@@ -1,0 +1,504 @@
+:root {
+  /* Primary Brand Colors */
+  --rotc-green-dark: #064e2e;    /* Top Header Banners, Main Buttons */
+  --rotc-green-primary: #005a36; /* Secondary Action Buttons & Active States */
+  --rotc-yellow-gold: #e5a900;   /* Active Menu Items, Target Corners, Sync Badges */
+
+  /* Neutral Surface Colors */
+  --bg-main: #f3f4f6;            /* Workspace Background */
+  --bg-card: #ffffff;            /* Card Backgrounds */
+  --border-light: #e5e7eb;        /* Input & Card Borders */
+
+  /* Typography Colors */
+  --text-dark: #111827;          /* Headings, Body Text & Input Values */
+  --text-muted: #6b7280;         /* Subtitles & Category Labels */
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-dark);
+  line-height: 1.4;
+  overflow-x: hidden;
+  user-select: none;
+}
+
+.mobile-container {
+  max-width: 480px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background-color: var(--bg-main);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 20px rgba(0,0,0,0.1);
+  position: relative;
+  padding-bottom: 90px; /* space for fixed bottom sync bar */
+}
+
+/* Header Bar */
+.mobile-header {
+  background-color: var(--rotc-green-dark);
+  color: #ffffff;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 3px solid var(--rotc-yellow-gold);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.mobile-logo-badge {
+  width: 38px;
+  height: 38px;
+  background: transparent;
+  color: var(--rotc-green-dark);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Oswald', sans-serif;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.mobile-logo-img {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+.header-title h1 {
+  font-family: 'Oswald', sans-serif;
+  font-size: 1.05rem;
+  line-height: 1.1;
+  color: #ffffff;
+  letter-spacing: 0.5px;
+}
+
+.header-title p {
+  font-size: 0.7rem;
+  color: var(--rotc-yellow-gold);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* Duty Officer Portal Landing Card UI (Reference Screenshot Match) */
+.setup-landing-wrapper {
+  padding: 1.25rem 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.setup-portal-card {
+  width: 100%;
+  max-width: 440px;
+  background: #064e2e;
+  background: linear-gradient(145deg, #075231 0%, #043922 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 24px;
+  padding: 2rem 1.35rem;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+.setup-input, .setup-select {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.28);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.setup-input:focus, .setup-select:focus {
+  border-color: var(--rotc-yellow-gold);
+}
+
+.setup-select option {
+  background: #064e2e;
+  color: #ffffff;
+}
+
+.setup-gold-btn {
+  width: 100%;
+  background: var(--rotc-yellow-gold);
+  color: var(--text-dark);
+  font-weight: 800;
+  font-size: 0.95rem;
+  padding: 0.9rem;
+  border-radius: 14px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-shadow: 0 6px 18px rgba(229, 169, 0, 0.4);
+  cursor: pointer;
+  margin-top: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.setup-gold-btn:active {
+  transform: scale(0.98);
+}
+
+/* Scanner Viewport Section */
+.scanner-card {
+  background: var(--bg-card);
+  margin: 0.85rem 1rem 1rem 1rem;
+  border-radius: 16px;
+  padding: 0.85rem 1rem 1rem 1rem;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.camera-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  background: #050d09;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid var(--rotc-green-dark);
+  box-shadow: 0 4px 16px rgba(6, 78, 46, 0.15);
+}
+
+#reader {
+  width: 100% !important;
+  height: 100% !important;
+  border: none !important;
+  padding: 0 !important;
+  background: #000000 !important;
+}
+
+#reader video {
+  object-fit: cover !important;
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 10px;
+}
+
+#reader canvas {
+  display: none !important;
+}
+
+#reader div {
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Slim & Clean Viewfinder Corner Frame */
+.scanner-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.target-box {
+  width: 60%;
+  aspect-ratio: 1 / 1;
+  max-width: 220px;
+  max-height: 220px;
+  position: relative;
+  border-radius: 8px;
+}
+
+.corner-mark {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+  border-color: #ffffff;
+  border-style: solid;
+  filter: drop-shadow(0 0 2px rgba(0, 0, 0, 0.8));
+}
+
+.corner-tl {
+  top: 0;
+  left: 0;
+  border-width: 2.5px 0 0 2.5px;
+  border-top-left-radius: 6px;
+}
+
+.corner-tr {
+  top: 0;
+  right: 0;
+  border-width: 2.5px 2.5px 0 0;
+  border-top-right-radius: 6px;
+}
+
+.corner-bl {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 2.5px 2.5px;
+  border-bottom-left-radius: 6px;
+}
+
+.corner-br {
+  bottom: 0;
+  right: 0;
+  border-width: 0 2.5px 2.5px 0;
+  border-bottom-right-radius: 6px;
+}
+
+.scan-laser-line {
+  position: absolute;
+  top: 0;
+  left: 4%;
+  width: 92%;
+  height: 2px;
+  background: var(--rotc-yellow-gold);
+  box-shadow: 0 0 8px var(--rotc-yellow-gold), 0 0 14px rgba(229, 169, 0, 0.6);
+  animation: scanMove 2.2s infinite ease-in-out;
+}
+
+@keyframes scanMove {
+  0% { top: 8%; opacity: 0.2; }
+  50% { top: 92%; opacity: 1; }
+  100% { top: 8%; opacity: 0.2; }
+}
+
+/* Scan Feedback Toast */
+.scan-toast {
+  position: fixed;
+  top: 75px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffffff;
+  border: 2px solid var(--rotc-yellow-gold);
+  border-radius: 12px;
+  padding: 0.75rem 1.25rem;
+  box-shadow: var(--shadow-lg);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 90%;
+  max-width: 420px;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { transform: translate(-50%, -20px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+/* Mobile Dashboard Cards */
+.mobile-card {
+  background: var(--bg-card);
+  margin: 0 1rem 1rem 1rem;
+  border-radius: 14px;
+  padding: 1rem;
+  border: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-card-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: var(--rotc-green-dark);
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* Company Chips */
+.chip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+.chip-item {
+  background: var(--bg-main);
+  padding: 0.5rem;
+  border-radius: 8px;
+  text-align: center;
+  border: 1px solid var(--border-light);
+}
+
+.chip-item .label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.chip-item .value {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--rotc-green-dark);
+}
+
+/* Fixed Bottom Sync Action Bar */
+.bottom-sync-bar {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  background: #ffffff;
+  border-top: 1px solid var(--border-light);
+  padding: 0.75rem 1rem;
+  box-shadow: 0 -4px 15px rgba(0,0,0,0.08);
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  z-index: 100;
+}
+
+.btn-sync-gold {
+  flex-grow: 1;
+  background-color: var(--rotc-yellow-gold);
+  color: var(--text-dark);
+  font-weight: 800;
+  font-size: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  box-shadow: 0 4px 10px rgba(229, 169, 0, 0.4);
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+
+.btn-sync-gold:active {
+  transform: scale(0.98);
+}
+
+.queue-badge {
+  background: var(--rotc-green-dark);
+  color: #ffffff;
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+/* ==========================================================================
+   LIGHTWEIGHT UI ANIMATIONS & SCAN FEEDBACK (SMARTPHONE MOBILE SCANNER)
+   ========================================================================== */
+
+/* Duty Officer Login Card Soft Fade-In & Slide-Up */
+.setup-portal-card {
+  animation: loginSlideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes loginSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(28px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Scanner Screen Feedback: Green Pulse Glow on Valid Scan Success */
+.scanner-card.flash-success {
+  animation: greenPulseGlow 0.75s ease-out forwards;
+}
+
+@keyframes greenPulseGlow {
+  0% {
+    border-color: #10b981;
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7), 0 0 25px rgba(16, 185, 129, 0.5);
+  }
+  40% {
+    border-color: #059669;
+    box-shadow: 0 0 0 8px rgba(16, 185, 129, 0.35), 0 0 35px rgba(16, 185, 129, 0.7);
+  }
+  100% {
+    border-color: var(--border-light);
+    box-shadow: var(--shadow-sm);
+  }
+}
+
+/* Scanner Screen Feedback: Red Flash & Shake Alert on Duplicate QR Attempt */
+.scanner-card.flash-warning {
+  animation: redShakeAlert 0.75s ease-in-out forwards;
+}
+
+@keyframes redShakeAlert {
+  0%, 100% {
+    transform: translateX(0);
+    border-color: var(--border-light);
+    box-shadow: var(--shadow-sm);
+  }
+  15%, 45%, 75% {
+    transform: translateX(-7px);
+    border-color: #ef4444;
+    box-shadow: 0 0 25px rgba(239, 68, 68, 0.7);
+  }
+  30%, 60%, 90% {
+    transform: translateX(7px);
+    border-color: #dc2626;
+    box-shadow: 0 0 25px rgba(239, 68, 68, 0.7);
+  }
+}
+
+/* Recent Field Scan List Items: Smooth Slide-In at Top */
+.scan-log-item {
+  animation: scanItemSlideIn 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes scanItemSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Mobile Action Button Hover & Press Tactile Micro-Interactions */
+.setup-gold-btn, .btn-sync-gold {
+  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.setup-gold-btn:hover, .btn-sync-gold:hover {
+  transform: translateY(-1.5px) scale(1.01);
+  box-shadow: 0 8px 20px rgba(229, 169, 0, 0.45);
+}
+
+.setup-gold-btn:active, .btn-sync-gold:active {
+  transform: translateY(1px) scale(0.97);
+}
