@@ -1,175 +1,567 @@
-import React, { useState } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal } from 'lucide-react';
+
+// Default 1,184 Standard CSU ROTC Structure Template
+const DEFAULT_UNIT_STRUCTURE = [
+  {
+    id: 'bn-1',
+    name: '1st Battalion',
+    shortCode: '1BN',
+    targetQuota: 592,
+    companies: [
+      {
+        id: 'co-1-alpha',
+        name: 'Alpha Company',
+        shortCode: 'ALPHA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-bravo',
+        name: 'Bravo Company',
+        shortCode: 'BRAVO',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-charlie',
+        name: 'Charlie Company',
+        shortCode: 'CHARLIE',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-delta',
+        name: 'Delta Company',
+        shortCode: 'DELTA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'bn-2',
+    name: '2nd Battalion',
+    shortCode: '2BN',
+    targetQuota: 592,
+    companies: [
+      {
+        id: 'co-2-alpha',
+        name: 'Alpha Company',
+        shortCode: 'ALPHA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-bravo',
+        name: 'Bravo Company',
+        shortCode: 'BRAVO',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-charlie',
+        name: 'Charlie Company',
+        shortCode: 'CHARLIE',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-delta',
+        name: 'Delta Company',
+        shortCode: 'DELTA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      }
+    ]
+  }
+];
 
 export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], onRefresh }) {
-  const [selectedBattalion, setSelectedBattalion] = useState('ALL');
-  const [selectedCompany, setSelectedCompany] = useState('ALL');
-  const [selectedPlatoon, setSelectedPlatoon] = useState('ALL');
+  // Top-Level Category Selection ('BASIC_CADETS' | 'CADET_OFFICERS' | null)
+  const [mainCategory, setMainCategory] = useState(null);
 
-  const TARGET_UNIT_STRENGTH = 1184;
-  const TARGET_PER_BATTALION = 592;
-  const TARGET_PER_COMPANY = 148;
-  const TARGET_PER_PLATOON = 37;
+  // Cascading Selection State for drill-downs
+  const [selectedBattalion, setSelectedBattalion] = useState(null);
+  const [selectedCompany, setSelectedCompany] = useState(null);
+  const [selectedPlatoon, setSelectedPlatoon] = useState(null);
+
+  // Dynamic Unit Hierarchy loaded from localStorage / Settings API
+  const [unitStructure, setUnitStructure] = useState(() => {
+    try {
+      const local = localStorage.getItem('csu_rotc_admin_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
+          return parsed.unitStructure;
+        }
+      }
+    } catch (e) {}
+    return DEFAULT_UNIT_STRUCTURE;
+  });
+
+  // Load updated settings & listen to storage events
+  useEffect(() => {
+    const loadDynamicSettings = async () => {
+      try {
+        const local = localStorage.getItem('csu_rotc_admin_settings');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
+            setUnitStructure(parsed.unitStructure);
+            return;
+          }
+        }
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.unitStructure && Array.isArray(data.unitStructure) && data.unitStructure.length > 0) {
+            setUnitStructure(data.unitStructure);
+          }
+        }
+      } catch (e) {}
+    };
+
+    loadDynamicSettings();
+
+    const handleStorageChange = () => {
+      try {
+        const local = localStorage.getItem('csu_rotc_admin_settings');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
+            setUnitStructure(parsed.unitStructure);
+          }
+        }
+      } catch (e) {}
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [onRefresh]);
+
+  // Dynamic Calculated Quotas
+  const totalBasicQuota = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || 1184;
+  const totalOfficerQuota = 60;
+  const totalUnitStrengthQuota = totalBasicQuota + totalOfficerQuota;
+
+  const totalPlatoonsCount = unitStructure.reduce((acc, bn) => {
+    return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
+  }, 0);
+
+  // Officer Classes Structure
+  const OFFICER_CLASSES = [
+    {
+      key: '1CL',
+      title: '1st Class',
+      name: '1st Class Officers',
+      shortName: '1st Class',
+      desc: 'Cadet COL, Cadet LT COL • Corps Command & Special Staff',
+      target: 4
+    },
+    {
+      key: '2CL',
+      title: '2nd Class',
+      name: '2nd Class Officers',
+      shortName: '2nd Class',
+      desc: 'Cadet MAJ, Cadet CPT • Brigade Staff & Battalion Commanders',
+      target: 8
+    },
+    {
+      key: '3CL',
+      title: '3rd Class',
+      name: '3rd Class Officers',
+      shortName: '3rd Class',
+      desc: 'Cadet CPT, Cadet 1LT • Company Commanders & Executive Officers',
+      target: 12
+    },
+    {
+      key: '4CL',
+      title: '4th Class',
+      name: '4th Class Officers',
+      shortName: '4th Class',
+      desc: 'Cadet 1LT, Cadet 2LT • Platoon Leaders & Junior Staff Officers',
+      target: 16
+    },
+    {
+      key: 'ASPIRANT',
+      title: 'Aspirant',
+      name: 'Aspirants & Candidates',
+      shortName: 'Aspirant',
+      desc: 'Cadet Officer Candidates (COCC) & Probationary Aspirants',
+      target: 20
+    }
+  ];
+
+  // Helper: Match whether a log is a Cadet Officer
+  const isOfficerLog = (log) => {
+    const r = (log.rank || '').toLowerCase();
+    const b = (log.battalion || '').toLowerCase();
+    const c = (log.company || '').toLowerCase();
+    const p = (log.platoon || '').toLowerCase();
+    const d = (log.designation || '').toLowerCase();
+    const t = (log.type || log.category || '').toLowerCase();
+    
+    return t === 'officer' || t.includes('officer') ||
+      b.includes('officer') || b.includes('brigade') ||
+      c.includes('officer') || c.includes('headquarters') ||
+      r.includes('1cl') || r.includes('2cl') || r.includes('3cl') || r.includes('4cl') || r.includes('aspirant') ||
+      r.includes('col') || r.includes('maj') || r.includes('cpt') || r.includes('lt') ||
+      d.includes('commander') || d.includes('staff') || d.includes('adjutant') || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7');
+  };
+
+  // Helper: Match a log to a specific Officer Class (1CL, 2CL, 3CL, 4CL, ASPIRANT)
+  const matchesOfficerClass = (log, classKey) => {
+    const r = (log.rank || '').toLowerCase();
+    const c = (log.company || '').toLowerCase();
+    const p = (log.platoon || '').toLowerCase();
+    const d = (log.designation || '').toLowerCase();
+    const k = (classKey || '').toLowerCase();
+
+    if (k === '1cl' || k.includes('1st')) {
+      return r.includes('1cl') || d.includes('corps commander') || d.includes('deputy commander') || r.includes('col');
+    }
+    if (k === '2cl' || k.includes('2nd')) {
+      return r.includes('2cl') || (r.includes('maj') && !r.includes('1cl')) || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7') || d.includes('bn commander');
+    }
+    if (k === '3cl' || k.includes('3rd')) {
+      return r.includes('3cl') || (r.includes('cpt') && !r.includes('2cl')) || d.includes('coy commander');
+    }
+    if (k === '4cl' || k.includes('4th')) {
+      return r.includes('4cl') || (r.includes('2lt') || (r.includes('1lt') && !r.includes('3cl'))) || d.includes('platoon leader');
+    }
+    if (k === 'aspirant' || k.includes('aspirant')) {
+      return r.includes('aspirant') || r.includes('candidate') || r.includes('cocc') || c.includes('aspirant') || p.includes('aspirant');
+    }
+    return false;
+  };
 
   // 1. Dynamic Counts calculated directly from attendanceLogs
   const totalAttendanceScans = attendanceLogs.length;
   const uniqueCadetIds = new Set(attendanceLogs.map(l => (l.cadetId || '').trim()).filter(Boolean));
   const uniqueCadetsCount = uniqueCadetIds.size;
 
-  const firstBnCount = attendanceLogs.filter(l => (l.battalion || '').includes('1st')).length;
-  const secondBnCount = attendanceLogs.filter(l => (l.battalion || '').includes('2nd')).length;
-  const brigadeHqCount = attendanceLogs.filter(l => (l.battalion || '').includes('Brigade') || (l.company || '') === 'Headquarters').length;
+  const basicCadetsCount = attendanceLogs.filter(l => !isOfficerLog(l)).length;
+  const cadetOfficersCount = attendanceLogs.filter(isOfficerLog).length;
 
-  // 2. Filtered logs according to active Battalion selector for top gauges
-  const bnSelectorClean = selectedBattalion.replace(' Battalion', '').toLowerCase().trim();
-  const activeLogs = selectedBattalion === 'ALL'
-    ? attendanceLogs
-    : attendanceLogs.filter(log => (log.battalion || '').toLowerCase().includes(bnSelectorClean));
+  const isOfficerSelected = mainCategory === 'CADET_OFFICERS';
+  const isBasicCadetsSelected = mainCategory === 'BASIC_CADETS';
 
-  // 3. Battalion Summaries (Computed dynamically from attendanceLogs)
-  const battalions = [
-    {
-      name: '1st Battalion',
-      scanned: firstBnCount,
-      target: TARGET_PER_BATTALION,
-      companiesDesc: 'Alpha, Bravo, Charlie, Delta • 16 Platoons'
-    },
-    {
-      name: '2nd Battalion',
-      scanned: secondBnCount,
-      target: TARGET_PER_BATTALION,
-      companiesDesc: 'Alpha, Bravo, Charlie, Delta • 16 Platoons'
-    },
-    {
-      name: 'Brigade HQ',
-      scanned: brigadeHqCount,
-      target: 12,
-      companiesDesc: 'Command Group & Special Staff'
-    }
-  ];
+  // 2. Filtered logs according to active Battalion selector for contextual counts
+  const bnSelectorClean = selectedBattalion ? selectedBattalion.replace(' Battalion', '').toLowerCase().trim() : '';
+  const activeLogs = selectedBattalion
+    ? attendanceLogs.filter(log => {
+      if (selectedBattalion === 'CADET OFFICERS') {
+        return isOfficerLog(log);
+      }
+      return (log.battalion || '').toLowerCase().includes(bnSelectorClean);
+    })
+    : (isOfficerSelected ? attendanceLogs.filter(isOfficerLog) : attendanceLogs);
 
-  // 4. Company Summaries (Computed dynamically from activeLogs)
-  const companies = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Headquarters'];
-  const companyCounts = companies.map(c => {
-    const isHQ = c === 'Headquarters';
-    const target = isHQ ? 12 : TARGET_PER_COMPANY;
+  // 3. Dynamic Basic Cadet Battalions from unitStructure
+  const basicBattalions = unitStructure.map((bn, idx) => {
+    const bnName = bn.name;
+    const clean = bnName.replace(' Battalion', '').toLowerCase().trim();
+    const scanned = attendanceLogs.filter(l => {
+      const b = (l.battalion || '').toLowerCase();
+      return !isOfficerLog(l) && (b.includes(bnName.toLowerCase()) || b.includes(clean));
+    }).length;
+    const target = Number(bn.targetQuota) || 592;
+    const coys = bn.companies || [];
+    const coysDesc = coys.length > 0
+      ? `${coys.map(c => c.shortCode || c.name.replace(' Company', '')).join(', ')} • ${coys.reduce((acc, c) => acc + (c.platoons?.length || 0), 0)} Platoons`
+      : 'No companies configured';
+    const icon = bnName.includes('1st') ? Shield : (bnName.includes('2nd') ? Award : Layers);
+
+    return {
+      id: bn.id || `bn-${idx}`,
+      name: bnName,
+      shortCode: bn.shortCode || `${idx + 1}BN`,
+      scanned,
+      target,
+      companiesDesc: coysDesc,
+      icon
+    };
+  });
+
+  // 4. Dynamic Active Battalion & Company Objects for Step 2 and Step 3
+  const activeBnObj = unitStructure.find(b => {
+    if (!selectedBattalion) return false;
+    return b.name.toLowerCase().trim() === selectedBattalion.toLowerCase().trim() ||
+      b.name.toLowerCase().includes(bnSelectorClean) ||
+      selectedBattalion.toLowerCase().includes(b.name.toLowerCase());
+  }) || unitStructure[0] || null;
+
+  const activeCoysList = activeBnObj && activeBnObj.companies && activeBnObj.companies.length > 0
+    ? activeBnObj.companies
+    : [
+        { id: 'co-alpha', name: 'Alpha Company', shortCode: 'ALPHA', targetQuota: 148, platoons: [] },
+        { id: 'co-bravo', name: 'Bravo Company', shortCode: 'BRAVO', targetQuota: 148, platoons: [] },
+        { id: 'co-charlie', name: 'Charlie Company', shortCode: 'CHARLIE', targetQuota: 148, platoons: [] },
+        { id: 'co-delta', name: 'Delta Company', shortCode: 'DELTA', targetQuota: 148, platoons: [] }
+      ];
+
+  const companyCounts = activeCoysList.map(c => {
+    const target = Number(c.targetQuota) || 148;
+    const cName = c.name;
+    const cShort = c.shortCode || c.name.replace(' Company', '');
     const scanned = activeLogs.filter(log => {
       const co = (log.company || '').toLowerCase().trim();
-      return co.includes(c.toLowerCase().trim());
+      return co.includes(cName.toLowerCase().trim()) || co.includes(cShort.toLowerCase().trim());
     }).length;
+    const percent = Math.min(100, Math.round((scanned / target) * 100));
+    return {
+      key: c.shortCode || c.name,
+      title: c.name,
+      name: c.name,
+      shortName: cShort,
+      desc: `${c.platoons?.length || 4} Platoons × Quota: ${target}`,
+      target,
+      scanned,
+      percent
+    };
+  });
+
+  // 5. Dynamic Active Company & Platoon Objects for Step 3
+  const activeCoObj = activeBnObj?.companies?.find(c => {
+    if (!selectedCompany) return false;
+    const clean = selectedCompany.toLowerCase().trim();
+    return c.name.toLowerCase().trim() === clean ||
+      (c.shortCode && c.shortCode.toLowerCase().trim() === clean) ||
+      c.name.toLowerCase().includes(clean) ||
+      clean.includes(c.name.toLowerCase());
+  }) || activeBnObj?.companies?.[0] || null;
+
+  const activePltnsList = activeCoObj && activeCoObj.platoons && activeCoObj.platoons.length > 0
+    ? activeCoObj.platoons
+    : [
+        { id: 'pl-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+        { id: 'pl-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+        { id: 'pl-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+        { id: 'pl-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+      ];
+
+  const platoonCounts = activePltnsList.map(p => {
+    const pName = p.name;
+    const pClean = pName.replace(' Platoon', '').toLowerCase().trim();
+    const pShort = (p.shortCode || '').toLowerCase().trim();
+    const scanned = activeLogs.filter(log => {
+      const co = (log.company || '').toLowerCase().trim();
+      const pl = (log.platoon || '').toLowerCase().trim();
+      const sn = (log.sessionName || '').toLowerCase().trim();
+      const matchCo = selectedCompany ? (co.includes(selectedCompany.toLowerCase().trim()) || (activeCoObj && co.includes(activeCoObj.name.toLowerCase()))) : true;
+      const matchPl = pl.includes(pClean) || sn.includes(pClean) || (pShort && (pl.includes(pShort) || sn.includes(pShort)));
+      return matchCo && matchPl;
+    }).length;
+    const target = Number(p.targetQuota) || 37;
     const percent = Math.min(100, Math.round((scanned / target) * 100));
 
     return {
-      name: c,
+      name: pName,
+      shortCode: p.shortCode || 'PLTN',
+      desc: 'Standard Platoon Formation',
       scanned,
       target,
       percent
     };
   });
 
-  // 5. Platoon Summaries (Computed dynamically from activeLogs against 37-Cadet capacity)
-  const platoons = ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
-  const platoonCounts = platoons.map(p => {
-    const plClean = p.replace(' Platoon', '').toLowerCase().trim();
-    const scanned = activeLogs.filter(log => {
-      const pl = (log.platoon || '').toLowerCase().trim();
-      const sn = (log.sessionName || '').toLowerCase().trim();
-      return pl.includes(plClean) || sn.includes(plClean);
-    }).length;
-    const percent = Math.min(100, Math.round((scanned / TARGET_PER_PLATOON) * 100));
+  const overallPercent = Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100));
 
-    return {
-      name: p,
-      scanned,
-      target: TARGET_PER_PLATOON,
-      percent
-    };
-  });
+  // 6. Navigation / Selection Handlers
+  const handleSelectMainCategory = (cat) => {
+    if (mainCategory === cat) {
+      setMainCategory(null);
+      setSelectedBattalion(null);
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
+    } else {
+      setMainCategory(cat);
+      if (cat === 'CADET_OFFICERS') {
+        setSelectedBattalion('CADET OFFICERS');
+      } else {
+        setSelectedBattalion(null);
+      }
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
+    }
+  };
 
-  const overallPercent = Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / TARGET_UNIT_STRENGTH) * 100));
-
-  // 6. Interactive Card Click Handlers
-  const handleToggleBattalion = (bnName) => {
+  const handleSelectBattalion = (bnName) => {
     if (selectedBattalion === bnName) {
-      setSelectedBattalion('ALL');
+      setSelectedBattalion(null);
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
     } else {
       setSelectedBattalion(bnName);
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
     }
   };
 
-  const handleToggleCompany = (coName) => {
-    if (selectedCompany === coName) {
-      setSelectedCompany('ALL');
+  const handleSelectCompany = (coKeyOrName) => {
+    if (selectedCompany === coKeyOrName) {
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
     } else {
-      setSelectedCompany(coName);
+      setSelectedCompany(coKeyOrName);
+      setSelectedPlatoon(null);
     }
   };
 
-  const handleTogglePlatoon = (plName) => {
+  const handleSelectPlatoon = (plName) => {
     if (selectedPlatoon === plName) {
-      setSelectedPlatoon('ALL');
+      setSelectedPlatoon(null);
     } else {
       setSelectedPlatoon(plName);
     }
   };
 
-  const handleClearAllFilters = () => {
-    setSelectedBattalion('ALL');
-    setSelectedCompany('ALL');
-    setSelectedPlatoon('ALL');
+  const handleResetToAllUnits = () => {
+    setMainCategory(null);
+    setSelectedBattalion(null);
+    setSelectedCompany(null);
+    setSelectedPlatoon(null);
   };
 
-  const isAnyFilterActive = selectedBattalion !== 'ALL' || selectedCompany !== 'ALL' || selectedPlatoon !== 'ALL';
+  const handleResetToMainCategory = () => {
+    if (mainCategory === 'BASIC_CADETS') {
+      setSelectedBattalion(null);
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
+    } else if (mainCategory === 'CADET_OFFICERS') {
+      setSelectedCompany(null);
+      setSelectedPlatoon(null);
+    }
+  };
 
-  // 7. Interactive Filtered Table Records (Strict Case-Insensitive String Matching)
+  const handleBackToBattalions = () => {
+    setSelectedBattalion(null);
+    setSelectedCompany(null);
+    setSelectedPlatoon(null);
+  };
+
+  const handleBackToCompanies = () => {
+    setSelectedCompany(null);
+    setSelectedPlatoon(null);
+  };
+
+  const handleClearAllFilters = () => {
+    setMainCategory(null);
+    setSelectedBattalion(null);
+    setSelectedCompany(null);
+    setSelectedPlatoon(null);
+  };
+
+  const isAnyFilterActive = mainCategory !== null || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
+
+  // 7. Interactive Filtered Table Records
   const tableFilteredLogs = attendanceLogs.filter(log => {
-    const bnClean = selectedBattalion === 'ALL' ? '' : selectedBattalion.replace(' Battalion', '').toLowerCase().trim();
-    const matchesBn = selectedBattalion === 'ALL' || (log.battalion || '').toLowerCase().trim().includes(bnClean);
+    // Top-Level Main Category Filter
+    if (mainCategory === 'BASIC_CADETS') {
+      if (isOfficerLog(log)) return false;
+    } else if (mainCategory === 'CADET_OFFICERS') {
+      if (!isOfficerLog(log)) return false;
+    }
 
-    const coClean = selectedCompany === 'ALL' ? '' : selectedCompany.toLowerCase().trim();
-    const matchesCo = selectedCompany === 'ALL' || (log.company || '').toLowerCase().trim().includes(coClean);
+    let matchesBn = true;
+    if (selectedBattalion && selectedBattalion !== 'CADET OFFICERS') {
+      const bnClean = selectedBattalion.replace(' Battalion', '').toLowerCase().trim();
+      matchesBn = (log.battalion || '').toLowerCase().trim().includes(bnClean);
+    }
 
-    const plClean = selectedPlatoon === 'ALL' ? '' : selectedPlatoon.replace(' Platoon', '').toLowerCase().trim();
-    const logPl = (log.platoon || '').toLowerCase().trim();
-    const logSn = (log.sessionName || '').toLowerCase().trim();
-    const matchesPl = selectedPlatoon === 'ALL' || logPl.includes(plClean) || logSn.includes(plClean);
+    let matchesCo = true;
+    if (selectedCompany) {
+      if (isOfficerSelected) {
+        matchesCo = matchesOfficerClass(log, selectedCompany);
+      } else {
+        const coClean = selectedCompany.toLowerCase().trim();
+        matchesCo = (log.company || '').toLowerCase().trim().includes(coClean);
+      }
+    }
+
+    let matchesPl = true;
+    if (!isOfficerSelected && selectedPlatoon) {
+      const plClean = selectedPlatoon.replace(' Platoon', '').toLowerCase().trim();
+      const logPl = (log.platoon || '').toLowerCase().trim();
+      const logSn = (log.sessionName || '').toLowerCase().trim();
+      matchesPl = logPl.includes(plClean) || logSn.includes(plClean);
+    }
 
     return matchesBn && matchesCo && matchesPl;
   });
 
+  // Get active Officer Class display label for breadcrumbs
+  const getSelectedCompanyDisplay = () => {
+    if (!selectedCompany) return '';
+    if (isOfficerSelected) {
+      const cls = OFFICER_CLASSES.find(c => c.key === selectedCompany || c.title === selectedCompany || c.name === selectedCompany);
+      return cls ? cls.title : selectedCompany;
+    }
+    return `${selectedCompany} Company`;
+  };
+
   return (
-    <div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {/* Header Banner */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0 }}>
-            COMMAND DASHBOARD • ECHELON ANALYTICS
+          <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
+            COMMAND DASHBOARD
           </h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '3px 0 0 0' }}>
-            Full Unit Target: <strong>1,184 Cadets</strong> (1 Brigade HQ • 2 Battalions • 8 Companies • 32 Platoons × 37 Cadets)
-          </p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          {isAnyFilterActive && (
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={handleClearAllFilters}
-              style={{ color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700 }}
-            >
-              <XCircle size={15} /> Clear Filters
-            </button>
-          )}
-          <button className="btn btn-secondary btn-sm" onClick={onRefresh}>
-            <RefreshCw size={16} /> Refresh
+          <button className="btn btn-secondary btn-sm" onClick={onRefresh} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+            <RefreshCw size={15} /> Refresh
           </button>
         </div>
       </div>
 
-      {/* Top Dynamic Metric Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
-        
-        {/* Total Unit Strength Progress */}
-        <div className="card" style={{ borderLeft: '5px solid var(--rotc-green-dark)' }}>
+      {/* Top Static Summary Metric Cards (Read-Only) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+
+        {/* Card 1: Total Unit Strength */}
+        <div className="card" style={{ borderLeft: '5px solid var(--rotc-green-dark)', cursor: 'default' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
             <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(6, 78, 46, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-green-dark)' }}>
               <Users size={22} />
@@ -177,20 +569,20 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
               <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {uniqueCadetsCount || totalAttendanceScans} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {TARGET_UNIT_STRENGTH}</span>
+                {uniqueCadetsCount || totalAttendanceScans} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalUnitStrengthQuota}</span>
               </div>
             </div>
           </div>
           <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden', marginBottom: '4px' }}>
-            <div style={{ width: `${overallPercent}%`, height: '100%', background: 'var(--rotc-green-dark)', transition: 'width 0.4s ease' }}></div>
+            <div style={{ width: `${Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}%`, height: '100%', background: 'var(--rotc-green-dark)', transition: 'width 0.4s ease' }}></div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            {overallPercent}% of Total Brigade Target
+            {Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}% of Total Brigade Quota ({totalUnitStrengthQuota.toLocaleString()})
           </div>
         </div>
 
-        {/* Master Attendance Logs */}
-        <div className="card" style={{ borderLeft: '5px solid var(--rotc-yellow-gold)' }}>
+        {/* Card 2: Master Attendance Logs */}
+        <div className="card" style={{ borderLeft: '5px solid var(--rotc-yellow-gold)', cursor: 'default' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
             <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(229, 169, 0, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-yellow-gold)' }}>
               <UserCheck size={22} />
@@ -198,7 +590,7 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Attendance Scans</div>
               <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {totalAttendanceScans}
+                {totalAttendanceScans} <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600 }}>Live Scanned</span>
               </div>
             </div>
           </div>
@@ -207,255 +599,761 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
           </div>
         </div>
 
-        {/* 1st Battalion Scans */}
-        <div
-          className="card"
-          onClick={() => handleToggleBattalion('1st Battalion')}
-          style={{
-            borderLeft: '5px solid #3b82f6',
-            cursor: 'pointer',
-            border: selectedBattalion === '1st Battalion' ? '2px solid #2563eb' : undefined,
-            background: selectedBattalion === '1st Battalion' ? '#eff6ff' : undefined,
-            boxShadow: selectedBattalion === '1st Battalion' ? '0 4px 14px rgba(37, 99, 235, 0.2)' : undefined,
-            transition: 'all 0.2s ease'
-          }}
-          title="Click to filter by 1st Battalion"
-        >
+        {/* Card 3: Total Basic Cadets (Read-Only) */}
+        <div className="card" style={{ borderLeft: '5px solid #334155', cursor: 'default' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(59, 130, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>
+            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(51, 65, 85, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155' }}>
               <Shield size={22} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span>1st Battalion</span>
-                {selectedBattalion === '1st Battalion' && <span style={{ color: '#2563eb', fontWeight: 800, fontSize: '0.65rem' }}>● ACTIVE</span>}
-              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Basic Cadets</div>
               <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {firstBnCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {TARGET_PER_BATTALION}</span>
+                {basicCadetsCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalBasicQuota}</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            Alpha, Bravo, Charlie, Delta • Click to Filter
+            {unitStructure.length} Battalions • {totalPlatoonsCount} Platoons
           </div>
         </div>
 
-        {/* 2nd Battalion Scans */}
-        <div
-          className="card"
-          onClick={() => handleToggleBattalion('2nd Battalion')}
-          style={{
-            borderLeft: '5px solid #8b5cf6',
-            cursor: 'pointer',
-            border: selectedBattalion === '2nd Battalion' ? '2px solid #7c3aed' : undefined,
-            background: selectedBattalion === '2nd Battalion' ? '#f5f3ff' : undefined,
-            boxShadow: selectedBattalion === '2nd Battalion' ? '0 4px 14px rgba(124, 58, 237, 0.2)' : undefined,
-            transition: 'all 0.2s ease'
-          }}
-          title="Click to filter by 2nd Battalion"
-        >
+        {/* Card 4: Total Cadet Officers (Read-Only) */}
+        <div className="card" style={{ borderLeft: '5px solid #4f46e5', cursor: 'default' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(139, 92, 246, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#8b5cf6' }}>
-              <Award size={22} />
+            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(79, 70, 229, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
+              <Medal size={22} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span>2nd Battalion</span>
-                {selectedBattalion === '2nd Battalion' && <span style={{ color: '#7c3aed', fontWeight: 800, fontSize: '0.65rem' }}>● ACTIVE</span>}
-              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Cadet Officers</div>
               <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {secondBnCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {TARGET_PER_BATTALION}</span>
+                {cadetOfficersCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ 60</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            Alpha, Bravo, Charlie, Delta • Click to Filter
+            1st, 2nd, 3rd, 4th Class & Aspirants
           </div>
         </div>
       </div>
 
-      {/* Battalion Echelon Interactive Row */}
-      <div className="card" style={{ marginBottom: '1.5rem' }}>
-        <div className="card-header">
-          <div className="card-title" style={{ fontSize: '1rem' }}>
-            <Layers size={18} />
-            <span>Battalion Echelon Cards (Click to Filter Table)</span>
-          </div>
-        </div>
+      {/* Breadcrumb Navigation & Step Status Bar */}
+      <div style={{
+        background: '#ffffff',
+        borderRadius: '12px',
+        padding: '0.85rem 1.25rem',
+        border: '1px solid var(--border-light)',
+        boxShadow: 'var(--shadow-sm)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem'
+      }}>
+        {/* Breadcrumb Trail */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.88rem' }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', marginRight: '2px', letterSpacing: '0.5px' }}>
+            PATH:
+          </span>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
-          {battalions.map(bn => {
-            const pct = Math.min(100, Math.round((bn.scanned / bn.target) * 100));
-            const isSelected = selectedBattalion === bn.name;
+          {/* Root Level: All Units */}
+          <button
+            type="button"
+            onClick={handleResetToAllUnits}
+            style={{
+              background: !mainCategory ? '#1e40af' : '#f1f5f9',
+              color: !mainCategory ? '#ffffff' : 'var(--text-dark)',
+              border: !mainCategory ? '1px solid #1e3a8a' : '1px solid #e2e8f0',
+              padding: '4px 10px',
+              borderRadius: '6px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '0.82rem',
+              transition: 'all 0.15s ease'
+            }}
+            title="View All Unit Categories"
+          >
+            <Layers size={14} />
+            <span>All Units</span>
+          </button>
 
-            return (
-              <div
-                key={bn.name}
-                onClick={() => handleToggleBattalion(bn.name)}
+          {/* Level 0 Crumb: Main Category (Basic Cadets vs Cadet Officers) */}
+          {mainCategory && (
+            <>
+              <ChevronRight size={15} color="#94a3b8" />
+              <button
+                type="button"
+                onClick={handleResetToMainCategory}
                 style={{
-                  background: isSelected ? '#ecfdf5' : '#f8fafc',
-                  padding: '1rem',
-                  borderRadius: '10px',
-                  border: isSelected ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                  boxShadow: isSelected ? '0 4px 16px rgba(6, 78, 46, 0.18)' : undefined,
+                  background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
+                  color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
+                  border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 700,
                   cursor: 'pointer',
-                  transition: 'all 0.2s ease',
-                  position: 'relative'
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.82rem',
+                  transition: 'all 0.15s ease'
+                }}
+                title={isBasicCadetsSelected ? 'View Battalions' : 'View Officer Classes'}
+              >
+                {isBasicCadetsSelected ? <Shield size={14} color="#1e293b" /> : <Medal size={14} color="#4f46e5" />}
+                <span>{isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers'}</span>
+              </button>
+            </>
+          )}
+
+          {/* Level 1 Crumb: Battalion Level (BLUE Theme) */}
+          {isBasicCadetsSelected && selectedBattalion && (
+            <>
+              <ChevronRight size={15} color="#94a3b8" />
+              <button
+                type="button"
+                onClick={handleBackToCompanies}
+                style={{
+                  background: '#dbeafe',
+                  color: '#1e40af',
+                  border: '1px solid #93c5fd',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.82rem',
+                  transition: 'all 0.15s ease'
+                }}
+                title={`View companies of ${selectedBattalion}`}
+              >
+                <Shield size={14} color="#1e40af" />
+                <span>{selectedBattalion}</span>
+              </button>
+            </>
+          )}
+
+          {/* Level 2 Crumb: Company / Officer Class Level (EMERALD / GREEN Theme) */}
+          {selectedCompany && (
+            <>
+              <ChevronRight size={15} color="#94a3b8" />
+              <button
+                type="button"
+                onClick={() => setSelectedPlatoon(null)}
+                style={{
+                  background: '#d1fae5',
+                  color: '#065f46',
+                  border: '1px solid #6ee7b7',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.82rem',
+                  transition: 'all 0.15s ease'
+                }}
+                title={`Selected: ${getSelectedCompanyDisplay()}`}
+              >
+                {isOfficerSelected ? <Star size={14} color="#065f46" /> : <Building size={14} color="#065f46" />}
+                <span>{getSelectedCompanyDisplay()}</span>
+              </button>
+            </>
+          )}
+
+          {/* Level 3 Crumb: Platoon Active Indicator (AMBER / ORANGE Theme) */}
+          {isBasicCadetsSelected && selectedBattalion && selectedCompany && selectedPlatoon && (
+            <>
+              <ChevronRight size={15} color="#94a3b8" />
+              <span
+                style={{
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  border: '1px solid #fcd34d',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.82rem'
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <strong style={{ color: 'var(--rotc-green-dark)', fontSize: '0.95rem' }}>
-                    {bn.name} {isSelected && '✓'}
-                  </strong>
-                  <span className="badge" style={{
-                    background: isSelected ? 'var(--rotc-green-dark)' : (bn.scanned > 0 ? '#d1fae5' : '#f1f5f9'),
-                    color: isSelected ? '#ffffff' : (bn.scanned > 0 ? '#065f46' : '#64748b'),
-                    fontWeight: 800
-                  }}>
-                    {bn.scanned} / {bn.target} Scanned ({pct}%)
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>
-                  {bn.companiesDesc}
-                </div>
-                <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
-                  <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #064e2e, #059669)', transition: 'width 0.4s ease' }}></div>
-                </div>
-              </div>
-            );
-          })}
+                <Users size={14} color="#92400e" />
+                <span>{selectedPlatoon}</span>
+              </span>
+            </>
+          )}
+        </div>
+
+        {/* Current Drill-down Step Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <div style={{
+            fontSize: '0.75rem',
+            fontWeight: 800,
+            padding: '4px 10px',
+            borderRadius: '9999px',
+            background: !mainCategory ? '#f1f5f9' : (isBasicCadetsSelected ? (!selectedBattalion ? '#eff6ff' : (!selectedCompany ? '#d1fae5' : '#fef3c7')) : (!selectedCompany ? '#eef2ff' : '#d1fae5')),
+            color: !mainCategory ? '#334155' : (isBasicCadetsSelected ? (!selectedBattalion ? '#1e40af' : (!selectedCompany ? '#065f46' : '#92400e')) : (!selectedCompany ? '#3730a3' : '#065f46')),
+            border: `1px solid ${!mainCategory ? '#cbd5e1' : (isBasicCadetsSelected ? (!selectedBattalion ? '#bfdbfe' : (!selectedCompany ? '#6ee7b7' : '#fcd34d')) : (!selectedCompany ? '#a5b4fc' : '#6ee7b7'))}`
+          }}>
+            {!mainCategory && 'SELECT A UNIT CATEGORY'}
+            {isBasicCadetsSelected && !selectedBattalion && 'STEP 1 OF 3: SELECT BATTALION'}
+            {isBasicCadetsSelected && selectedBattalion && !selectedCompany && `STEP 2 OF 3: SELECT COMPANY (${selectedBattalion.toUpperCase()})`}
+            {isBasicCadetsSelected && selectedBattalion && selectedCompany && `STEP 3 OF 3: SELECT PLATOON (${selectedCompany.toUpperCase()} COY)`}
+            {isOfficerSelected && !selectedCompany && 'OFFICER CORPS: SELECT OFFICER CLASS'}
+            {isOfficerSelected && selectedCompany && `FILTER ACTIVE: ${getSelectedCompanyDisplay().toUpperCase()}`}
+          </div>
         </div>
       </div>
 
-      {/* 2-Column: Company Quotas & Platoon Breakdown (Clickable Cards) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem', marginBottom: '1.5rem' }}>
-        
-        {/* Company Breakdown (Clickable) */}
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title" style={{ fontSize: '0.95rem' }}>
-              <Building size={18} />
-              <span>Company Filter Cards (Click to Filter Table)</span>
+      {/* ========================================================================= */}
+      {/* LEVEL 0: Select Unit Category (Basic Cadets vs Cadet Officers)            */}
+      {/* ========================================================================= */}
+      <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>
+        <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+          <div>
+            <div className="card-title" style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-dark)' }}>
+              <Compass size={20} color="var(--rotc-green-dark)" />
+              <span style={{ fontWeight: 800 }}>Select Unit Category</span>
             </div>
-            {selectedCompany !== 'ALL' && (
-              <span className="badge badge-company" onClick={() => setSelectedCompany('ALL')} style={{ cursor: 'pointer' }}>
-                {selectedCompany} ✕
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+              Choose whether to view and filter the <strong>Basic Cadets</strong> hierarchy ({unitStructure.length} Battalions) or the <strong>Cadet Officers</strong> Corps.
+            </div>
+          </div>
+
+          {mainCategory && (
+            <span className="badge" style={{
+              background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
+              color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
+              fontWeight: 800,
+              border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`
+            }}>
+              ✓ {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'} Selected
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+          
+          {/* Option 1: BASIC CADETS (Theme: Dark Slate / Charcoal) */}
+          <div
+            onClick={() => handleSelectMainCategory('BASIC_CADETS')}
+            style={{
+              background: isBasicCadetsSelected ? '#f1f5f9' : '#ffffff',
+              padding: '1.25rem',
+              borderRadius: '12px',
+              border: isBasicCadetsSelected ? '2px solid #334155' : '1px solid var(--border-light)',
+              boxShadow: isBasicCadetsSelected ? '0 4px 16px rgba(51, 65, 85, 0.25)' : 'var(--shadow-sm)',
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.6rem'
+            }}
+            title="Click to select Basic Cadets hierarchy"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: isBasicCadetsSelected ? '#334155' : 'rgba(51, 65, 85, 0.12)',
+                  color: isBasicCadetsSelected ? '#ffffff' : '#334155',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800
+                }}>
+                  <Shield size={22} />
+                </div>
+                <div>
+                  <div style={{ color: isBasicCadetsSelected ? '#0f172a' : '#1e293b', fontSize: '1.1rem', fontWeight: 800 }}>
+                    BASIC CADETS
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    {unitStructure.length} Battalions • {totalPlatoonsCount} Platoons
+                  </div>
+                </div>
+              </div>
+
+              <span className="badge" style={{
+                background: isBasicCadetsSelected ? '#334155' : '#e2e8f0',
+                color: isBasicCadetsSelected ? '#ffffff' : '#1e293b',
+                fontWeight: 800
+              }}>
+                {basicCadetsCount} / {totalBasicQuota}
+              </span>
+            </div>
+
+            <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(100, Math.round((basicCadetsCount / totalBasicQuota) * 100))}%`, height: '100%', background: 'linear-gradient(90deg, #1e293b, #475569)', transition: 'width 0.4s ease' }}></div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isBasicCadetsSelected ? '#0f172a' : 'var(--text-muted)', fontWeight: 700 }}>
+              <span>{isBasicCadetsSelected ? '▼ Battalions Revealed Below' : '▶ Click to Drill Down into Battalions'}</span>
+              <span>{totalBasicQuota.toLocaleString()} Cadets Quota</span>
+            </div>
+          </div>
+
+          {/* Option 2: CADET OFFICERS (Theme: Indigo / Purple) */}
+          <div
+            onClick={() => handleSelectMainCategory('CADET_OFFICERS')}
+            style={{
+              background: isOfficerSelected ? '#eef2ff' : '#ffffff',
+              padding: '1.25rem',
+              borderRadius: '12px',
+              border: isOfficerSelected ? '2px solid #4f46e5' : '1px solid var(--border-light)',
+              boxShadow: isOfficerSelected ? '0 4px 16px rgba(79, 70, 229, 0.25)' : 'var(--shadow-sm)',
+              cursor: 'pointer',
+              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.6rem'
+            }}
+            title="Click to select Cadet Officers and view officer classes"
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: isOfficerSelected ? '#4f46e5' : 'rgba(79, 70, 229, 0.12)',
+                  color: isOfficerSelected ? '#ffffff' : '#4f46e5',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800
+                }}>
+                  <Medal size={22} />
+                </div>
+                <div>
+                  <div style={{ color: isOfficerSelected ? '#312e81' : '#3730a3', fontSize: '1.1rem', fontWeight: 800 }}>
+                    CADET OFFICERS
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    1st, 2nd, 3rd, 4th Class & Aspirants
+                  </div>
+                </div>
+              </div>
+
+              <span className="badge" style={{
+                background: isOfficerSelected ? '#4f46e5' : '#e0e7ff',
+                color: isOfficerSelected ? '#ffffff' : '#3730a3',
+                fontWeight: 800
+              }}>
+                {cadetOfficersCount} / 60
+              </span>
+            </div>
+
+            <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
+              <div style={{ width: `${Math.min(100, Math.round((cadetOfficersCount / 60) * 100))}%`, height: '100%', background: 'linear-gradient(90deg, #4338ca, #6366f1)', transition: 'width 0.4s ease' }}></div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isOfficerSelected ? '#3730a3' : 'var(--text-muted)', fontWeight: 700 }}>
+              <span>{isOfficerSelected ? '▼ Officer Classes Revealed Below' : '▶ Click to View Officer Classes'}</span>
+              <span>60 Officers Quota</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* LEVEL 1: Basic Cadets -> Battalion Selection (Theme: BLUE)               */}
+      {/* ========================================================================= */}
+      {isBasicCadetsSelected && (
+        <div className="card">
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div className="card-title" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e40af' }}>
+                <Layers size={18} color="#2563eb" />
+                <span style={{ color: '#1e3a8a', fontWeight: 800 }}>Step 1: Battalion ({basicBattalions.length} Configured)</span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {selectedBattalion
+                  ? `Active Battalion: ${selectedBattalion}. Click another card or click again to change.`
+                  : 'Click a Battalion card below to drill down into its Companies.'}
+              </div>
+            </div>
+
+            {selectedBattalion && (
+              <span className="badge" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 800, border: '1px solid #93c5fd' }}>
+                ✓ {selectedBattalion} Selected
               </span>
             )}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {companyCounts.map(comp => {
-              const isSelected = selectedCompany === comp.name;
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
+            {basicBattalions.map(bn => {
+              const pct = Math.min(100, Math.round((bn.scanned / bn.target) * 100));
+              const isSelected = selectedBattalion === bn.name;
+              const IconComp = bn.icon || Shield;
 
               return (
                 <div
-                  key={comp.name}
-                  onClick={() => handleToggleCompany(comp.name)}
+                  key={bn.id || bn.name}
+                  onClick={() => handleSelectBattalion(bn.name)}
                   style={{
-                    padding: '0.75rem 0.9rem',
-                    background: isSelected ? '#ecfdf5' : '#ffffff',
-                    borderRadius: '8px',
-                    border: isSelected ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                    boxShadow: isSelected ? '0 4px 12px rgba(6, 78, 46, 0.16)' : undefined,
+                    background: isSelected ? '#eff6ff' : '#f8fafc',
+                    padding: '1.1rem',
+                    borderRadius: '12px',
+                    border: isSelected ? '2px solid #2563eb' : '1px solid var(--border-light)',
+                    boxShadow: isSelected ? '0 4px 16px rgba(37, 99, 235, 0.25)' : 'var(--shadow-sm)',
                     cursor: 'pointer',
-                    transition: 'all 0.2s ease'
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    position: 'relative'
                   }}
-                  title={`Click to filter by ${comp.name} Company`}
+                  title={`Click to select ${bn.name} and view companies`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 700, color: 'var(--rotc-green-dark)', fontSize: '0.9rem' }}>
-                        {comp.name} Company {isSelected && '✓'}
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>4 Platoons × 37 Cadets</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <IconComp size={18} color="#2563eb" />
+                      <strong style={{ color: isSelected ? '#1e3a8a' : '#1e40af', fontSize: '1rem' }}>
+                        {bn.name}
+                      </strong>
+                      <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: '4px' }}>
+                        {bn.shortCode}
+                      </span>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.92rem', color: comp.scanned > 0 ? 'var(--rotc-green-dark)' : 'var(--text-muted)' }}>
-                        {comp.scanned} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {comp.target} Scanned</span>
-                      </div>
-                    </div>
+                    <span className="badge" style={{
+                      background: isSelected ? '#2563eb' : (bn.scanned > 0 ? '#dbeafe' : '#f1f5f9'),
+                      color: isSelected ? '#ffffff' : (bn.scanned > 0 ? '#1e40af' : '#64748b'),
+                      fontWeight: 800
+                    }}>
+                      {bn.scanned} / {bn.target} ({pct}%)
+                    </span>
                   </div>
-                  <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${comp.percent}%`, height: '100%', background: comp.scanned > 0 ? 'var(--rotc-green-primary)' : '#cbd5e1', transition: 'width 0.4s ease' }}></div>
+
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                    {bn.companiesDesc}
+                  </div>
+
+                  <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', marginBottom: '0.5rem' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #1d4ed8, #3b82f6)', transition: 'width 0.4s ease' }}></div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isSelected ? '#1d4ed8' : 'var(--text-muted)', fontWeight: 700 }}>
+                    <span>{isSelected ? '▼ Companies Revealed Below' : '▶ Click to Drill Down'}</span>
+                    <span>{bn.target} Quota</span>
                   </div>
                 </div>
               );
             })}
           </div>
         </div>
+      )}
 
-        {/* Platoon Breakdown (Clickable) */}
-        <div className="card">
-          <div className="card-header">
-            <div className="card-title" style={{ fontSize: '0.95rem' }}>
-              <Users size={18} />
-              <span>Platoon Filter Cards (Click to Filter Table)</span>
+      {/* ========================================================================= */}
+      {/* LEVEL 2: Basic Cadets -> Company Selection (Theme: EMERALD / GREEN)       */}
+      {/* ========================================================================= */}
+      {isBasicCadetsSelected && selectedBattalion && (
+        <div className="card" style={{ border: '2px solid #a7f3d0', background: '#f6fdf9' }}>
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div className="card-title" style={{ fontSize: '1rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Building size={18} color="#059669" />
+                <span style={{ color: '#064e2e', fontWeight: 800 }}>
+                  Step 2: Companies • {selectedBattalion} ({companyCounts.length} Coys)
+                </span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {selectedCompany
+                  ? `Active Company: ${selectedCompany}. Platoons revealed below.`
+                  : 'Click a Company card below to view its Platoon formations.'}
+              </div>
             </div>
-            {selectedPlatoon !== 'ALL' && (
-              <span className="badge" style={{ background: '#fef3c7', color: '#92400e', cursor: 'pointer', fontWeight: 800 }} onClick={() => setSelectedPlatoon('ALL')}>
-                {selectedPlatoon} ✕
-              </span>
-            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {selectedCompany && (
+                <span className="badge" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 800, border: '1px solid #6ee7b7' }}>
+                  ✓ {selectedCompany} Selected
+                </span>
+              )}
+            </div>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+            {companyCounts.map(comp => {
+              const isSelected = selectedCompany === comp.key || selectedCompany === comp.shortName || selectedCompany === comp.name;
+
+              return (
+                <div
+                  key={comp.key}
+                  onClick={() => handleSelectCompany(comp.key)}
+                  style={{
+                    padding: '1rem',
+                    background: isSelected ? '#ecfdf5' : '#ffffff',
+                    borderRadius: '10px',
+                    border: isSelected ? '2px solid #059669' : '1px solid #a7f3d0',
+                    boxShadow: isSelected ? '0 4px 14px rgba(5, 150, 105, 0.2)' : 'var(--shadow-sm)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
+                  }}
+                  title={`Click to select ${comp.name} and view its platoons`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                    <div>
+                      <div style={{ fontWeight: 800, color: isSelected ? '#064e2e' : '#065f46', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{comp.name}</span>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#d1fae5', color: '#065f46', padding: '1px 5px', borderRadius: '3px' }}>
+                          {comp.shortName}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{comp.desc}</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <span className="badge" style={{
+                        background: isSelected ? '#059669' : (comp.scanned > 0 ? '#d1fae5' : '#f1f5f9'),
+                        color: isSelected ? '#ffffff' : (comp.scanned > 0 ? '#065f46' : '#64748b'),
+                        fontWeight: 800,
+                        fontSize: '0.75rem'
+                      }}>
+                        {comp.scanned} / {comp.target} ({comp.percent}%)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', margin: '0.5rem 0' }}>
+                    <div style={{ width: `${comp.percent}%`, height: '100%', background: 'linear-gradient(90deg, #064e2e, #059669)', transition: 'width 0.4s ease' }}></div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#065f46' : 'var(--text-muted)', fontWeight: 700 }}>
+                    <span>{isSelected ? '▼ Platoons Revealed Below' : '▶ Click to Reveal Platoons'}</span>
+                    <span>{comp.target} Quota</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* LEVEL 3: Basic Cadets -> Platoon Selection (Theme: AMBER / ORANGE)        */}
+      {/* ========================================================================= */}
+      {isBasicCadetsSelected && selectedBattalion && selectedCompany && (
+        <div className="card" style={{ border: '2px solid #fde68a', background: '#fffdf5' }}>
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div className="card-title" style={{ fontSize: '1rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Users size={18} color="#d97706" />
+                <span style={{ color: '#78350f', fontWeight: 800 }}>
+                  Step 3: Platoon Formations • {selectedCompany} ({selectedBattalion})
+                </span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {selectedPlatoon
+                  ? `Filtering table by: ${selectedPlatoon}. Click again to clear platoon focus.`
+                  : 'Click a platoon card to focus the attendance table specifically on that platoon.'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {selectedPlatoon && (
+                <span className="badge" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 800, border: '1px solid #fcd34d' }}>
+                  ✓ {selectedPlatoon} Focused
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem' }}>
             {platoonCounts.map(pltn => {
               const isSelected = selectedPlatoon === pltn.name;
 
               return (
                 <div
                   key={pltn.name}
-                  onClick={() => handleTogglePlatoon(pltn.name)}
+                  onClick={() => handleSelectPlatoon(pltn.name)}
                   style={{
-                    padding: '0.75rem 0.9rem',
+                    padding: '1rem',
                     background: isSelected ? '#fffbeb' : '#ffffff',
-                    borderRadius: '8px',
-                    border: isSelected ? '2px solid #d97706' : '1px solid var(--border-light)',
-                    boxShadow: isSelected ? '0 4px 12px rgba(217, 119, 6, 0.18)' : undefined,
+                    borderRadius: '10px',
+                    border: isSelected ? '2px solid #d97706' : '1px solid #fde68a',
+                    boxShadow: isSelected ? '0 4px 14px rgba(217, 119, 6, 0.2)' : 'var(--shadow-sm)',
                     cursor: 'pointer',
-                    transition: 'all 0.2s ease'
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
                   }}
-                  title={`Click to filter by ${pltn.name}`}
+                  title={`Click to filter attendance logs by ${pltn.name}`}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
                     <div>
-                      <div style={{ fontWeight: 700, color: '#92400e', fontSize: '0.9rem' }}>
-                        {pltn.name} {isSelected && '✓'}
+                      <div style={{ fontWeight: 800, color: isSelected ? '#78350f' : '#92400e', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>{pltn.name}</span>
+                        <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: '3px' }}>
+                          {pltn.shortCode}
+                        </span>
                       </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Standard Platoon Formation</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{pltn.desc}</div>
                     </div>
                     <div style={{ textAlign: 'right' }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.92rem', color: pltn.scanned > 0 ? '#059669' : 'var(--text-muted)' }}>
-                        {pltn.scanned} <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {pltn.target} Scanned</span>
-                      </div>
+                      <span className="badge" style={{
+                        background: isSelected ? '#d97706' : (pltn.scanned > 0 ? '#fef3c7' : '#f1f5f9'),
+                        color: isSelected ? '#ffffff' : (pltn.scanned > 0 ? '#92400e' : '#64748b'),
+                        fontWeight: 800,
+                        fontSize: '0.75rem'
+                      }}>
+                        {pltn.scanned} / {pltn.target} ({pltn.percent}%)
+                      </span>
                     </div>
                   </div>
-                  <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
-                    <div style={{ width: `${pltn.percent}%`, height: '100%', background: pltn.scanned > 0 ? 'linear-gradient(90deg, #059669, #10b981)' : '#cbd5e1', transition: 'width 0.4s ease' }}></div>
+
+                  <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', margin: '0.5rem 0' }}>
+                    <div style={{ width: `${pltn.percent}%`, height: '100%', background: 'linear-gradient(90deg, #d97706, #f59e0b)', transition: 'width 0.4s ease' }}></div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#92400e' : 'var(--text-muted)', fontWeight: 700 }}>
+                    <span>{isSelected ? '● Table Filter Active' : '▶ Click to Filter Table'}</span>
+                    <span>{pltn.target} Quota</span>
                   </div>
                 </div>
               );
             })}
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Recent Master Attendance Ingestions Table (Dynamically Filtered) */}
+      {/* ========================================================================= */}
+      {/* CADET OFFICERS: Clean Stacked Full-Width Vertical Cards (EMERALD Theme)   */}
+      {/* ========================================================================= */}
+      {isOfficerSelected && (
+        <div className="card" style={{ border: '2px solid #a7f3d0', background: '#f6fdf9' }}>
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div>
+              <div className="card-title" style={{ fontSize: '1rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Medal size={18} color="#059669" />
+                <span style={{ color: '#064e2e', fontWeight: 800 }}>
+                  Cadet Officer Classes (Click to Filter Attendance Table)
+                </span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {selectedCompany
+                  ? `Active Selection: ${getSelectedCompanyDisplay()}. Table filtered below.`
+                  : 'Click any stacked Officer Class below to directly filter the attendance records.'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              {selectedCompany && (
+                <span className="badge" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 800, border: '1px solid #6ee7b7' }}>
+                  ✓ {getSelectedCompanyDisplay()} Active
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {OFFICER_CLASSES.map(comp => {
+              const isSelected = selectedCompany === comp.key || selectedCompany === comp.title || selectedCompany === comp.shortName || selectedCompany === comp.name;
+
+              return (
+                <div
+                  key={comp.key}
+                  onClick={() => handleSelectCompany(comp.key)}
+                  style={{
+                    padding: '1.1rem 1.35rem',
+                    background: isSelected ? '#ecfdf5' : '#ffffff',
+                    borderRadius: '10px',
+                    border: isSelected ? '2px solid #059669' : '1px solid #d1fae5',
+                    boxShadow: isSelected ? '0 4px 14px rgba(5, 150, 105, 0.2)' : 'var(--shadow-sm)',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: '0.75rem'
+                  }}
+                  title={`Click to filter attendance logs by ${comp.title}`}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '10px',
+                      background: isSelected ? '#059669' : 'rgba(5, 150, 105, 0.1)',
+                      color: isSelected ? '#ffffff' : '#059669',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      flexShrink: 0
+                    }}>
+                      <Star size={20} />
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 800, color: isSelected ? '#064e2e' : '#065f46', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span>{comp.title}</span>
+                        {isSelected && (
+                          <span style={{ background: '#059669', color: '#ffffff', fontSize: '0.68rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
+                            ACTIVE FILTER
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>{comp.desc}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 700,
+                      color: isSelected ? '#059669' : 'var(--text-muted)',
+                      background: isSelected ? 'rgba(5, 150, 105, 0.1)' : 'transparent',
+                      padding: '4px 10px',
+                      borderRadius: '6px'
+                    }}>
+                      {isSelected ? '✓ Filter Active' : '▶ Click to Filter'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* Attendance Ingestions Table (Dynamically Filtered by Active Echelons)      */}
+      {/* ========================================================================= */}
       <div className="card">
         <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
           <div>
-            <div className="card-title">
-              <Activity size={20} />
-              <span>Recent Master Attendance Ingestions ({tableFilteredLogs.length} Records)</span>
+            <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Activity size={20} color="var(--rotc-green-dark)" />
+              <span>Master Attendance Records ({tableFilteredLogs.length} Scans)</span>
             </div>
-            {isAnyFilterActive && (
-              <div style={{ fontSize: '0.78rem', color: 'var(--rotc-green-dark)', marginTop: '2px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Filter size={13} />
-                <span>Filtered by:</span>
-                {selectedBattalion !== 'ALL' && <strong style={{ background: '#e0e7ff', color: '#3730a3', padding: '1px 6px', borderRadius: '4px' }}>{selectedBattalion}</strong>}
-                {selectedCompany !== 'ALL' && <strong style={{ background: '#d1fae5', color: '#065f46', padding: '1px 6px', borderRadius: '4px' }}>{selectedCompany} Coy</strong>}
-                {selectedPlatoon !== 'ALL' && <strong style={{ background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px' }}>{selectedPlatoon}</strong>}
+            {isAnyFilterActive ? (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '3px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                <Filter size={13} color="var(--rotc-green-dark)" />
+                <span style={{ color: 'var(--text-muted)' }}>Filtered drill-down:</span>
+                {mainCategory && (
+                  <strong style={{
+                    background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
+                    color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
+                    border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
+                    padding: '2px 8px',
+                    borderRadius: '4px'
+                  }}>
+                    {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'}
+                  </strong>
+                )}
+                {isBasicCadetsSelected && selectedBattalion && <strong style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px' }}>{selectedBattalion}</strong>}
+                {selectedCompany && <strong style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: '4px' }}>{getSelectedCompanyDisplay()}</strong>}
+                {isBasicCadetsSelected && selectedPlatoon && <strong style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px' }}>{selectedPlatoon}</strong>}
+              </div>
+            ) : (
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '3px' }}>
+                Showing all attendance records across the Brigade. Select an echelon category above to filter.
               </div>
             )}
           </div>
@@ -466,10 +1364,10 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={handleClearAllFilters}
-                style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700 }}
+                style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                 title="Reset all echelon filters"
               >
-                <XCircle size={14} /> Clear Active Filters
+                <XCircle size={14} /> Clear Filters
               </button>
             )}
           </div>
@@ -477,7 +1375,7 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
 
         {tableFilteredLogs.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No attendance records matching active filters ({selectedBattalion} • {selectedCompany} • {selectedPlatoon}).
+            No attendance records matching active filters ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
         ) : (
           <div className="table-responsive">
@@ -487,8 +1385,8 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
                   <th>#</th>
                   <th>Cadet ID</th>
                   <th>Cadet Name</th>
-                  <th>Battalion</th>
-                  <th>Company</th>
+                  <th>Battalion / Unit</th>
+                  <th>Company / Class</th>
                   <th>Platoon</th>
                   <th>Rank</th>
                   <th>Session Details</th>
@@ -511,14 +1409,16 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
                     }
                   }
 
+                  const isOfficer = isOfficerLog(log);
+
                   return (
                     <tr key={idx}>
                       <td>{idx + 1}</td>
                       <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{log.cadetId}</td>
                       <td style={{ fontWeight: 600 }}>{log.name}</td>
-                      <td><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>{log.battalion || '1st Battalion'}</span></td>
-                      <td><span className="badge badge-company">{log.company}</span></td>
-                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{log.platoon || '1st Platoon'}</span></td>
+                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{log.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
+                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{log.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
+                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{log.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
                       <td style={{ fontWeight: 600 }}>{log.rank || 'Cadet'}</td>
                       <td>{log.sessionName || 'Drill Session'}</td>
                       <td>{log.dutyOfficer || 'Duty Officer'}</td>

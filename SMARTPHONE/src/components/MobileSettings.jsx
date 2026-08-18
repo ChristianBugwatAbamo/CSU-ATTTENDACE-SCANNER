@@ -236,30 +236,56 @@ export default function MobileSettings({
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
             <div>
-              <label style={{ fontSize: '0.72rem', fontWeight: 700, display: 'block', marginBottom: '3px' }}>Battalion</label>
+              <label style={{ fontSize: '0.72rem', fontWeight: 700, display: 'block', marginBottom: '3px' }}>Battalion / Unit</label>
               <select
                 value={battalion}
-                onChange={(e) => setBattalion(e.target.value)}
+                onChange={(e) => {
+                  const newBn = e.target.value;
+                  setBattalion(newBn);
+                  if (newBn === 'CADET OFFICERS') {
+                    if (!['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
+                      setCompany('1CL');
+                    }
+                    setPlatoon('Officer Corps');
+                  } else if (['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
+                    setCompany('Alpha Company');
+                    setPlatoon('1st Platoon');
+                  }
+                }}
                 style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.82rem', fontWeight: 600 }}
               >
                 <option value="1st Battalion">1st Battalion</option>
                 <option value="2nd Battalion">2nd Battalion</option>
-                <option value="Brigade HQ">Brigade HQ</option>
+                <option value="CADET OFFICERS">CADET OFFICERS</option>
               </select>
             </div>
 
             <div>
-              <label style={{ fontSize: '0.72rem', fontWeight: 700, display: 'block', marginBottom: '3px' }}>Company</label>
+              <label style={{ fontSize: '0.72rem', fontWeight: 700, display: 'block', marginBottom: '3px' }}>
+                {battalion === 'CADET OFFICERS' ? 'Officer Class' : 'Company'}
+              </label>
               <select
                 value={company}
                 onChange={(e) => setCompany(e.target.value)}
                 style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.82rem', fontWeight: 600 }}
               >
-                <option value="Alpha Company">Alpha Company</option>
-                <option value="Bravo Company">Bravo Company</option>
-                <option value="Charlie Company">Charlie Company</option>
-                <option value="Delta Company">Delta Company</option>
-                <option value="HQ Company">HQ Company</option>
+                {battalion === 'CADET OFFICERS' ? (
+                  <>
+                    <option value="1CL">1CL (First Class)</option>
+                    <option value="2CL">2CL (Second Class)</option>
+                    <option value="3CL">3CL (Third Class)</option>
+                    <option value="4CL">4CL (Fourth Class)</option>
+                    <option value="ASPIRANT">ASPIRANT (Candidates)</option>
+                  </>
+                ) : (
+                  <>
+                    <option value="Alpha Company">Alpha Company</option>
+                    <option value="Bravo Company">Bravo Company</option>
+                    <option value="Charlie Company">Charlie Company</option>
+                    <option value="Delta Company">Delta Company</option>
+                    <option value="HQ Company">HQ Company</option>
+                  </>
+                )}
               </select>
             </div>
           </div>

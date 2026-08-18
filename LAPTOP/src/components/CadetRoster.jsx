@@ -104,7 +104,7 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
   };
 
   const handleGenerateFullRoster = async () => {
-    if (!window.confirm("Auto-generate the complete CSU ROTC Echelon Roster (1,184 Cadets: 2 Battalions × 4 Companies × 4 Platoons × 37 Cadets + Brigade HQ Staff)? This will populate the master database.")) {
+    if (!window.confirm("Auto-generate the complete CSU ROTC Echelon Roster (1,184 Cadets: 2 Battalions × 4 Companies × 4 Platoons × 37 Cadets + Cadet Officers Corps)? This will populate the master database.")) {
       return;
     }
 
@@ -176,7 +176,7 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
           <div>
             <h2 className="card-title">MASTER CADET DIRECTORY</h2>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              Full Unit Strength: <strong>1,184 Cadets</strong> (1 Brigade HQ • 2 Battalions • 4 Coys • 4 Platoons × 37 Cadets)
+              Full Unit Strength: <strong>1,184 Cadets</strong> (CADET OFFICERS • 2 Battalions • 4 Coys • 4 Platoons × 37 Cadets)
             </p>
           </div>
           
@@ -214,10 +214,10 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
             
             {/* Battalion Filter */}
             <select className="form-control" value={battalionFilter} onChange={(e) => setBattalionFilter(e.target.value)}>
-              <option value="ALL">All Battalions (1,184)</option>
+              <option value="ALL">All Battalions / Units</option>
               <option value="1st Battalion">1st Battalion (592)</option>
               <option value="2nd Battalion">2nd Battalion (592)</option>
-              <option value="Brigade HQ">Brigade HQ Staff</option>
+              <option value="CADET OFFICERS">CADET OFFICERS</option>
             </select>
 
             {/* Company Filter */}
@@ -377,7 +377,7 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
                 {/* Echelon Hierarchy: Battalion, Company, Platoon */}
                 <div className="form-grid" style={{ marginTop: '1rem' }}>
                   <div className="form-group">
-                    <label>Battalion</label>
+                    <label>Battalion / Unit</label>
                     <select
                       className="form-control"
                       value={formData.battalion}
@@ -385,7 +385,7 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
                     >
                       <option value="1st Battalion">1st Battalion</option>
                       <option value="2nd Battalion">2nd Battalion</option>
-                      <option value="Brigade HQ">Brigade HQ</option>
+                      <option value="CADET OFFICERS">CADET OFFICERS</option>
                     </select>
                   </div>
 

@@ -31,8 +31,8 @@ export default function IDGenerator({ cadets = [] }) {
   const [batchQueue, setBatchQueue] = useState([
     { id: '221-11101', name: 'SANTOS, MARIA L.', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
     { id: '221-11102', name: 'DELA CRUZ, JUAN A.', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-    { id: '221-00101', name: 'BAUTISTA, MARK G.', rank: 'Cadet COL (ROTC) 1CL', battalion: 'Brigade HQ', company: 'Headquarters', platoon: 'Brigade Staff', designation: 'Corps Commander', type: 'officer' },
-    { id: '221-00104', name: 'CASTILLO, ELENA J.', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'Brigade HQ', company: 'Headquarters', platoon: 'Brigade Staff', designation: 'S4 Brigade', type: 'officer' }
+    { id: '221-00101', name: 'BAUTISTA, MARK G.', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
+    { id: '221-00104', name: 'CASTILLO, ELENA J.', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
   ]);
 
   const officerRanks = [
@@ -87,9 +87,15 @@ export default function IDGenerator({ cadets = [] }) {
     setCategory(newCategory);
     if (newCategory === 'basic') {
       setRank('Cadet');
+      setBattalion('1st Battalion');
+      setCompany('Alpha');
+      setPlatoon('1st Platoon');
       setDesignation('None');
     } else {
       setRank('Cadet 2LT (ROTC) 4CL');
+      setBattalion('CADET OFFICERS');
+      setCompany('1CL');
+      setPlatoon('Officer Corps');
       setDesignation('None');
     }
   };
@@ -324,7 +330,7 @@ export default function IDGenerator({ cadets = [] }) {
             {/* Echelon Hierarchy Assignment */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
               <div className="form-field-group">
-                <label>Battalion</label>
+                <label>Battalion / Unit</label>
                 <select
                   className="custom-select"
                   value={battalion}
@@ -332,7 +338,7 @@ export default function IDGenerator({ cadets = [] }) {
                 >
                   <option value="1st Battalion">1st Battalion</option>
                   <option value="2nd Battalion">2nd Battalion</option>
-                  <option value="Brigade HQ">Brigade HQ</option>
+                  <option value="CADET OFFICERS">CADET OFFICERS</option>
                 </select>
               </div>
 
@@ -492,7 +498,9 @@ export default function IDGenerator({ cadets = [] }) {
                         
                         {/* Echelon Badge */}
                         <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: 'rgba(6,78,46,0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', margin: '2px 0' }}>
-                          {card.battalion || '1st Bn'} • {card.company || 'Alpha'} Coy • {card.platoon || '1st Pltn'}
+                          {card.type === 'officer' || card.battalion === 'CADET OFFICERS' || card.battalion === 'Brigade HQ'
+                            ? `CADET OFFICERS • ${card.company || '1CL'} • ${card.platoon || 'Officer Corps'}`
+                            : `${card.battalion || '1st Bn'} • ${card.company || 'Alpha'} Coy • ${card.platoon || '1st Pltn'}`}
                         </div>
 
                         {card.designation && card.designation !== 'None' && (

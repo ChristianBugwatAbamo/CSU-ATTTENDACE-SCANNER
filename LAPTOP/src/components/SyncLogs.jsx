@@ -210,10 +210,10 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
             <Filter size={15} style={{ color: 'var(--text-muted)' }} />
             
             <select className="form-control form-control-sm" value={battalionFilter} onChange={(e) => setBattalionFilter(e.target.value)}>
-              <option value="ALL">All Battalions</option>
+              <option value="ALL">All Battalions / Units</option>
               <option value="1st Battalion">1st Battalion</option>
               <option value="2nd Battalion">2nd Battalion</option>
-              <option value="Brigade HQ">Brigade HQ</option>
+              <option value="CADET OFFICERS">CADET OFFICERS</option>
             </select>
 
             <select className="form-control form-control-sm" value={companyFilter} onChange={(e) => setCompanyFilter(e.target.value)}>

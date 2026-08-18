@@ -25,9 +25,132 @@ import {
   KeyRound,
   Check,
   Eye,
-  Sliders
+  Sliders,
+  Plus,
+  Edit2,
+  FolderPlus,
+  ChevronRight,
+  Sparkles,
+  Info,
+  X
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
+
+// Standard CSU ROTC 1,184 Unit Structure Template
+const DEFAULT_UNIT_STRUCTURE = [
+  {
+    id: 'bn-1',
+    name: '1st Battalion',
+    shortCode: '1BN',
+    targetQuota: 592,
+    companies: [
+      {
+        id: 'co-1-alpha',
+        name: 'Alpha Company',
+        shortCode: 'ALPHA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-bravo',
+        name: 'Bravo Company',
+        shortCode: 'BRAVO',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-charlie',
+        name: 'Charlie Company',
+        shortCode: 'CHARLIE',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-1-delta',
+        name: 'Delta Company',
+        shortCode: 'DELTA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-1-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-1-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'bn-2',
+    name: '2nd Battalion',
+    shortCode: '2BN',
+    targetQuota: 592,
+    companies: [
+      {
+        id: 'co-2-alpha',
+        name: 'Alpha Company',
+        shortCode: 'ALPHA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-bravo',
+        name: 'Bravo Company',
+        shortCode: 'BRAVO',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-charlie',
+        name: 'Charlie Company',
+        shortCode: 'CHARLIE',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      },
+      {
+        id: 'co-2-delta',
+        name: 'Delta Company',
+        shortCode: 'DELTA',
+        targetQuota: 148,
+        platoons: [
+          { id: 'pl-2-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+          { id: 'pl-2-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+        ]
+      }
+    ]
+  }
+];
 
 const DEFAULT_SETTINGS = {
   // Tab 1: Attendance Rules
@@ -38,7 +161,10 @@ const DEFAULT_SETTINGS = {
   cadetQuotaPerPlatoon: 37,
   requireTimeInAndOut: true,
 
-  // Tab 2: Unit Branding
+  // Tab 2: Dynamic Unit Structure & Echelons
+  unitStructure: DEFAULT_UNIT_STRUCTURE,
+
+  // Tab 3: Unit Branding
   unitName: "1501st CDC ROTC Unit",
   commandingOfficer: "LTC RYAN L MARCELO INF (GSC) PA",
   commandingOfficerTitle: "Commandant, CSU ROTC Unit",
@@ -47,12 +173,12 @@ const DEFAULT_SETTINGS = {
   rotcSealUrl: "/rotc-seal-transparent.png",
   universityLogoUrl: "/csu-logo.png",
 
-  // Tab 3: Data & Storage
+  // Tab 4: Data & Storage
   exportDirectory: "./desktop_excel_reports/",
   autoExcelExport: true,
   autoBackupEnabled: true,
 
-  // Tab 4: ID Printing Setup
+  // Tab 5: ID Printing Setup
   signatoryName: "LTC RYAN L MARCELO INF (GSC) PA",
   signatoryDesignation: "Commandant, CSU ROTC Unit",
   signatureImageUrl: "",
@@ -64,12 +190,33 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefresh, serverOnline }) {
-  // Active top tab: 'attendance' | 'branding' | 'storage' | 'idprinting'
+  // Active top tab: 'attendance' | 'structure' | 'branding' | 'storage' | 'idprinting'
   const [activeTab, setActiveTab] = useState('attendance');
 
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessToast, setSaveSuccessToast] = useState(null);
+
+  // Echelon Navigation in Structure Tab
+  const [selectedBnId, setSelectedBnId] = useState('bn-1');
+  const [selectedCoId, setSelectedCoId] = useState('co-1-alpha');
+
+  // Echelon Add/Edit Modal State
+  const [isEchelonModalOpen, setIsEchelonModalOpen] = useState(false);
+  const [echelonModalConfig, setEchelonModalConfig] = useState({
+    level: 'battalion', // 'battalion' | 'company' | 'platoon'
+    mode: 'add', // 'add' | 'edit'
+    parentId: null,
+    item: { id: '', name: '', shortCode: '', targetQuota: 37 }
+  });
+
+  // Echelon Delete Modal State
+  const [isEchelonDeleteModalOpen, setIsEchelonDeleteModalOpen] = useState(false);
+  const [echelonDeleteConfig, setEchelonDeleteConfig] = useState({
+    level: 'battalion',
+    parentId: null,
+    item: { id: '', name: '' }
+  });
 
   // Modals & Security Verification
   const [isResetRosterModalOpen, setIsResetRosterModalOpen] = useState(false);
@@ -90,17 +237,31 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         const res = await fetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
-          setSettings(prev => ({ ...prev, ...data }));
+          setSettings(prev => ({
+            ...prev,
+            ...data,
+            unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE
+          }));
         } else {
           const local = localStorage.getItem('csu_rotc_admin_settings');
           if (local) {
-            setSettings(prev => ({ ...prev, ...JSON.parse(local) }));
+            const parsed = JSON.parse(local);
+            setSettings(prev => ({
+              ...prev,
+              ...parsed,
+              unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE
+            }));
           }
         }
       } catch (err) {
         const local = localStorage.getItem('csu_rotc_admin_settings');
         if (local) {
-          setSettings(prev => ({ ...prev, ...JSON.parse(local) }));
+          const parsed = JSON.parse(local);
+          setSettings(prev => ({
+            ...prev,
+            ...parsed,
+            unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE
+          }));
         }
       }
     };
@@ -112,21 +273,22 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   // Save Settings Handler
-  const handleSaveSettings = async (e) => {
+  const handleSaveSettings = async (e, customSettings = null) => {
     if (e) e.preventDefault();
     setIsSaving(true);
+    const toSave = customSettings || settings;
 
     try {
-      localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(settings));
+      localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(toSave));
 
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(settings)
+        body: JSON.stringify(toSave)
       });
 
       if (res.ok) {
-        setSaveSuccessToast('System parameters saved and applied successfully!');
+        setSaveSuccessToast('System parameters & unit echelons saved and applied successfully!');
       } else {
         setSaveSuccessToast('Settings saved locally to browser storage.');
       }
@@ -138,141 +300,414 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Image Upload Helper (converts image file to Base64 data URL for persistence)
+  // Image Upload Handlers
   const handleImageUpload = (e, fieldKey) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload a valid image file (.png, .jpg, .jpeg, .webp).');
-      return;
-    }
-
     const reader = new FileReader();
-    reader.onload = (loadEvt) => {
-      handleChange(fieldKey, loadEvt.target.result);
+    reader.onload = (uploadEvent) => {
+      const base64Data = uploadEvent.target.result;
+      setSettings(prev => ({ ...prev, [fieldKey]: base64Data }));
       setSaveSuccessToast(`Image uploaded for ${fieldKey}! Click "Save All Settings" to apply.`);
       setTimeout(() => setSaveSuccessToast(null), 4000);
     };
     reader.readAsDataURL(file);
   };
 
-  // Export Full Database Backup (.json)
-  const handleExportBackup = async () => {
+  // Reset Full Cadet Roster
+  const handleConfirmResetRoster = async () => {
+    setIsResetRosterModalOpen(false);
     try {
-      const backupPayload = {
-        exportTimestamp: new Date().toISOString(),
-        systemVersion: "1.0.0",
-        unitProfile: {
-          unitName: settings.unitName,
-          commandingOfficer: settings.commandingOfficer,
-          hostInstitution: settings.hostInstitution
-        },
-        settings: settings,
-        totalCadets: cadets.length,
-        totalAttendanceLogs: attendanceLogs.length,
-        cadetRoster: cadets,
-        attendanceLogs: attendanceLogs
-      };
-
-      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupPayload, null, 2));
-      const downloadAnchor = document.createElement('a');
-      const dateKey = new Date().toISOString().slice(0, 10);
-      downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", `CSU_ROTC_DATABASE_BACKUP_${dateKey}.json`);
-      document.body.appendChild(downloadAnchor);
-      downloadAnchor.click();
-      downloadAnchor.remove();
-
-      setSaveSuccessToast('Complete system JSON backup downloaded successfully!');
-      setTimeout(() => setSaveSuccessToast(null), 4000);
+      const res = await fetch('/api/cadets/reset', { method: 'POST' });
+      if (res.ok) {
+        setSaveSuccessToast('Master Cadet Directory restored to standard 1,184-cadet structure.');
+        if (onRefresh) onRefresh();
+      } else {
+        alert('Could not reset roster on server.');
+      }
     } catch (err) {
-      alert("Failed to export backup: " + err.message);
+      alert('Error contacting server to reset roster: ' + err.message);
+    } finally {
+      setTimeout(() => setSaveSuccessToast(null), 4000);
     }
   };
 
-  // Restore from File Picker (.json)
-  const handleRestoreFile = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      try {
-        const parsed = JSON.parse(e.target.result);
-        if (!parsed.cadetRoster && !parsed.cadets && !parsed.attendanceLogs) {
-          alert("Invalid backup file format. Expected CSU ROTC database payload.");
-          return;
-        }
-
-        const res = await fetch('/api/backup/restore', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(parsed)
-        });
-
-        if (res.ok) {
-          setSaveSuccessToast('Database successfully restored from backup file!');
-          if (onRefresh) onRefresh();
-        } else {
-          setSaveSuccessToast('Backup parsed successfully. Refreshing view...');
-          if (onRefresh) onRefresh();
-        }
-      } catch (err) {
-        alert("Failed to parse backup JSON file: " + err.message);
-      } finally {
-        setTimeout(() => setSaveSuccessToast(null), 4000);
-        event.target.value = '';
-      }
-    };
-    reader.readAsText(file);
-  };
-
-  // Password Protected Log Purge Execution
+  // Execute Purge Attendance Logs
   const handleExecuteSecurePurge = async () => {
-    // Check against authorized security passcodes
-    const normalizedInput = purgePasswordInput.trim();
-    if (normalizedInput !== '1501' && normalizedInput !== 'admin' && normalizedInput !== 'csu1501') {
-      setPurgeErrorMsg('Incorrect Admin PIN / Password. Verification failed.');
+    if (purgePasswordInput !== '1501') {
+      setPurgeErrorMsg('Incorrect Admin PIN. Access denied.');
       return;
     }
 
     try {
       const res = await fetch('/api/attendance', { method: 'DELETE' });
       if (res.ok) {
-        setSaveSuccessToast('Master attendance logs securely purged from database.');
+        setIsSecurePurgeModalOpen(false);
+        setPurgePasswordInput('');
+        setPurgeErrorMsg('');
+        setSaveSuccessToast('All attendance logs have been securely wiped.');
+        if (onRefresh) onRefresh();
+      } else {
+        setPurgeErrorMsg('Failed to clear logs on server.');
       }
-      if (onRefresh) onRefresh();
-      setIsSecurePurgeModalOpen(false);
-      setPurgePasswordInput('');
-      setPurgeErrorMsg('');
     } catch (err) {
-      alert("Error purging logs: " + err.message);
+      setPurgeErrorMsg('Error contacting server.');
     } finally {
       setTimeout(() => setSaveSuccessToast(null), 4000);
     }
   };
 
-  // Confirm Reset Roster to default 1,184 cadets
-  const handleConfirmResetRoster = async () => {
+  // Download System Backup
+  const handleDownloadBackup = async () => {
     try {
-      const res = await fetch('/api/roster/reset', { method: 'POST' });
+      const res = await fetch('/api/backup');
       if (res.ok) {
-        setSaveSuccessToast('Cadet roster reset to standard 1,184 echelon template.');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `csu_rotc_backup_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        setSaveSuccessToast('System backup downloaded successfully.');
       } else {
-        setSaveSuccessToast('Roster reset requested.');
+        const backupData = {
+          exportTimestamp: new Date().toISOString(),
+          settings: settings,
+          cadets: cadets,
+          attendanceLogs: attendanceLogs
+        };
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `csu_rotc_local_backup_${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        setSaveSuccessToast('Local backup downloaded successfully.');
       }
-      if (onRefresh) onRefresh();
     } catch (err) {
-      alert("Error resetting roster: " + err.message);
+      alert('Could not download backup: ' + err.message);
     } finally {
-      setIsResetRosterModalOpen(false);
       setTimeout(() => setSaveSuccessToast(null), 4000);
+    }
+  };
+
+  // Restore System Backup
+  const handleRestoreBackup = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        if (data.settings) {
+          setSettings(data.settings);
+          localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(data.settings));
+        }
+
+        const res = await fetch('/api/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (res.ok) {
+          setSaveSuccessToast('System snapshot restored successfully from backup.');
+          if (onRefresh) onRefresh();
+        } else {
+          setSaveSuccessToast('Settings loaded locally from backup file.');
+        }
+      } catch (err) {
+        alert('Invalid backup JSON file: ' + err.message);
+      } finally {
+        setTimeout(() => setSaveSuccessToast(null), 4000);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // =========================================================================
+  // UNIT STRUCTURE & ECHELONS CRUD HANDLERS
+  // =========================================================================
+
+  const currentStructure = settings.unitStructure || DEFAULT_UNIT_STRUCTURE;
+
+  // Active battalion object
+  const activeBattalion = currentStructure.find(b => b.id === selectedBnId) || currentStructure[0] || null;
+
+  // Active company object
+  const activeCompany = activeBattalion
+    ? (activeBattalion.companies.find(c => c.id === selectedCoId) || activeBattalion.companies[0] || null)
+    : null;
+
+  // Calculate totals
+  const totalBattalionsCount = currentStructure.length;
+  const totalCompaniesCount = currentStructure.reduce((acc, bn) => acc + (bn.companies ? bn.companies.length : 0), 0);
+  const totalPlatoonsCount = currentStructure.reduce((acc, bn) => {
+    return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
+  }, 0);
+  const totalBasicQuota = currentStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
+  const totalBrigadeQuota = totalBasicQuota + 60; // 60 Officer Corps quota
+
+  // Open Modal to Add Echelon
+  const handleOpenAddEchelon = (level, parentId = null) => {
+    let defaultName = '';
+    let defaultCode = '';
+    let defaultQuota = 37;
+
+    if (level === 'battalion') {
+      const nextNum = currentStructure.length + 1;
+      const suffix = nextNum === 1 ? 'st' : nextNum === 2 ? 'nd' : nextNum === 3 ? 'rd' : 'th';
+      defaultName = `${nextNum}${suffix} Battalion`;
+      defaultCode = `${nextNum}BN`;
+      defaultQuota = 592;
+    } else if (level === 'company') {
+      const existingCoys = activeBattalion ? activeBattalion.companies.length : 0;
+      const coyNames = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel'];
+      const pickName = coyNames[existingCoys] || `Company ${existingCoys + 1}`;
+      defaultName = `${pickName} Company`;
+      defaultCode = pickName.toUpperCase();
+      defaultQuota = 148;
+    } else if (level === 'platoon') {
+      const existingPltns = activeCompany ? activeCompany.platoons.length : 0;
+      const nextNum = existingPltns + 1;
+      const suffix = nextNum === 1 ? 'st' : nextNum === 2 ? 'nd' : nextNum === 3 ? 'rd' : 'th';
+      defaultName = `${nextNum}${suffix} Platoon`;
+      defaultCode = `${nextNum}PLTN`;
+      defaultQuota = 37;
+    }
+
+    setEchelonModalConfig({
+      level,
+      mode: 'add',
+      parentId,
+      item: {
+        id: `echelon-${Date.now()}`,
+        name: defaultName,
+        shortCode: defaultCode,
+        targetQuota: defaultQuota
+      }
+    });
+    setIsEchelonModalOpen(true);
+  };
+
+  // Open Modal to Edit Echelon
+  const handleOpenEditEchelon = (level, item, parentId = null) => {
+    setEchelonModalConfig({
+      level,
+      mode: 'edit',
+      parentId,
+      item: { ...item }
+    });
+    setIsEchelonModalOpen(true);
+  };
+
+  // Save Echelon from Modal (Add or Edit)
+  const handleSaveEchelonModal = () => {
+    const { level, mode, parentId, item } = echelonModalConfig;
+
+    if (!item.name || !item.name.trim()) {
+      alert('Please enter a valid unit display name.');
+      return;
+    }
+
+    const quotaNum = Number(item.targetQuota) || 37;
+    const cleanItem = {
+      ...item,
+      name: item.name.trim(),
+      shortCode: (item.shortCode || item.name.slice(0, 4)).trim().toUpperCase(),
+      targetQuota: quotaNum
+    };
+
+    let updatedStructure = JSON.parse(JSON.stringify(currentStructure));
+
+    if (level === 'battalion') {
+      if (mode === 'add') {
+        const newBn = {
+          id: `bn-${Date.now()}`,
+          name: cleanItem.name,
+          shortCode: cleanItem.shortCode,
+          targetQuota: cleanItem.targetQuota,
+          companies: [
+            {
+              id: `co-${Date.now()}-alpha`,
+              name: 'Alpha Company',
+              shortCode: 'ALPHA',
+              targetQuota: Math.round(cleanItem.targetQuota / 4) || 148,
+              platoons: [
+                { id: `pl-${Date.now()}-1`, name: '1st Platoon', shortCode: '1PLTN', targetQuota: Math.round(cleanItem.targetQuota / 16) || 37 },
+                { id: `pl-${Date.now()}-2`, name: '2nd Platoon', shortCode: '2PLTN', targetQuota: Math.round(cleanItem.targetQuota / 16) || 37 },
+                { id: `pl-${Date.now()}-3`, name: '3rd Platoon', shortCode: '3PLTN', targetQuota: Math.round(cleanItem.targetQuota / 16) || 37 },
+                { id: `pl-${Date.now()}-4`, name: '4th Platoon', shortCode: '4PLTN', targetQuota: Math.round(cleanItem.targetQuota / 16) || 37 }
+              ]
+            }
+          ]
+        };
+        updatedStructure.push(newBn);
+        setSelectedBnId(newBn.id);
+        setSelectedCoId(newBn.companies[0].id);
+      } else {
+        const idx = updatedStructure.findIndex(b => b.id === cleanItem.id);
+        if (idx !== -1) {
+          updatedStructure[idx] = { ...updatedStructure[idx], ...cleanItem };
+        }
+      }
+    } else if (level === 'company') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === (parentId || selectedBnId));
+      if (bnIdx !== -1) {
+        if (mode === 'add') {
+          const newCo = {
+            id: `co-${Date.now()}`,
+            name: cleanItem.name,
+            shortCode: cleanItem.shortCode,
+            targetQuota: cleanItem.targetQuota,
+            platoons: [
+              { id: `pl-${Date.now()}-1`, name: '1st Platoon', shortCode: '1PLTN', targetQuota: Math.round(cleanItem.targetQuota / 4) || 37 },
+              { id: `pl-${Date.now()}-2`, name: '2nd Platoon', shortCode: '2PLTN', targetQuota: Math.round(cleanItem.targetQuota / 4) || 37 },
+              { id: `pl-${Date.now()}-3`, name: '3rd Platoon', shortCode: '3PLTN', targetQuota: Math.round(cleanItem.targetQuota / 4) || 37 },
+              { id: `pl-${Date.now()}-4`, name: '4th Platoon', shortCode: '4PLTN', targetQuota: Math.round(cleanItem.targetQuota / 4) || 37 }
+            ]
+          };
+          updatedStructure[bnIdx].companies.push(newCo);
+          setSelectedCoId(newCo.id);
+        } else {
+          const coIdx = updatedStructure[bnIdx].companies.findIndex(c => c.id === cleanItem.id);
+          if (coIdx !== -1) {
+            updatedStructure[bnIdx].companies[coIdx] = {
+              ...updatedStructure[bnIdx].companies[coIdx],
+              ...cleanItem
+            };
+          }
+        }
+        // Auto-sync Battalion Quota to sum of companies
+        const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+        if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+      }
+    } else if (level === 'platoon') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === selectedBnId);
+      if (bnIdx !== -1) {
+        const coIdx = updatedStructure[bnIdx].companies.findIndex(c => c.id === (parentId || selectedCoId));
+        if (coIdx !== -1) {
+          if (mode === 'add') {
+            const newPl = {
+              id: `pl-${Date.now()}`,
+              name: cleanItem.name,
+              shortCode: cleanItem.shortCode,
+              targetQuota: cleanItem.targetQuota
+            };
+            updatedStructure[bnIdx].companies[coIdx].platoons.push(newPl);
+          } else {
+            const plIdx = updatedStructure[bnIdx].companies[coIdx].platoons.findIndex(p => p.id === cleanItem.id);
+            if (plIdx !== -1) {
+              updatedStructure[bnIdx].companies[coIdx].platoons[plIdx] = {
+                ...updatedStructure[bnIdx].companies[coIdx].platoons[plIdx],
+                ...cleanItem
+              };
+            }
+          }
+          // Auto-sync Company Quota to sum of platoons
+          const plSum = updatedStructure[bnIdx].companies[coIdx].platoons.reduce((acc, p) => acc + Number(p.targetQuota || 0), 0);
+          if (plSum > 0) updatedStructure[bnIdx].companies[coIdx].targetQuota = plSum;
+
+          // Auto-sync Battalion Quota
+          const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+          if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+        }
+      }
+    }
+
+    const newSettings = { ...settings, unitStructure: updatedStructure };
+    setSettings(newSettings);
+    setIsEchelonModalOpen(false);
+    handleSaveSettings(null, newSettings);
+  };
+
+  // Open Delete Confirmation
+  const handleOpenDeleteEchelon = (level, item, parentId = null) => {
+    setEchelonDeleteConfig({ level, item, parentId });
+    setIsEchelonDeleteModalOpen(true);
+  };
+
+  // Confirm Delete Echelon
+  const handleConfirmDeleteEchelon = () => {
+    const { level, item, parentId } = echelonDeleteConfig;
+    let updatedStructure = JSON.parse(JSON.stringify(currentStructure));
+
+    if (level === 'battalion') {
+      if (updatedStructure.length <= 1) {
+        alert('Cannot delete the only remaining Battalion.');
+        setIsEchelonDeleteModalOpen(false);
+        return;
+      }
+      updatedStructure = updatedStructure.filter(b => b.id !== item.id);
+      if (selectedBnId === item.id) {
+        setSelectedBnId(updatedStructure[0]?.id || null);
+        setSelectedCoId(updatedStructure[0]?.companies[0]?.id || null);
+      }
+    } else if (level === 'company') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === (parentId || selectedBnId));
+      if (bnIdx !== -1) {
+        if (updatedStructure[bnIdx].companies.length <= 1) {
+          alert('Cannot delete the only remaining Company in this Battalion.');
+          setIsEchelonDeleteModalOpen(false);
+          return;
+        }
+        updatedStructure[bnIdx].companies = updatedStructure[bnIdx].companies.filter(c => c.id !== item.id);
+        if (selectedCoId === item.id) {
+          setSelectedCoId(updatedStructure[bnIdx].companies[0]?.id || null);
+        }
+        // Recalculate Quota
+        const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+        if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+      }
+    } else if (level === 'platoon') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === selectedBnId);
+      if (bnIdx !== -1) {
+        const coIdx = updatedStructure[bnIdx].companies.findIndex(c => c.id === (parentId || selectedCoId));
+        if (coIdx !== -1) {
+          if (updatedStructure[bnIdx].companies[coIdx].platoons.length <= 1) {
+            alert('Cannot delete the only remaining Platoon in this Company.');
+            setIsEchelonDeleteModalOpen(false);
+            return;
+          }
+          updatedStructure[bnIdx].companies[coIdx].platoons = updatedStructure[bnIdx].companies[coIdx].platoons.filter(p => p.id !== item.id);
+          // Recalculate Quota
+          const plSum = updatedStructure[bnIdx].companies[coIdx].platoons.reduce((acc, p) => acc + Number(p.targetQuota || 0), 0);
+          if (plSum > 0) updatedStructure[bnIdx].companies[coIdx].targetQuota = plSum;
+
+          const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+          if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+        }
+      }
+    }
+
+    const newSettings = { ...settings, unitStructure: updatedStructure };
+    setSettings(newSettings);
+    setIsEchelonDeleteModalOpen(false);
+    handleSaveSettings(null, newSettings);
+  };
+
+  // Restore Default 1,184 Echelon Structure
+  const handleRestoreDefaultStructure = () => {
+    if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)?')) {
+      const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE };
+      setSettings(newSettings);
+      setSelectedBnId('bn-1');
+      setSelectedCoId('co-1-alpha');
+      handleSaveSettings(null, newSettings);
     }
   };
 
   const tabs = [
     { id: 'attendance', label: 'Attendance Rules', icon: Clock, desc: 'Cutoff times & capacity buffers' },
+    { id: 'structure', label: 'Unit Structure & Echelons', icon: Layers, desc: 'Battalions, companies & platoons' },
     { id: 'branding', label: 'Unit Branding', icon: Award, desc: 'Command profile & official seals' },
     { id: 'storage', label: 'Data & Storage', icon: Database, desc: 'Excel paths & JSON backups' },
     { id: 'idprinting', label: 'ID Printing Setup', icon: Printer, desc: 'Signatories & CR80 specs' }
@@ -317,7 +752,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             System & Unit Settings
           </h2>
           <p style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)', margin: 0, lineHeight: 1.5 }}>
-            Configure formation rules, official seals, database operations, and ID printing parameters.
+            Configure formation rules, dynamic echelon structure, official seals, and ID printing parameters.
           </p>
         </div>
 
@@ -366,10 +801,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         </div>
       )}
 
-      {/* Top 4-Tab Navigation Buttons Bar */}
+      {/* Top 5-Tab Navigation Buttons Bar */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
         gap: '0.75rem',
         marginBottom: '1.5rem'
       }}>
@@ -388,7 +823,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                 padding: '0.9rem 1.1rem',
                 borderRadius: '12px',
                 border: isActive ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                background: isActive ? '#ffffff' : '#ffffff',
+                background: '#ffffff',
                 color: isActive ? 'var(--rotc-green-dark)' : 'var(--text-muted)',
                 boxShadow: isActive ? '0 4px 12px rgba(6, 78, 46, 0.15)' : 'var(--shadow-sm)',
                 cursor: 'pointer',
@@ -545,7 +980,436 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       )}
 
       {/* =========================================================================
-          TAB 2: UNIT BRANDING
+          TAB 2: UNIT STRUCTURE & ECHELONS (DYNAMIC ORGANIZATIONAL MANAGEMENT)
+          ========================================================================= */}
+      {activeTab === 'structure' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          
+          {/* Unit Structure Summary Banner */}
+          <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Layers size={22} color="var(--rotc-green-dark)" />
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-dark)', fontFamily: 'Oswald, sans-serif' }}>
+                    UNIT ECHELON HIERARCHY MANAGEMENT
+                  </h3>
+                </div>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                  Manage dynamic Battalions, Companies, and Platoons. Update display names, short codes, and cadet quotas.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleRestoreDefaultStructure}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
+                  title="Reset to standard 1,184 structure (2 Battalions x 4 Coys x 4 Platoons)"
+                >
+                  <RefreshCw size={14} /> Restore 1,184 Standard Template
+                </button>
+              </div>
+            </div>
+
+            {/* Quota Breakdown Chips */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gap: '0.75rem',
+              marginTop: '1.25rem',
+              paddingTop: '1rem',
+              borderTop: '1px solid var(--border-light)'
+            }}>
+              <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
+                <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>Battalions</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1e3a8a' }}>{totalBattalionsCount}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{totalBasicQuota} Basic Quota</div>
+              </div>
+
+              <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                <div style={{ fontSize: '0.72rem', color: '#065f46', fontWeight: 700, textTransform: 'uppercase' }}>Companies</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#064e2e' }}>{totalCompaniesCount}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Across all battalions</div>
+              </div>
+
+              <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #fde68a' }}>
+                <div style={{ fontSize: '0.72rem', color: '#92400e', fontWeight: 700, textTransform: 'uppercase' }}>Platoons</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#78350f' }}>{totalPlatoonsCount}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Fixed formation units</div>
+              </div>
+
+              <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #a5b4fc' }}>
+                <div style={{ fontSize: '0.72rem', color: '#3730a3', fontWeight: 700, textTransform: 'uppercase' }}>Officer Corps</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#312e81' }}>60</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>5 Classes (1CL to ASP)</div>
+              </div>
+
+              <div style={{ padding: '0.75rem', background: 'rgba(6, 78, 46, 0.08)', borderRadius: '8px', border: '1.5px solid var(--rotc-green-dark)' }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--rotc-green-dark)', fontWeight: 800, textTransform: 'uppercase' }}>Total Unit Target</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{totalBrigadeQuota}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Full Brigade Capacity</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 3-Column Interactive Hierarchy Manager */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem' }}>
+            
+            {/* COLUMN 1: BATTALIONS (Theme: BLUE) */}
+            <div className="card" style={{ border: '2px solid #bfdbfe', background: '#eff6ff' }}>
+              <div className="card-header" style={{ paddingBottom: '0.75rem', borderBottom: '1.5px solid #dbeafe' }}>
+                <div>
+                  <div className="card-title" style={{ fontSize: '0.98rem', color: '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Shield size={18} color="#2563eb" />
+                    <span>1. Battalions ({currentStructure.length})</span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                    Level 1 Unit Echelons
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddEchelon('battalion')}
+                  style={{
+                    background: '#2563eb',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.3)'
+                  }}
+                >
+                  <Plus size={13} /> Add Bn
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
+                {currentStructure.map(bn => {
+                  const isSelected = selectedBnId === bn.id;
+                  const coyCount = bn.companies ? bn.companies.length : 0;
+
+                  return (
+                    <div
+                      key={bn.id}
+                      onClick={() => {
+                        setSelectedBnId(bn.id);
+                        if (bn.companies && bn.companies.length > 0) {
+                          setSelectedCoId(bn.companies[0].id);
+                        } else {
+                          setSelectedCoId(null);
+                        }
+                      }}
+                      style={{
+                        padding: '0.85rem 1rem',
+                        borderRadius: '10px',
+                        background: isSelected ? '#ffffff' : '#f8fafc',
+                        border: isSelected ? '2px solid #2563eb' : '1px solid #bfdbfe',
+                        boxShadow: isSelected ? '0 4px 12px rgba(37, 99, 235, 0.2)' : 'none',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                        <div>
+                          <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isSelected ? '#1e3a8a' : '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{bn.name}</span>
+                            <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: '4px' }}>
+                              {bn.shortCode || 'BN'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                            {coyCount} Companies • Quota: <strong>{bn.targetQuota}</strong>
+                          </div>
+                        </div>
+
+                        {/* Edit & Delete Controls */}
+                        <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditEchelon('battalion', bn)}
+                            style={{
+                              background: '#f1f5f9',
+                              border: '1px solid #cbd5e1',
+                              borderRadius: '6px',
+                              padding: '4px 6px',
+                              color: '#334155',
+                              cursor: 'pointer'
+                            }}
+                            title={`Edit ${bn.name}`}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenDeleteEchelon('battalion', bn)}
+                            style={{
+                              background: '#fee2e2',
+                              border: '1px solid #fca5a5',
+                              borderRadius: '6px',
+                              padding: '4px 6px',
+                              color: '#dc2626',
+                              cursor: 'pointer'
+                            }}
+                            title={`Delete ${bn.name}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#2563eb' : '#94a3b8', fontWeight: 700, marginTop: '6px' }}>
+                        <span>{isSelected ? '● ACTIVE BATTALION' : 'Click to View Companies'}</span>
+                        <ChevronRight size={14} color={isSelected ? '#2563eb' : '#94a3b8'} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* COLUMN 2: COMPANIES (Theme: EMERALD / GREEN) */}
+            <div className="card" style={{ border: '2px solid #a7f3d0', background: '#ecfdf5' }}>
+              <div className="card-header" style={{ paddingBottom: '0.75rem', borderBottom: '1.5px solid #d1fae5' }}>
+                <div>
+                  <div className="card-title" style={{ fontSize: '0.98rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Building size={18} color="#059669" />
+                    <span>2. Companies ({activeBattalion?.name || 'None'})</span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                    Level 2 Unit Echelons
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddEchelon('company', selectedBnId)}
+                  disabled={!activeBattalion}
+                  style={{
+                    background: '#059669',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    cursor: activeBattalion ? 'pointer' : 'not-allowed',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.3)'
+                  }}
+                >
+                  <Plus size={13} /> Add Coy
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
+                {(!activeBattalion || !activeBattalion.companies || activeBattalion.companies.length === 0) ? (
+                  <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                    No companies configured under this battalion. Click "+ Add Coy" to create one.
+                  </div>
+                ) : (
+                  activeBattalion.companies.map(co => {
+                    const isSelected = selectedCoId === co.id;
+                    const pltnCount = co.platoons ? co.platoons.length : 0;
+
+                    return (
+                      <div
+                        key={co.id}
+                        onClick={() => setSelectedCoId(co.id)}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          borderRadius: '10px',
+                          background: isSelected ? '#ffffff' : '#f8fafc',
+                          border: isSelected ? '2px solid #059669' : '1px solid #a7f3d0',
+                          boxShadow: isSelected ? '0 4px 12px rgba(5, 150, 105, 0.2)' : 'none',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isSelected ? '#064e2e' : '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{co.name}</span>
+                              <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#d1fae5', color: '#065f46', padding: '1px 6px', borderRadius: '4px' }}>
+                                {co.shortCode || 'CO'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              {pltnCount} Platoons • Quota: <strong>{co.targetQuota}</strong>
+                            </div>
+                          </div>
+
+                          {/* Edit & Delete Controls */}
+                          <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditEchelon('company', co, selectedBnId)}
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '6px',
+                                padding: '4px 6px',
+                                color: '#334155',
+                                cursor: 'pointer'
+                              }}
+                              title={`Edit ${co.name}`}
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteEchelon('company', co, selectedBnId)}
+                              style={{
+                                background: '#fee2e2',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '6px',
+                                padding: '4px 6px',
+                                color: '#dc2626',
+                                cursor: 'pointer'
+                              }}
+                              title={`Delete ${co.name}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#059669' : '#94a3b8', fontWeight: 700, marginTop: '6px' }}>
+                          <span>{isSelected ? '● ACTIVE COMPANY' : 'Click to View Platoons'}</span>
+                          <ChevronRight size={14} color={isSelected ? '#059669' : '#94a3b8'} />
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            {/* COLUMN 3: PLATOONS (Theme: AMBER / ORANGE) */}
+            <div className="card" style={{ border: '2px solid #fde68a', background: '#fffbeb' }}>
+              <div className="card-header" style={{ paddingBottom: '0.75rem', borderBottom: '1.5px solid #fef3c7' }}>
+                <div>
+                  <div className="card-title" style={{ fontSize: '0.98rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Users size={18} color="#d97706" />
+                    <span>3. Platoons ({activeCompany?.name || 'None'})</span>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                    Level 3 Formation Units
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleOpenAddEchelon('platoon', selectedCoId)}
+                  disabled={!activeCompany}
+                  style={{
+                    background: '#d97706',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    cursor: activeCompany ? 'pointer' : 'not-allowed',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    boxShadow: '0 2px 6px rgba(217, 119, 6, 0.3)'
+                  }}
+                >
+                  <Plus size={13} /> Add Pltn
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
+                {(!activeCompany || !activeCompany.platoons || activeCompany.platoons.length === 0) ? (
+                  <div style={{ padding: '2rem 1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                    No platoons configured under this company. Click "+ Add Pltn" to create one.
+                  </div>
+                ) : (
+                  activeCompany.platoons.map(pl => {
+                    return (
+                      <div
+                        key={pl.id}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          borderRadius: '10px',
+                          background: '#ffffff',
+                          border: '1px solid #fde68a',
+                          boxShadow: 'none',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: '#78350f', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>{pl.name}</span>
+                              <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px' }}>
+                                {pl.shortCode || 'PLTN'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                              Capacity Quota: <strong>{pl.targetQuota} Cadets</strong>
+                            </div>
+                          </div>
+
+                          {/* Edit & Delete Controls */}
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditEchelon('platoon', pl, selectedCoId)}
+                              style={{
+                                background: '#f1f5f9',
+                                border: '1px solid #cbd5e1',
+                                borderRadius: '6px',
+                                padding: '4px 6px',
+                                color: '#334155',
+                                cursor: 'pointer'
+                              }}
+                              title={`Edit ${pl.name}`}
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteEchelon('platoon', pl, selectedCoId)}
+                              style={{
+                                background: '#fee2e2',
+                                border: '1px solid #fca5a5',
+                                borderRadius: '6px',
+                                padding: '4px 6px',
+                                color: '#dc2626',
+                                cursor: 'pointer'
+                              }}
+                              title={`Delete ${pl.name}`}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          TAB 3: UNIT BRANDING
           ========================================================================= */}
       {activeTab === 'branding' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
@@ -614,79 +1478,65 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             </div>
           </div>
 
-          {/* Official Logo Uploaders */}
+          {/* Official Seals & Logos */}
           <div className="card">
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
                 <ImageIcon size={20} />
-                <span>Official Logo Uploaders</span>
+                <span>Official Seals & Logos</span>
               </div>
-              <span className="badge badge-present">INSIGNIA & SEALS</span>
+              <span className="badge badge-present">BRANDING ASSETS</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               {/* ROTC Unit Seal */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#ffffff', border: '2px solid var(--rotc-yellow-gold)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '4px' }}>
-                    <img src={settings.rotcSealUrl || '/rotc-seal-transparent.png'} alt="ROTC Seal" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--rotc-green-dark)' }}>ROTC Unit Seal</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Displays on ID Cards, Reports, and Top Banners (.PNG transparent recommended)</div>
-                  </div>
+              <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--border-light)', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.75rem' }}>
+                  Official ROTC Unit Seal
                 </div>
-
-                <div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => rotcSealInputRef.current?.click()}
-                    style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Upload size={16} />
-                    <span>Upload Seal</span>
-                  </button>
-                  <input
-                    ref={rotcSealInputRef}
-                    type="file"
-                    accept="image/png, image/jpeg, image/webp"
-                    onChange={(e) => handleImageUpload(e, 'rotcSealUrl')}
-                    style={{ display: 'none' }}
-                  />
+                <div style={{ width: '90px', height: '90px', margin: '0 auto 0.75rem auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src={settings.rotcSealUrl || '/rotc-seal-transparent.png'} alt="ROTC Seal" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
                 </div>
+                <input
+                  type="file"
+                  ref={rotcSealInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleImageUpload(e, 'rotcSealUrl')}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => rotcSealInputRef.current?.click()}
+                  style={{ width: '100%', fontSize: '0.75rem', fontWeight: 700 }}
+                >
+                  <Upload size={14} /> Upload Seal
+                </button>
               </div>
 
               {/* University Logo */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ width: '56px', height: '56px', borderRadius: '50%', background: '#ffffff', border: '2px solid var(--rotc-green-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '4px' }}>
-                    <img src={settings.universityLogoUrl || '/csu-logo.png'} alt="University Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.src = '/rotc-seal-transparent.png'; }} />
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--rotc-green-dark)' }}>University / Institution Logo</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Host university header badge (.PNG / .JPG)</div>
-                  </div>
+              <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--border-light)', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.75rem' }}>
+                  University / College Logo
                 </div>
-
-                <div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => univLogoInputRef.current?.click()}
-                    style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
-                  >
-                    <Upload size={16} />
-                    <span>Upload Logo</span>
-                  </button>
-                  <input
-                    ref={univLogoInputRef}
-                    type="file"
-                    accept="image/png, image/jpeg, image/webp"
-                    onChange={(e) => handleImageUpload(e, 'universityLogoUrl')}
-                    style={{ display: 'none' }}
-                  />
+                <div style={{ width: '90px', height: '90px', margin: '0 auto 0.75rem auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <img src={settings.universityLogoUrl || '/csu-logo.png'} alt="University Logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => { e.target.src = '/rotc-seal-transparent.png'; }} />
                 </div>
+                <input
+                  type="file"
+                  ref={univLogoInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleImageUpload(e, 'universityLogoUrl')}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => univLogoInputRef.current?.click()}
+                  style={{ width: '100%', fontSize: '0.75rem', fontWeight: 700 }}
+                >
+                  <Upload size={14} /> Upload Logo
+                </button>
               </div>
             </div>
           </div>
@@ -694,162 +1544,131 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       )}
 
       {/* =========================================================================
-          TAB 3: DATA & STORAGE
+          TAB 4: DATA & STORAGE
           ========================================================================= */}
       {activeTab === 'storage' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-          {/* Storage Paths & Auto-Save */}
+          {/* Storage Paths & Sync */}
           <div className="card">
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <FileSpreadsheet size={20} />
-                <span>Export Paths & Auto-Save Locations</span>
+                <Database size={20} />
+                <span>Data Directories & Backups</span>
               </div>
-              <span className="badge badge-present">FILE DIRECTORY</span>
+              <span className="badge badge-present">STORAGE ENGINE</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Local Excel Auto-Save Directory Path
+                  Excel Export Directory
                 </label>
                 <input
                   type="text"
                   className="form-control"
                   value={settings.exportDirectory}
                   onChange={(e) => handleChange('exportDirectory', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem', fontFamily: 'monospace' }}
+                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  All synced attendance batch logs automatically write formatted multi-echelon sheets to this folder.
+                  Location where periodic master .xlsx reports are generated.
                 </span>
               </div>
 
-              <div style={{ padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--rotc-green-dark)', textTransform: 'uppercase', marginBottom: '2px' }}>
-                  Database Node Storage Path
-                </div>
-                <div style={{ fontSize: '0.9rem', fontFamily: 'monospace', fontWeight: 700, color: '#1e293b' }}>
-                  ./data/ (cadets.json, attendance.json, settings.json)
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Database Backup, Restore, & Secure Purge */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Database size={20} />
-                <span>Database Backup & Master Maintenance</span>
-              </div>
-              <span className="badge badge-present">DATA OPS</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {/* Export Backup Button */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-dark)' }}>
-                    Full JSON System Backup
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Download complete snapshot (Roster, Logs, Branding & Settings).
-                  </div>
-                </div>
+              {/* JSON Backup & Restore Actions */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
                 <button
                   type="button"
-                  className="btn btn-primary"
-                  onClick={handleExportBackup}
-                  style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  className="btn btn-secondary"
+                  onClick={handleDownloadBackup}
+                  style={{ padding: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem' }}
                 >
                   <Download size={16} />
-                  <span>Download Backup</span>
+                  <span>Download Backup JSON</span>
                 </button>
-              </div>
 
-              {/* Restore Backup Button */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-dark)' }}>
-                    Restore from Backup File
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Upload a previously saved `.json` database file.
-                  </div>
-                </div>
+                <input
+                  type="file"
+                  ref={backupFileInputRef}
+                  accept=".json"
+                  style={{ display: 'none' }}
+                  onChange={handleRestoreBackup}
+                />
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => backupFileInputRef.current?.click()}
-                  style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  style={{ padding: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem' }}
                 >
                   <Upload size={16} />
-                  <span>Upload & Restore</span>
+                  <span>Restore from Backup</span>
                 </button>
-                <input
-                  ref={backupFileInputRef}
-                  type="file"
-                  accept=".json"
-                  onChange={handleRestoreFile}
-                  style={{ display: 'none' }}
-                />
               </div>
+            </div>
+          </div>
 
-              {/* Reset Roster */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--text-dark)' }}>
-                    Re-initialize Master Roster
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Reset roster to standard 1,184 echelon hierarchy template.
-                  </div>
+          {/* Danger Zone: Reset & Purge */}
+          <div className="card" style={{ border: '1px solid #fca5a5', background: '#fffafb' }}>
+            <div className="card-header">
+              <div className="card-title" style={{ fontSize: '1.05rem', color: '#dc2626' }}>
+                <AlertTriangle size={20} />
+                <span>Administrative Danger Zone</span>
+              </div>
+              <span className="badge" style={{ background: '#fee2e2', color: '#dc2626', fontWeight: 800 }}>DANGER</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ padding: '0.9rem', background: '#ffffff', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '0.88rem', marginBottom: '2px' }}>
+                  Reset Master Cadet Directory
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Restore full CSU ROTC 1,184-cadet database to default roster.
                 </div>
                 <button
                   type="button"
-                  className="btn btn-secondary"
                   onClick={() => setIsResetRosterModalOpen(true)}
-                  style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  style={{
+                    background: '#fee2e2',
+                    color: '#dc2626',
+                    border: '1px solid #fca5a5',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
+                  }}
                 >
-                  <RefreshCw size={16} />
-                  <span>Reset Roster</span>
+                  Reset Cadet Roster (1,184)
                 </button>
               </div>
 
-              {/* Master Log Purge (Password Protected) */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem', background: '#fee2e2', borderRadius: '10px', border: '1px solid #fca5a5' }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#b91c1c', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Lock size={15} /> Master Log Purge (Password Protected)
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: '#7f1d1d' }}>
-                    Erase all recorded attendance logs while preserving cadet roster data.
-                  </div>
+              <div style={{ padding: '0.9rem', background: '#ffffff', borderRadius: '10px', border: '1px solid #fecaca' }}>
+                <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '0.88rem', marginBottom: '2px' }}>
+                  Purge Master Attendance Logs
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
+                  Permanently delete all recorded scan logs from database. Requires security PIN.
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setPurgePasswordInput('');
-                    setPurgeErrorMsg('');
                     setIsSecurePurgeModalOpen(true);
+                    setPurgeErrorMsg('');
+                    setPurgePasswordInput('');
                   }}
                   style={{
                     background: '#dc2626',
                     color: '#ffffff',
                     border: 'none',
-                    borderRadius: '6px',
-                    padding: '0.55rem 1rem',
-                    fontSize: '0.82rem',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
                     fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px'
+                    fontSize: '0.8rem',
+                    cursor: 'pointer'
                   }}
                 >
-                  <Trash2 size={16} />
-                  <span>Purge Logs</span>
+                  <Trash2 size={13} style={{ display: 'inline', marginRight: '4px' }} /> Purge Attendance Logs
                 </button>
               </div>
             </div>
@@ -858,110 +1677,84 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       )}
 
       {/* =========================================================================
-          TAB 4: ID PRINTING SETUP
+          TAB 5: ID PRINTING SETUP
           ========================================================================= */}
       {activeTab === 'idprinting' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-          {/* Authorized Signatory Details */}
+          {/* Signatory Profile */}
           <div className="card">
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Award size={20} />
-                <span>Authorized Signatory Profile</span>
+                <Printer size={20} />
+                <span>Command Signatory Profile</span>
               </div>
-              <span className="badge badge-present">SIGNATORY</span>
+              <span className="badge badge-present">CARD SIGNATORY</span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Signatory Full Name (with Rank / Branch)
+                  Authorized Signatory Full Name & Rank
                 </label>
                 <input
                   type="text"
                   className="form-control"
                   value={settings.signatoryName}
                   onChange={(e) => handleChange('signatoryName', e.target.value)}
-                  placeholder="LTC RYAN L MARCELO INF (GSC) PA"
                   style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
               </div>
 
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Signatory Designation / Official Title
+                  Signatory Designation / Position
                 </label>
                 <input
                   type="text"
                   className="form-control"
                   value={settings.signatoryDesignation}
                   onChange={(e) => handleChange('signatoryDesignation', e.target.value)}
-                  placeholder="Commandant, CSU ROTC Unit"
                   style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
               </div>
 
-              {/* Digital Signature Image Uploader */}
-              <div style={{ padding: '0.9rem', background: '#f8fafc', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                  <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>
-                    Digital Signature (.PNG Transparent)
-                  </label>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => signatureInputRef.current?.click()}
-                    style={{ padding: '0.4rem 0.85rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  >
-                    <Upload size={14} />
-                    <span>Upload Signature</span>
-                  </button>
-                  <input
-                    ref={signatureInputRef}
-                    type="file"
-                    accept="image/png, image/jpeg, image/webp"
-                    onChange={(e) => handleImageUpload(e, 'signatureImageUrl')}
-                    style={{ display: 'none' }}
-                  />
-                </div>
-
-                {/* Signature Preview Box */}
-                <div style={{
-                  height: '80px',
-                  background: '#ffffff',
-                  borderRadius: '8px',
-                  border: '1.5px dashed #cbd5e1',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  overflow: 'hidden'
-                }}>
-                  {settings.signatureImageUrl ? (
-                    <img src={settings.signatureImageUrl} alt="Digital Signature" style={{ maxHeight: '65px', maxWidth: '90%', objectFit: 'contain' }} />
-                  ) : (
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8', fontStyle: 'italic' }}>
-                      No signature image uploaded yet (Default official stamp will be used)
-                    </span>
-                  )}
-                </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                  Digital Signature Image
+                </label>
+                <input
+                  type="file"
+                  ref={signatureInputRef}
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => handleImageUpload(e, 'signatureImageUrl')}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => signatureInputRef.current?.click()}
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
+                >
+                  <Upload size={14} /> Upload Transparent PNG Signature
+                </button>
               </div>
             </div>
           </div>
 
-          {/* CR80 Dimensions & Printing Template Preferences */}
+          {/* CR80 Card Dimensions */}
           <div className="card">
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Printer size={20} />
-                <span>CR80 Card Template & Layout Preferences</span>
+                <Sliders size={20} />
+                <span>CR80 Physical Card Specs</span>
               </div>
-              <span className="badge badge-present">CR80 PRINT ENGINE</span>
+              <span className="badge badge-present">CR80 PVC FORMAT</span>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.5rem' }}>
-                  Default ID Card Orientation
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                  Print Orientation
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                   <button
@@ -973,8 +1766,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       border: settings.cardOrientation === 'vertical' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
                       background: settings.cardOrientation === 'vertical' ? '#ecfdf5' : '#ffffff',
                       color: settings.cardOrientation === 'vertical' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
+                      fontWeight: 800,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
@@ -995,8 +1787,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       border: settings.cardOrientation === 'horizontal' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
                       background: settings.cardOrientation === 'horizontal' ? '#ecfdf5' : '#ffffff',
                       color: settings.cardOrientation === 'horizontal' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
+                      fontWeight: 800,
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
@@ -1024,6 +1815,271 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   Calibrated for PVC ID Card Printers (Evolis, Zebra, Fargo) and A4 8-card sheets.
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          DYNAMIC UNIT ECHELON ADD / EDIT MODAL
+          ========================================================================= */}
+      {isEchelonModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 15, 8, 0.75)',
+          backdropFilter: 'blur(5px)',
+          WebkitBackdropFilter: 'blur(5px)',
+          zIndex: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '460px',
+            padding: '1.75rem',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
+            border: `2px solid ${
+              echelonModalConfig.level === 'battalion'
+                ? '#2563eb'
+                : echelonModalConfig.level === 'company'
+                ? '#059669'
+                : '#d97706'
+            }`
+          }}>
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background:
+                    echelonModalConfig.level === 'battalion'
+                      ? '#dbeafe'
+                      : echelonModalConfig.level === 'company'
+                      ? '#d1fae5'
+                      : '#fef3c7',
+                  color:
+                    echelonModalConfig.level === 'battalion'
+                      ? '#1e40af'
+                      : echelonModalConfig.level === 'company'
+                      ? '#065f46'
+                      : '#92400e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}>
+                  {echelonModalConfig.level === 'battalion' && <Shield size={20} />}
+                  {echelonModalConfig.level === 'company' && <Building size={20} />}
+                  {echelonModalConfig.level === 'platoon' && <Users size={20} />}
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-dark)', fontFamily: 'Oswald, sans-serif' }}>
+                    {echelonModalConfig.mode === 'add' ? 'ADD NEW ' : 'EDIT '}
+                    {echelonModalConfig.level.toUpperCase()}
+                  </h3>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    {echelonModalConfig.level === 'battalion' && 'Level 1 Battalion Echelon'}
+                    {echelonModalConfig.level === 'company' && `Level 2 Company under ${activeBattalion?.name || 'Battalion'}`}
+                    {echelonModalConfig.level === 'platoon' && `Level 3 Platoon under ${activeCompany?.name || 'Company'}`}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsEchelonModalOpen(false)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Input Form */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                  Unit Display Name <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder={
+                    echelonModalConfig.level === 'battalion'
+                      ? 'e.g., 3rd Battalion'
+                      : echelonModalConfig.level === 'company'
+                      ? 'e.g., Echo Company'
+                      : 'e.g., 5th Platoon'
+                  }
+                  value={echelonModalConfig.item.name}
+                  onChange={(e) => setEchelonModalConfig(prev => ({
+                    ...prev,
+                    item: { ...prev.item, name: e.target.value }
+                  }))}
+                  style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  autoFocus
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Short Code / Acronym
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g., 3BN, ECHO, 5PLTN"
+                    value={echelonModalConfig.item.shortCode}
+                    onChange={(e) => setEchelonModalConfig(prev => ({
+                      ...prev,
+                      item: { ...prev.item, shortCode: e.target.value.toUpperCase() }
+                    }))}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Target Cadet Quota
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control"
+                    placeholder="e.g., 592, 148, 37"
+                    value={echelonModalConfig.item.targetQuota}
+                    onChange={(e) => setEchelonModalConfig(prev => ({
+                      ...prev,
+                      item: { ...prev.item, targetQuota: parseInt(e.target.value) || 0 }
+                    }))}
+                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Action Buttons */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsEchelonModalOpen(false)}
+                style={{ padding: '0.75rem', fontWeight: 700 }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSaveEchelonModal}
+                style={{
+                  background:
+                    echelonModalConfig.level === 'battalion'
+                      ? 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)'
+                      : echelonModalConfig.level === 'company'
+                      ? 'linear-gradient(135deg, #065f46 0%, #059669 100%)'
+                      : 'linear-gradient(135deg, #92400e 0%, #d97706 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.75rem',
+                  fontWeight: 800,
+                  fontSize: '0.92rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+                }}
+              >
+                Save Echelon
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          DYNAMIC UNIT ECHELON DELETE CONFIRMATION MODAL
+          ========================================================================= */}
+      {isEchelonDeleteModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 15, 8, 0.8)',
+          backdropFilter: 'blur(5px)',
+          WebkitBackdropFilter: 'blur(5px)',
+          zIndex: 750,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '420px',
+            padding: '1.75rem',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.45)',
+            border: '2px solid #fca5a5'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ width: '42px', height: '42px', borderRadius: '10px', background: '#fee2e2', color: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Trash2 size={22} />
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#991b1b', fontFamily: 'Oswald, sans-serif' }}>
+                  DELETE {echelonDeleteConfig.level.toUpperCase()}?
+                </h3>
+                <span style={{ fontSize: '0.75rem', color: '#7f1d1d' }}>Permanent Structure Removal</span>
+              </div>
+            </div>
+
+            <p style={{ fontSize: '0.88rem', color: '#4b5563', lineHeight: 1.5, marginBottom: '1.25rem' }}>
+              Are you sure you want to delete <strong>{echelonDeleteConfig.item.name}</strong>?
+              {echelonDeleteConfig.level === 'battalion' && ' All child companies and platoons belonging to this battalion will also be removed.'}
+              {echelonDeleteConfig.level === 'company' && ' All child platoons under this company will also be removed.'}
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setIsEchelonDeleteModalOpen(false)}
+                style={{ padding: '0.7rem', fontWeight: 700 }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmDeleteEchelon}
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.7rem',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)'
+                }}
+              >
+                Delete Unit
+              </button>
             </div>
           </div>
         </div>

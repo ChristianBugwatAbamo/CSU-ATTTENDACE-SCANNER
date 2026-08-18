@@ -373,17 +373,29 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
         {/* Battalion Selector */}
         <div>
           <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-            <Layers size={14} /> Battalion *
+            <Layers size={14} /> Battalion / Unit *
           </label>
           <select
             className="setup-select"
             value={battalion}
-            onChange={(e) => setBattalion(e.target.value)}
+            onChange={(e) => {
+              const newBn = e.target.value;
+              setBattalion(newBn);
+              if (newBn === 'CADET OFFICERS') {
+                if (!['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
+                  setCompany('1CL');
+                }
+                setPlatoon('Officer Corps');
+              } else if (['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
+                setCompany('Alpha Company');
+                setPlatoon('1st Platoon');
+              }
+            }}
           >
             <option value="1st Battalion">1st Battalion</option>
             <option value="2nd Battalion">2nd Battalion</option>
-            <option value="Brigade HQ">Brigade HQ</option>
-            <option value="All Battalions">All Battalions</option>
+            <option value="CADET OFFICERS">CADET OFFICERS</option>
+            <option value="All Battalions">All Units / Battalions</option>
           </select>
         </div>
 
@@ -391,36 +403,60 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-              <Building size={14} /> Company *
+              <Building size={14} /> {battalion === 'CADET OFFICERS' ? 'Officer Class *' : 'Company *'}
             </label>
             <select
               className="setup-select"
               value={company}
               onChange={(e) => setCompany(e.target.value)}
             >
-              <option value="Alpha Company">Alpha Company</option>
-              <option value="Bravo Company">Bravo Company</option>
-              <option value="Charlie Company">Charlie Company</option>
-              <option value="Delta Company">Delta Company</option>
-              <option value="Headquarters">Headquarters (HQ)</option>
-              <option value="All Companies">All Companies</option>
+              {battalion === 'CADET OFFICERS' ? (
+                <>
+                  <option value="1CL">1CL (First Class Officers)</option>
+                  <option value="2CL">2CL (Second Class Officers)</option>
+                  <option value="3CL">3CL (Third Class Officers)</option>
+                  <option value="4CL">4CL (Fourth Class Officers)</option>
+                  <option value="ASPIRANT">ASPIRANT (Officer Candidates)</option>
+                  <option value="All Officer Classes">All Officer Classes</option>
+                </>
+              ) : (
+                <>
+                  <option value="Alpha Company">Alpha Company</option>
+                  <option value="Bravo Company">Bravo Company</option>
+                  <option value="Charlie Company">Charlie Company</option>
+                  <option value="Delta Company">Delta Company</option>
+                  <option value="Headquarters">Headquarters (HQ)</option>
+                  <option value="All Companies">All Companies</option>
+                </>
+              )}
             </select>
           </div>
 
           <div>
             <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-              <Users size={14} /> Platoon *
+              <Users size={14} /> {battalion === 'CADET OFFICERS' ? 'Formation / Staff *' : 'Platoon *'}
             </label>
             <select
               className="setup-select"
               value={platoon}
               onChange={(e) => setPlatoon(e.target.value)}
             >
-              <option value="1st Platoon">1st Platoon</option>
-              <option value="2nd Platoon">2nd Platoon</option>
-              <option value="3rd Platoon">3rd Platoon</option>
-              <option value="4th Platoon">4th Platoon</option>
-              <option value="All Platoons">All Platoons</option>
+              {battalion === 'CADET OFFICERS' ? (
+                <>
+                  <option value="Officer Corps">Officer Corps</option>
+                  <option value="Command Staff">Command Staff</option>
+                  <option value="Special Staff">Special Staff</option>
+                  <option value="All Officers">All Officers</option>
+                </>
+              ) : (
+                <>
+                  <option value="1st Platoon">1st Platoon</option>
+                  <option value="2nd Platoon">2nd Platoon</option>
+                  <option value="3rd Platoon">3rd Platoon</option>
+                  <option value="4th Platoon">4th Platoon</option>
+                  <option value="All Platoons">All Platoons</option>
+                </>
+              )}
             </select>
           </div>
         </div>

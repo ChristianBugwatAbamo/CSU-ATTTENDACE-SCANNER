@@ -74,22 +74,22 @@ const MIDDLE_INITIALS = ['A.', 'B.', 'C.', 'D.', 'E.', 'F.', 'G.', 'H.', 'I.', '
 function generateFullEchelonRoster() {
   const roster = [];
 
-  // 1. Brigade HQ Staff Officers (12 Key Staff)
-  const brigadeStaff = [
-    { id: "221-00101", name: "BAUTISTA, MARK G.", rank: "Cadet COL (ROTC) 1CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "Corps Commander" },
-    { id: "221-00102", name: "MENDOZA, CLARA H.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "Deputy Commander" },
-    { id: "221-00103", name: "RAMOS, DANIEL I.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "S1 Brigade" },
-    { id: "221-00104", name: "CASTILLO, ELENA J.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "S2 Brigade" },
-    { id: "221-00105", name: "GONZALES, ARTH K.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "S3 Brigade" },
-    { id: "221-00106", name: "VILLANUEVA, ROSA L.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "S4 Brigade" },
-    { id: "221-00107", name: "ABAMO, CHRISTIAN B.", rank: "Cadet CPT (ROTC) 2CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "S7 Brigade" },
-    { id: "221-00108", name: "AQUINO, JOSHUA D.", rank: "Cadet CPT (ROTC) 3CL", battalion: "Brigade HQ", company: "Headquarters", platoon: "Brigade Staff", type: "Cadet Officer", designation: "Adjutant" },
+  // 1. Cadet Officers (Key Staff & Commanders)
+  const cadetOfficers = [
+    { id: "221-00101", name: "BAUTISTA, MARK G.", rank: "Cadet COL (ROTC) 1CL", battalion: "CADET OFFICERS", company: "1CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "Corps Commander" },
+    { id: "221-00102", name: "MENDOZA, CLARA H.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "CADET OFFICERS", company: "1CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "Deputy Commander" },
+    { id: "221-00103", name: "RAMOS, DANIEL I.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "S1 Brigade" },
+    { id: "221-00104", name: "CASTILLO, ELENA J.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "S2 Brigade" },
+    { id: "221-00105", name: "GONZALES, ARTH K.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "S3 Brigade" },
+    { id: "221-00106", name: "VILLANUEVA, ROSA L.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "S4 Brigade" },
+    { id: "221-00107", name: "ABAMO, CHRISTIAN B.", rank: "Cadet CPT (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "S7 Brigade" },
+    { id: "221-00108", name: "AQUINO, JOSHUA D.", rank: "Cadet CPT (ROTC) 3CL", battalion: "CADET OFFICERS", company: "3CL", platoon: "Officer Corps", type: "Cadet Officer", designation: "Adjutant" },
     // Battalion Commanders
     { id: "221-00109", name: "NAVARRO, MICHAEL E.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "1st Battalion", company: "Headquarters", platoon: "Battalion Staff", type: "Cadet Officer", designation: "1st Bn Commander" },
     { id: "221-00110", name: "FERNANDEZ, GABRIEL F.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "2nd Battalion", company: "Headquarters", platoon: "Battalion Staff", type: "Cadet Officer", designation: "2nd Bn Commander" }
   ];
 
-  brigadeStaff.forEach(staff => roster.push(staff));
+  cadetOfficers.forEach(staff => roster.push(staff));
 
   // 2. Generate 1,184 Basic Cadets (2 Battalions x 4 Companies x 4 Platoons x 37 Cadets)
   const battalions = ['1st Battalion', '2nd Battalion'];
@@ -228,7 +228,10 @@ async function exportToExcel(records, sessionName = "Drill Session") {
     const directName = (rec.name && rec.name !== 'UNREGISTERED CADET' && rec.name.trim().length > 0)
       ? rec.name.trim()
       : (rec.cadetId ? `CADET ${rec.cadetId}` : 'CADET');
-    const directBn = rec.battalion && rec.battalion !== 'N/A' ? rec.battalion : '1st Battalion';
+    let directBn = rec.battalion && rec.battalion !== 'N/A' ? rec.battalion : '1st Battalion';
+    if (directBn === 'Brigade HQ' || rec.type === 'Cadet Officer' || (rec.rank && (rec.rank.includes('1CL') || rec.rank.includes('2CL') || rec.rank.includes('3CL') || rec.rank.includes('4CL') || rec.rank.includes('ASPIRANT')) && !directBn.includes('Battalion'))) {
+      directBn = 'CADET OFFICERS';
+    }
     const directCo = rec.company && rec.company !== 'N/A' ? rec.company : 'Alpha Company';
     const directPl = rec.platoon && rec.platoon !== 'N/A' ? rec.platoon : '1st Platoon';
 
