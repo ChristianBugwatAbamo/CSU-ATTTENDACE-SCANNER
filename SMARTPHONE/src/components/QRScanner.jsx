@@ -1,7 +1,50 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, CheckCircle2, AlertTriangle, Shield } from 'lucide-react';
+import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
+import ConfirmModal from './ConfirmModal';
+
+const PLATOON_QUOTA = 37;
+
+// Helper to filter scans for active unit context
+const getActiveUnitScans = (scans, setup, mode) => {
+  if (!Array.isArray(scans)) return [];
+  const activeBn = (setup?.battalion || '1st Battalion').trim();
+  const activeCoy = (setup?.company || 'Alpha Company').trim();
+  const activePltn = (setup?.platoon || '1st Platoon').trim();
+  const activeMode = mode || setup?.scanMode || 'Time-In';
+
+  return scans.filter(scan => {
+    if (!scan.cadetId) return false;
+    const id = String(scan.cadetId).trim();
+    if (id.startsWith('{') || id.startsWith('[') || id.startsWith('http')) return false;
+
+    // Battalion match
+    const matchBn = !setup?.battalion ||
+      setup.battalion === 'All Battalions' ||
+      scan.battalion === setup.battalion ||
+      (scan.sessionName || '').includes(setup.battalion);
+
+    // Company match
+    const setupCoClean = activeCoy.replace(' Company', '');
+    const matchCo = !setup?.company ||
+      setup.company === 'All Companies' ||
+      (scan.company || '').includes(setupCoClean) ||
+      (scan.sessionName || '').includes(setupCoClean);
+
+    // Platoon match
+    const setupPlClean = activePltn.replace(' Platoon', '');
+    const matchPl = !setup?.platoon ||
+      setup.platoon === 'All Platoons' ||
+      (scan.platoon || '').includes(setupPlClean) ||
+      (scan.sessionName || '').includes(setupPlClean);
+
+    // Scan Mode match (Time-In vs Time-Out)
+    const matchMode = !activeMode || scan.scanMode === activeMode;
+
+    return matchBn && matchCo && matchPl && matchMode;
+  });
+};
 
 export default function QRScanner({
   onScanSuccess,
@@ -17,25 +60,25 @@ export default function QRScanner({
   const [lastScanToast, setLastScanToast] = useState(null);
   const [scanFlash, setScanFlash] = useState(null); // 'success' | 'warning' | null
 
+  // Manual override candidate for scanning beyond quota
+  const [overrideCandidate, setOverrideCandidate] = useState(null);
+
   // Real-time Ref Set of scanned Cadet IDs to prevent stale closures and rapid frame duplicates
   const scannedIdsSetRef = useRef(new Set());
+
+  // Scoped active scans count
+  const activeUnitScans = getActiveUnitScans(activeSessionScans, sessionSetup, scanMode);
+  const activeScannedCount = activeUnitScans.length;
+  const isCapacityFull = activeScannedCount >= PLATOON_QUOTA;
 
   // Keep Ref Set synchronized with activeSessionScans for the current Unit Context
   useEffect(() => {
     const currentSet = new Set();
-    if (Array.isArray(activeSessionScans)) {
-      activeSessionScans.forEach(scan => {
-        if (!scan.cadetId) return;
-
-        // Scope check for current battalion, company, platoon, and scan mode
-        const matchBn = !sessionSetup?.battalion || sessionSetup.battalion === 'All Battalions' || scan.battalion === sessionSetup.battalion || (scan.sessionName || '').includes(sessionSetup.battalion);
-        const setupCoClean = (sessionSetup?.company || '').replace(' Company', '');
-        const matchCo = !sessionSetup?.company || sessionSetup.company === 'All Companies' || (scan.company || '').includes(setupCoClean) || (scan.sessionName || '').includes(setupCoClean);
-        if (scan.cadetId) currentSet.add(scan.cadetId);
-      });
-    }
+    activeUnitScans.forEach(scan => {
+      if (scan.cadetId) currentSet.add(String(scan.cadetId).trim().toUpperCase());
+    });
     scannedIdsSetRef.current = currentSet;
-  }, [activeSessionScans]);
+  }, [activeSessionScans, sessionSetup, scanMode]);
 
   // Audio Synthesizer Beep
   const playBeep = (freq = 880, type = 'sine', duration = 0.15) => {
@@ -194,7 +237,6 @@ export default function QRScanner({
   }, [facingMode]);
 
   const handleScannedCode = (decodedText) => {
-    console.log("Scanned QR Text:", decodedText);
     if (!decodedText) return;
 
     let data = decodedText;
@@ -238,39 +280,7 @@ export default function QRScanner({
 
     if (!rawId) return;
 
-    // STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
-    if (scannedIdsSetRef.current.has(rawId)) {
-      playBeep(400, 'sawtooth', 0.25);
-      triggerHaptic([200, 100, 200, 100, 200]); // Strong vibration alert for duplicate
-      setScanFlash('warning');
-      setTimeout(() => setScanFlash(null), 850);
-
-      const dupHeading = embeddedName
-        ? formatCadetHeading({ name: embeddedName, cadetId: rawId })
-        : formatCadetHeading({ cadetId: rawId });
-
-      setLastScanToast({
-        type: 'warning',
-        title: 'DUPLICATE CADET QR BLOCKED',
-        cadetId: dupHeading,
-        message: `Cadet ${rawId} has ALREADY been scanned in this session!`
-      });
-      setTimeout(() => setLastScanToast(null), 3000);
-      return;
-    }
-
-    // Immediately add to Real-time Ref Set to block rapid camera callbacks
-    scannedIdsSetRef.current.add(rawId);
-
-    // Success feedback
-    playBeep(1046.5, 'sine', 0.15); // High C pitch beep
-    triggerHaptic([80, 40, 80]);
-    setScanFlash('success');
-    setTimeout(() => setScanFlash(null), 850);
-
     const activeMode = scanMode || 'Time-In';
-
-    // DIRECT NAME PARSING: Use the real name encoded in the QR code directly!
     const scanRecord = {
       cadetId: rawId,
       name: embeddedName || '',
@@ -282,19 +292,101 @@ export default function QRScanner({
       platoon: sessionSetup ? sessionSetup.platoon : '1st Platoon',
       status: activeMode === 'Time-In' ? 'TIME-IN RECORDED' : 'TIME-OUT RECORDED'
     };
+    const headingName = formatCadetHeading(scanRecord);
+
+    // 1. STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
+    if (scannedIdsSetRef.current.has(rawId)) {
+      playBeep(400, 'sawtooth', 0.25);
+      triggerHaptic([200, 100, 200, 100, 200]);
+      setScanFlash('warning');
+      setTimeout(() => setScanFlash(null), 850);
+
+      setLastScanToast({
+        type: 'warning',
+        title: 'DUPLICATE CADET QR BLOCKED',
+        cadetId: headingName,
+        message: `Cadet ${rawId} has ALREADY been scanned in this session!`
+      });
+      setTimeout(() => setLastScanToast(null), 3000);
+      return;
+    }
+
+    // 2. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED)
+    if (scannedIdsSetRef.current.size >= PLATOON_QUOTA) {
+      playBeep(300, 'sawtooth', 0.35);
+      triggerHaptic([300, 100, 300, 100, 300]);
+      setScanFlash('warning');
+      setTimeout(() => setScanFlash(null), 850);
+
+      setLastScanToast({
+        type: 'warning',
+        title: `CAPACITY REACHED (${PLATOON_QUOTA}/${PLATOON_QUOTA})`,
+        cadetId: headingName,
+        message: `Maximum quota of ${PLATOON_QUOTA} cadets is reached for ${sessionSetup?.platoon || '1st Platoon'}! Scan blocked.`
+      });
+      setTimeout(() => setLastScanToast(null), 4000);
+
+      // Offer manual override option modal
+      setOverrideCandidate({
+        scanRecord,
+        headingName,
+        rawId
+      });
+      return;
+    }
+
+    // 3. UNDER CAPACITY: Process normal scan
+    scannedIdsSetRef.current.add(rawId);
+
+    // Success feedback
+    playBeep(1046.5, 'sine', 0.15); // High C pitch beep
+    triggerHaptic([80, 40, 80]);
+    setScanFlash('success');
+    setTimeout(() => setScanFlash(null), 850);
 
     onScanSuccess(scanRecord);
-
-    const headingName = formatCadetHeading(scanRecord);
 
     setLastScanToast({
       type: 'success',
       title: `${activeMode.toUpperCase()} CONFIRMED`,
       cadetId: headingName,
-      message: `ID: ${rawId} • ${sessionSetup?.platoon || '1st Platoon'} recorded.`
+      message: `ID: ${rawId} • ${sessionSetup?.platoon || '1st Platoon'} (${scannedIdsSetRef.current.size}/${PLATOON_QUOTA})`
     });
 
     setTimeout(() => setLastScanToast(null), 3000);
+  };
+
+  // Handle Manual Override confirmation when capacity is full
+  const handleConfirmOverride = () => {
+    if (!overrideCandidate) return;
+    const { scanRecord, rawId, headingName } = overrideCandidate;
+
+    const extraRecord = {
+      ...scanRecord,
+      designation: 'Extra / Visitor Cadet'
+    };
+
+    scannedIdsSetRef.current.add(rawId);
+    playBeep(1046.5, 'sine', 0.15);
+    triggerHaptic([80, 40, 80]);
+    setScanFlash('success');
+    setTimeout(() => setScanFlash(null), 850);
+
+    onScanSuccess(extraRecord);
+
+    setLastScanToast({
+      type: 'success',
+      title: 'EXTRA CADET RECORDED',
+      cadetId: headingName,
+      message: `Cadet ${rawId} recorded as Extra / Visitor Cadet.`
+    });
+    setTimeout(() => setLastScanToast(null), 3500);
+
+    setOverrideCandidate(null);
+  };
+
+  const handleCancelOverride = () => {
+    setOverrideCandidate(null);
   };
 
   // Formatted active unit echelon banner text
@@ -325,8 +417,26 @@ export default function QRScanner({
             <span>FIELD QR SCANNER</span>
           </div>
 
-          {/* Top-Right Badges: TIME-IN MODE & LIVE Indicator */}
+          {/* Top-Right Badges: CAPACITY PILL, TIME-IN MODE & LIVE Indicator */}
           <div className="scanner-topbar-badges">
+            {/* Platoon Capacity Pill */}
+            <span style={{
+              fontSize: '0.68rem',
+              fontWeight: 800,
+              padding: '3px 8px',
+              borderRadius: '9999px',
+              background: isCapacityFull ? '#fee2e2' : 'rgba(0, 0, 0, 0.45)',
+              color: isCapacityFull ? '#dc2626' : '#ffffff',
+              border: isCapacityFull ? '1px solid #f87171' : '1px solid rgba(255, 255, 255, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              whiteSpace: 'nowrap'
+            }}>
+              <Users size={12} />
+              <span>{activeScannedCount}/{PLATOON_QUOTA}</span>
+            </span>
+
             <span className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : 'mode-timeout'}`}>
               {scanMode === 'Time-In' ? '🟢 TIME-IN' : '🟡 TIME-OUT'}
             </span>
@@ -337,6 +447,33 @@ export default function QRScanner({
             </div>
           </div>
         </div>
+
+        {/* Capacity Full Warning Banner on Viewfinder */}
+        {isCapacityFull && (
+          <div style={{
+            position: 'absolute',
+            top: '56px',
+            left: '12px',
+            right: '12px',
+            background: 'rgba(185, 28, 28, 0.92)',
+            color: '#ffffff',
+            padding: '6px 10px',
+            borderRadius: '8px',
+            fontSize: '0.72rem',
+            fontWeight: 800,
+            textAlign: 'center',
+            zIndex: 20,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
+          }}>
+            <AlertTriangle size={13} color="#fef08a" />
+            <span>CAPACITY FULL ({activeScannedCount}/{PLATOON_QUOTA}) — SCANS BLOCKED</span>
+          </div>
+        )}
 
         {/* Toast Feedback */}
         {lastScanToast && (
@@ -368,7 +505,9 @@ export default function QRScanner({
 
           {/* Floating Guide Prompt below target reticle */}
           <div className="scanner-floating-guide">
-            Point camera at Cadet QR Code ID card
+            {isCapacityFull
+              ? 'Platoon capacity reached (37/37 cadets)'
+              : 'Point camera at Cadet QR Code ID card'}
           </div>
         </div>
 
@@ -391,6 +530,18 @@ export default function QRScanner({
           </div>
         )}
       </div>
+
+      {/* Manual Override Confirmation Modal for Extra / Visitor Cadet */}
+      <ConfirmModal
+        isOpen={!!overrideCandidate}
+        title="⚠️ Platoon Quota Full (37/37)"
+        message={`The maximum quota of 37 cadets has already been scanned for ${sessionSetup?.platoon || '1st Platoon'}. Do you want to record ${overrideCandidate?.headingName || overrideCandidate?.rawId} as an Extra / Visitor Cadet?`}
+        confirmLabel="Allow Extra Cadet"
+        cancelLabel="Cancel / Block"
+        onConfirm={handleConfirmOverride}
+        onCancel={handleCancelOverride}
+        isDestructive={false}
+      />
     </div>
   );
 }

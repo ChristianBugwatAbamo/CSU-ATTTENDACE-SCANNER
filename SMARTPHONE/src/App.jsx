@@ -29,7 +29,7 @@ export default function App() {
 
   // Session Setup parameters
   const [sessionSetup, setSessionSetup] = useState({
-    dutyOfficer: 'C/CPT Santos',
+    dutyOfficer: 'C/LT COL MARIA L SANTOS (ROTC) 1CL',
     sessionDate: new Date().toISOString().split('T')[0],
     sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     battalion: '1st Battalion',

@@ -14,7 +14,7 @@ export default function AboutUs() {
           />
         </div>
         <div className="about-hero-titles">
-          <span className="about-echelon-tag">ARESCOM • 15TH RCDG • 1501ST CDC</span>
+          <span className="about-echelon-tag">ARESCOM • 15th RCDG • 1501st CDC</span>
           <h1 className="about-unit-title">Caraga State University</h1>
           <h2 className="about-unit-subtitle">ROTC Unit Attendance System</h2>
           <div className="about-version-badge">
@@ -115,7 +115,7 @@ export default function AboutUs() {
         <div className="credits-body">
           <div className="credit-row">
             <span className="credit-role">Commanding Unit:</span>
-            <span className="credit-name">1501st Community Defense Center (CDC), 15th RCDG, ARESCOM</span>
+            <span className="credit-name">Caraga State University ROTC Unit • 1501st Community Defense Center (CDC) • 15th RCDG • ARESCOM</span>
           </div>
           <div className="credit-row">
             <span className="credit-role">Host Institution:</span>

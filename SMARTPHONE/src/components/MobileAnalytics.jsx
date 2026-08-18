@@ -138,12 +138,22 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 fontWeight: 800,
                 padding: '3px 10px',
                 borderRadius: '9999px',
-                background: activeScannedCount >= PLATOON_CAPACITY ? '#d1fae5' : '#fef3c7',
-                color: activeScannedCount >= PLATOON_CAPACITY ? '#065f46' : '#92400e',
-                border: `1px solid ${activeScannedCount >= PLATOON_CAPACITY ? '#6ee7b7' : '#fde68a'}`,
+                background: activeScannedCount > PLATOON_CAPACITY
+                  ? '#fee2e2'
+                  : (activeScannedCount === PLATOON_CAPACITY ? '#d1fae5' : '#fef3c7'),
+                color: activeScannedCount > PLATOON_CAPACITY
+                  ? '#b91c1c'
+                  : (activeScannedCount === PLATOON_CAPACITY ? '#065f46' : '#92400e'),
+                border: `1px solid ${
+                  activeScannedCount > PLATOON_CAPACITY
+                    ? '#f87171'
+                    : (activeScannedCount === PLATOON_CAPACITY ? '#6ee7b7' : '#fde68a')
+                }`,
                 transition: 'all 0.4s ease'
               }}>
-                {activeScannedCount >= PLATOON_CAPACITY ? '100% COMPLETE' : `${remaining} REMAINING`}
+                {activeScannedCount > PLATOON_CAPACITY
+                  ? `OVER CAPACITY (${activeScannedCount}/${PLATOON_CAPACITY})`
+                  : (activeScannedCount === PLATOON_CAPACITY ? `CAPACITY REACHED (${PLATOON_CAPACITY}/${PLATOON_CAPACITY})` : `${remaining} REMAINING`)}
               </span>
             </div>
           </div>
@@ -163,9 +173,11 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               style={{
                 width: `${progressPercent}%`,
                 height: '100%',
-                background: activeScannedCount >= PLATOON_CAPACITY
-                  ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
-                  : 'linear-gradient(90deg, #064e2e 0%, #059669 50%, var(--rotc-yellow-gold) 100%)',
+                background: activeScannedCount > PLATOON_CAPACITY
+                  ? 'linear-gradient(90deg, #dc2626 0%, #ef4444 100%)'
+                  : (activeScannedCount === PLATOON_CAPACITY
+                    ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
+                    : 'linear-gradient(90deg, #064e2e 0%, #059669 50%, var(--rotc-yellow-gold) 100%)'),
                 borderRadius: '9999px',
                 transition: 'width 0.8s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.5s ease'
               }}
@@ -174,7 +186,14 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px', fontWeight: 600 }}>
             <span>0 Cadets</span>
-            <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 800 }}>{progressPercent}% of {activePltn}</span>
+            <span style={{
+              color: activeScannedCount > PLATOON_CAPACITY ? '#dc2626' : (activeScannedCount === PLATOON_CAPACITY ? '#059669' : 'var(--rotc-green-dark)'),
+              fontWeight: 800
+            }}>
+              {activeScannedCount > PLATOON_CAPACITY
+                ? `Over Quota (${activeScannedCount}/${PLATOON_CAPACITY})`
+                : (activeScannedCount === PLATOON_CAPACITY ? '100% (Quota Reached)' : `${progressPercent}% of ${activePltn}`)}
+            </span>
             <span>37 Cadets Quota</span>
           </div>
         </div>
