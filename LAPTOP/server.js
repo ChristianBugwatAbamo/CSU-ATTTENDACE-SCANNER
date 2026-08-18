@@ -15,10 +15,41 @@ const DATA_DIR = path.join(__dirname, 'data');
 const EXCEL_DIR = path.join(__dirname, 'desktop_excel_reports');
 const CADETS_FILE = path.join(DATA_DIR, 'cadets.json');
 const ATTENDANCE_FILE = path.join(DATA_DIR, 'attendance.json');
+const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 // Ensure directories exist
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(EXCEL_DIR)) fs.mkdirSync(EXCEL_DIR, { recursive: true });
+
+const DEFAULT_SETTINGS = {
+  formationCutoffTime: "07:30",
+  formationTardyGrace: 15,
+  cadetQuotaPerPlatoon: 37,
+  commandingOfficer: "LTC RYAN L MARCELO INF (GSC) PA",
+  commandingOfficerTitle: "Commandant, CSU ROTC Unit",
+  unitName: "1501st CDC ROTC Unit",
+  parentCommand: "15th RCDG, ARESCOM, Philippine Army",
+  hostInstitution: "Caraga State University (CSU Main Campus, Ampayon, Butuan City)",
+  exportDirectory: "desktop_excel_reports",
+  autoBackupEnabled: true
+};
+
+function getSettings() {
+  if (!fs.existsSync(SETTINGS_FILE)) {
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(DEFAULT_SETTINGS, null, 2));
+    return DEFAULT_SETTINGS;
+  }
+  try {
+    const raw = fs.readFileSync(SETTINGS_FILE, 'utf-8');
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch (_) {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function saveSettings(settings) {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+}
 
 // First names and Filipino Surnames bank for realistic roster generation
 const SURNAMES = [
@@ -438,6 +469,68 @@ app.get('/api/reports/download/:filename', (req, res) => {
     return res.status(404).send("Report file not found.");
   }
   res.download(filePath);
+});
+
+// System Settings API Endpoints
+app.get('/api/settings', (req, res) => {
+  res.json(getSettings());
+});
+
+app.post('/api/settings', (req, res) => {
+  try {
+    const updated = { ...getSettings(), ...req.body };
+    saveSettings(updated);
+    res.json({ success: true, settings: updated });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save settings." });
+  }
+});
+
+// Database Backup and Restore Endpoints
+app.get('/api/backup', (req, res) => {
+  try {
+    const backupPayload = {
+      exportTimestamp: new Date().toISOString(),
+      systemVersion: "1.0.0",
+      settings: getSettings(),
+      cadetRoster: getCadets(),
+      attendanceLogs: getAttendanceLogs()
+    };
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename=CSU_ROTC_DATABASE_BACKUP_${new Date().toISOString().slice(0, 10)}.json`);
+    res.json(backupPayload);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to generate backup." });
+  }
+});
+
+app.post('/api/backup/restore', (req, res) => {
+  try {
+    const { cadetRoster, cadets, attendanceLogs, settings } = req.body;
+    const restoredCadets = cadetRoster || cadets;
+    if (Array.isArray(restoredCadets) && restoredCadets.length > 0) {
+      fs.writeFileSync(CADETS_FILE, JSON.stringify(restoredCadets, null, 2));
+    }
+    if (Array.isArray(attendanceLogs)) {
+      saveAttendanceLogs(attendanceLogs);
+    }
+    if (settings && typeof settings === 'object') {
+      saveSettings(settings);
+    }
+    res.json({ success: true, message: "Database restored successfully." });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to restore database: " + err.message });
+  }
+});
+
+app.post('/api/roster/reset', (req, res) => {
+  try {
+    const defaultRoster = generateFullEchelonRoster();
+    fs.writeFileSync(CADETS_FILE, JSON.stringify(defaultRoster, null, 2));
+    res.json({ success: true, count: defaultRoster.length, message: "Cadet roster reset to default template." });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to reset cadet roster." });
+  }
 });
 
 // Serve Smartphone scanner web app statically under /mobile

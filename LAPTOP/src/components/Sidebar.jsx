@@ -1,12 +1,13 @@
 import React from 'react';
-import { LayoutDashboard, Users, QrCode, FileSpreadsheet, Camera } from 'lucide-react';
+import { LayoutDashboard, Users, QrCode, FileSpreadsheet, Camera, Settings } from 'lucide-react';
 
 export default function Sidebar({ activeTab, setActiveTab, serverOnline }) {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard & Analytics', icon: LayoutDashboard },
     { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
     { id: 'scanner', label: 'Webcam Batch Scanner', icon: Camera },
-    { id: 'synclogs', label: 'Attendance & Excel Reports', icon: FileSpreadsheet }
+    { id: 'synclogs', label: 'Attendance & Excel Reports', icon: FileSpreadsheet },
+    { id: 'settings', label: 'Unit & System Settings', icon: Settings }
   ];
 
   return (

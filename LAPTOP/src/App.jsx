@@ -5,6 +5,7 @@ import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IDGenerator from './components/IDGenerator';
 import ScannerPage from './components/ScannerPage';
 import SyncLogs from './components/SyncLogs';
+import AdminSettings from './components/AdminSettings';
 import BatchScannerModal from './components/BatchScannerModal';
 import { Camera, QrCode } from 'lucide-react';
 
@@ -114,6 +115,15 @@ export default function App() {
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
               onClearLogs={handleClearAttendance}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <AdminSettings
+              cadets={cadets}
+              attendanceLogs={attendanceLogs}
+              onRefresh={fetchData}
+              serverOnline={serverOnline}
             />
           )}
         </div>
