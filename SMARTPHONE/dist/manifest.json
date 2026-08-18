@@ -1,0 +1,21 @@
+{
+  "name": "CSU ROTC Duty Officer Scanner",
+  "short_name": "ROTC Scanner",
+  "description": "Offline-ready QR Attendance Scanner for CSU ROTC Unit",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#064e2e",
+  "theme_color": "#064e2e",
+  "icons": [
+    {
+      "src": "./rotc-seal-transparent.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./rotc-seal-transparent.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

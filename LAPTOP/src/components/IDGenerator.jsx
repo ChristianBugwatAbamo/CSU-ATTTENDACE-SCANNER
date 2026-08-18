@@ -1,81 +1,108 @@
-import React, { useState } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Building, Users } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers } from 'lucide-react';
+import IDCardPreview from './IDCardPreview';
+import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
+
+export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
 
 export default function IDGenerator({ cadets = [] }) {
   // Category state: 'basic' | 'officer'
   const [category, setCategory] = useState('basic');
 
+  // Dynamic Ranks and Designations loaded from settings
+  const [officerRanks, setOfficerRanks] = useState(() => {
+    try {
+      const local = localStorage.getItem('csu_rotc_admin_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.officerRanks && parsed.officerRanks.length > 0) return parsed.officerRanks;
+      }
+    } catch (e) {}
+    return DEFAULT_OFFICER_RANKS;
+  });
+
+  const [officerDesignations, setOfficerDesignations] = useState(() => {
+    try {
+      const local = localStorage.getItem('csu_rotc_admin_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.officerDesignations && parsed.officerDesignations.length > 0) return parsed.officerDesignations;
+      }
+    } catch (e) {}
+    return DEFAULT_OFFICER_DESIGNATIONS;
+  });
+
+  useEffect(() => {
+    const syncOptions = () => {
+      try {
+        const local = localStorage.getItem('csu_rotc_admin_settings');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (parsed.officerRanks && parsed.officerRanks.length > 0) {
+            setOfficerRanks(parsed.officerRanks);
+          }
+          if (parsed.officerDesignations && parsed.officerDesignations.length > 0) {
+            setOfficerDesignations(parsed.officerDesignations);
+          }
+        }
+      } catch (e) {}
+    };
+
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.officerRanks && data.officerRanks.length > 0) {
+            setOfficerRanks(data.officerRanks);
+          }
+          if (data.officerDesignations && data.officerDesignations.length > 0) {
+            setOfficerDesignations(data.officerDesignations);
+          }
+        }
+      } catch (e) {}
+    };
+
+    fetchSettings();
+    window.addEventListener('storage', syncOptions);
+    window.addEventListener('csu_settings_updated', syncOptions);
+    return () => {
+      window.removeEventListener('storage', syncOptions);
+      window.removeEventListener('csu_settings_updated', syncOptions);
+    };
+  }, []);
+
   // Split Name Fields State
-  const [lastName, setLastName] = useState('SANTOS');
-  const [firstName, setFirstName] = useState('MARIA');
-  const [middleInitial, setMiddleInitial] = useState('L.');
+  const [lastName, setLastName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleInitial, setMiddleInitial] = useState('');
 
   // Cadet ID, Rank, Echelon State
-  const [cadetId, setCadetId] = useState('221-11101');
+  const [cadetId, setCadetId] = useState('');
   const [rank, setRank] = useState('Cadet');
   const [battalion, setBattalion] = useState('1st Battalion');
   const [company, setCompany] = useState('Alpha');
   const [platoon, setPlatoon] = useState('1st Platoon');
   const [designation, setDesignation] = useState('None');
 
-  // Batch import helper selectors
-  const [batchBn, setBatchBn] = useState('1st Battalion');
-  const [batchCo, setBatchCo] = useState('Alpha');
-  const [batchPl, setBatchPl] = useState('1st Platoon');
-
   // Print Mode state: 'single' | 'batch'
   const [printMode, setPrintMode] = useState('single');
 
   // Batch Cards Queue
   const [batchQueue, setBatchQueue] = useState([
-    { id: '221-11101', name: 'SANTOS, MARIA L.', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-    { id: '221-11102', name: 'DELA CRUZ, JUAN A.', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-    { id: '221-00101', name: 'BAUTISTA, MARK G.', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
-    { id: '221-00104', name: 'CASTILLO, ELENA J.', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
+    { id: '221-11101', name: 'SANTOS, MARIA L', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
+    { id: '221-11102', name: 'DELA CRUZ, JUAN A', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
+    { id: '221-00101', name: 'BAUTISTA, MARK G', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
+    { id: '221-00104', name: 'CASTILLO, ELENA J', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
   ]);
-
-  const officerRanks = [
-    'Cadet 2LT (ROTC) 4CL',
-    'Cadet 1LT (ROTC) 4CL',
-    'Cadet 1LT (ROTC) 3CL',
-    'Cadet CPT (ROTC) 3CL',
-    'Cadet CPT (ROTC) 2CL',
-    'Cadet MAJ (ROTC) 2CL',
-    'Cadet LT COL (ROTC) 1CL',
-    'Cadet COL (ROTC) 1CL'
-  ];
-
-  const officerDesignations = [
-    'None',
-    'Corps Commander',
-    'Deputy Commander',
-    'Adjutant',
-    'S1 Brigade',
-    'S2 Brigade',
-    'S3 Brigade',
-    'S4 Brigade',
-    'S7 Brigade',
-    '1st Bn Commander',
-    '2nd Bn Commander',
-    'Alpha Coy Commander',
-    'Bravo Coy Commander',
-    'Charlie Coy Commander',
-    'Delta Coy Commander',
-    'Platoon Leader'
-  ];
 
   // Helper: Format combined Full Name: LAST NAME, FIRST NAME MIDDLE INITIAL
   const getFormattedFullName = () => {
     const last = lastName.trim().toUpperCase();
     const first = firstName.trim().toUpperCase();
-    let mi = middleInitial.trim().toUpperCase();
+    const mi = middleInitial.replace(/\./g, '').trim().toUpperCase();
 
-    if (mi && !mi.endsWith('.')) {
-      mi = `${mi}.`;
-    }
-
-    if (!last && !first) return 'SANTOS, MARIA L.';
+    if (!last && !first) return 'SANTOS, MARIA L';
     if (last && first) return `${last}, ${first}${mi ? ` ${mi}` : ''}`;
     return `${last || first}${mi ? ` ${mi}` : ''}`;
   };
@@ -92,11 +119,11 @@ export default function IDGenerator({ cadets = [] }) {
       setPlatoon('1st Platoon');
       setDesignation('None');
     } else {
-      setRank('Cadet 2LT (ROTC) 4CL');
+      setRank('Cadet COL (ROTC) 1CL');
       setBattalion('CADET OFFICERS');
       setCompany('1CL');
-      setPlatoon('Officer Corps');
-      setDesignation('None');
+      setPlatoon('Corps Command Staff');
+      setDesignation('Corps Commander');
     }
   };
 
@@ -109,7 +136,7 @@ export default function IDGenerator({ cadets = [] }) {
   };
 
   const handleMiddleInitialChange = (val) => {
-    const cleaned = val.toUpperCase().replace(/[^A-Z.]/g, '').slice(0, 3);
+    const cleaned = val.replace(/\./g, '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
     setMiddleInitial(cleaned);
   };
 
@@ -127,47 +154,28 @@ export default function IDGenerator({ cadets = [] }) {
       alert("Please fill in Last Name, First Name, and Cadet ID.");
       return;
     }
+
+    let officerClass = '1CL';
+    if (rank.includes('1CL')) officerClass = '1CL';
+    else if (rank.includes('2CL')) officerClass = '2CL';
+    else if (rank.includes('3CL')) officerClass = '3CL';
+    else if (rank.includes('4CL')) officerClass = '4CL';
+    else if (rank.includes('ASPIRANT') || rank.includes('COCC')) officerClass = 'ASPIRANT';
+
     const newCard = {
       id: cadetId,
       name: fullName,
       rank: category === 'basic' ? 'Cadet' : rank,
-      battalion: battalion,
-      company: company,
-      platoon: platoon,
+      battalion: category === 'basic' ? battalion : 'CADET OFFICERS',
+      company: category === 'basic' ? company : officerClass,
+      platoon: category === 'basic' ? platoon : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
       designation: category === 'basic' ? 'None' : designation,
       type: category
     };
     setBatchQueue(prev => [...prev, newCard]);
   };
 
-  // Quick Load Entire 37-Cadet Platoon from Roster
-  const handleLoadPlatoonFromRoster = () => {
-    const matching = cadets.filter(c => 
-      (c.battalion === batchBn) && 
-      (c.company === batchCo) && 
-      (c.platoon === batchPl)
-    );
 
-    if (matching.length === 0) {
-      alert(`No registered cadets found for ${batchBn} • ${batchCo} Company • ${batchPl}. You can generate the full roster from Master Cadet Directory.`);
-      return;
-    }
-
-    const formattedCards = matching.map(c => ({
-      id: c.id,
-      name: c.name,
-      rank: c.rank || 'Cadet',
-      battalion: c.battalion || batchBn,
-      company: c.company || batchCo,
-      platoon: c.platoon || batchPl,
-      designation: c.designation || 'None',
-      type: c.type === 'Cadet Officer' ? 'officer' : 'basic'
-    }));
-
-    setBatchQueue(formattedCards);
-    setPrintMode('batch');
-    alert(`Loaded all ${formattedCards.length} cadets of ${batchBn} - ${batchCo} Coy (${batchPl}) into Batch Print Queue!`);
-  };
 
   const handleRemoveFromBatch = (index) => {
     setBatchQueue(prev => prev.filter((_, idx) => idx !== index));
@@ -177,14 +185,21 @@ export default function IDGenerator({ cadets = [] }) {
     window.print();
   };
 
+  let singleOfficerClass = '1CL';
+  if (rank.includes('1CL')) singleOfficerClass = '1CL';
+  else if (rank.includes('2CL')) singleOfficerClass = '2CL';
+  else if (rank.includes('3CL')) singleOfficerClass = '3CL';
+  else if (rank.includes('4CL')) singleOfficerClass = '4CL';
+  else if (rank.includes('ASPIRANT') || rank.includes('COCC')) singleOfficerClass = 'ASPIRANT';
+
   const cardsToPrint = printMode === 'single' ? [
     {
       id: cadetId || '221-11101',
-      name: fullName || 'SANTOS, MARIA L.',
+      name: fullName || 'SANTOS, MARIA L',
       rank: category === 'basic' ? 'Cadet' : rank,
-      battalion: battalion || '1st Battalion',
-      company: company || 'Alpha',
-      platoon: platoon || '1st Platoon',
+      battalion: category === 'basic' ? (battalion || '1st Battalion') : 'CADET OFFICERS',
+      company: category === 'basic' ? (company || 'Alpha') : singleOfficerClass,
+      platoon: category === 'basic' ? (platoon || '1st Platoon') : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
       designation: category === 'basic' ? 'None' : designation,
       type: category
     }
@@ -259,7 +274,7 @@ export default function IDGenerator({ cadets = [] }) {
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="SANTOS"
+                  placeholder="e.g., DELA CRUZ"
                   value={lastName}
                   onChange={(e) => handleLastNameChange(e.target.value)}
                 />
@@ -270,7 +285,7 @@ export default function IDGenerator({ cadets = [] }) {
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="MARIA"
+                  placeholder="e.g., JUAN"
                   value={firstName}
                   onChange={(e) => handleFirstNameChange(e.target.value)}
                 />
@@ -281,26 +296,28 @@ export default function IDGenerator({ cadets = [] }) {
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="L."
-                  maxLength={3}
+                  placeholder="e.g., A"
+                  maxLength={1}
                   value={middleInitial}
                   onChange={(e) => handleMiddleInitialChange(e.target.value)}
                 />
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Single letter only (no period)</span>
               </div>
             </div>
 
             {/* Cadet ID & Rank */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-field-group">
-                <label>Cadet ID (221-XXXXX)</label>
+                <label>Cadet ID (221-XXXXX) *</label>
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="221-11101"
+                  placeholder="e.g., 221-00001"
                   maxLength={9}
                   value={cadetId}
                   onChange={(e) => handleIdChange(e.target.value)}
                 />
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Format: 221-XXXXX (Used for QR code rendering)</span>
               </div>
 
               <div className="form-field-group">
@@ -327,55 +344,55 @@ export default function IDGenerator({ cadets = [] }) {
               </div>
             </div>
 
-            {/* Echelon Hierarchy Assignment */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
-              <div className="form-field-group">
-                <label>Battalion / Unit</label>
-                <select
-                  className="custom-select"
-                  value={battalion}
-                  onChange={(e) => setBattalion(e.target.value)}
-                >
-                  <option value="1st Battalion">1st Battalion</option>
-                  <option value="2nd Battalion">2nd Battalion</option>
-                  <option value="CADET OFFICERS">CADET OFFICERS</option>
-                </select>
-              </div>
+            {/* Basic Cadet Echelon Hierarchy Assignment */}
+            {category === 'basic' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
+                <div className="form-field-group">
+                  <label>Battalion</label>
+                  <select
+                    className="custom-select"
+                    value={battalion}
+                    onChange={(e) => setBattalion(e.target.value)}
+                  >
+                    <option value="1st Battalion">1st Battalion</option>
+                    <option value="2nd Battalion">2nd Battalion</option>
+                  </select>
+                </div>
 
-              <div className="form-field-group">
-                <label>Company</label>
-                <select
-                  className="custom-select"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
-                >
-                  <option value="Alpha">Alpha</option>
-                  <option value="Bravo">Bravo</option>
-                  <option value="Charlie">Charlie</option>
-                  <option value="Delta">Delta</option>
-                  <option value="Headquarters">HQ</option>
-                </select>
-              </div>
+                <div className="form-field-group">
+                  <label>Company</label>
+                  <select
+                    className="custom-select"
+                    value={company}
+                    onChange={(e) => setCompany(e.target.value)}
+                  >
+                    <option value="Alpha">Alpha</option>
+                    <option value="Bravo">Bravo</option>
+                    <option value="Charlie">Charlie</option>
+                    <option value="Delta">Delta</option>
+                  </select>
+                </div>
 
-              <div className="form-field-group">
-                <label>Platoon (37)</label>
-                <select
-                  className="custom-select"
-                  value={platoon}
-                  onChange={(e) => setPlatoon(e.target.value)}
-                >
-                  <option value="1st Platoon">1st Pltn</option>
-                  <option value="2nd Platoon">2nd Pltn</option>
-                  <option value="3rd Platoon">3rd Pltn</option>
-                  <option value="4th Platoon">4th Pltn</option>
-                </select>
+                <div className="form-field-group">
+                  <label>Platoon (37)</label>
+                  <select
+                    className="custom-select"
+                    value={platoon}
+                    onChange={(e) => setPlatoon(e.target.value)}
+                  >
+                    <option value="1st Platoon">1st Pltn</option>
+                    <option value="2nd Platoon">2nd Pltn</option>
+                    <option value="3rd Platoon">3rd Pltn</option>
+                    <option value="4th Platoon">4th Pltn</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Designation Input (Only for Cadet Officer) */}
+            {/* Cadet Officer: Single Designation Field (Replaces Bn, Co, Platoon) */}
             {category === 'officer' && (
               <div className="form-field-group">
-                <label>Designation</label>
+                <label>Officer Designation / Position</label>
                 <select
                   className="custom-select"
                   value={designation}
@@ -385,6 +402,9 @@ export default function IDGenerator({ cadets = [] }) {
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>
+                  Rendered on Line 2 inside the green echelon badge
+                </span>
               </div>
             )}
 
@@ -397,40 +417,7 @@ export default function IDGenerator({ cadets = [] }) {
               <Plus size={16} /> Add Form Cadet to Batch Queue
             </button>
 
-            {/* Quick Platoon Batch Import Section */}
-            <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-light)', paddingTop: '0.85rem' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '0.5rem' }}>
-                <Sparkles size={15} /> Quick Load Entire Platoon Batch (37 Cadets)
-              </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                <select className="custom-select" value={batchBn} onChange={(e) => setBatchBn(e.target.value)}>
-                  <option value="1st Battalion">1st Bn</option>
-                  <option value="2nd Battalion">2nd Bn</option>
-                </select>
-                <select className="custom-select" value={batchCo} onChange={(e) => setBatchCo(e.target.value)}>
-                  <option value="Alpha">Alpha Coy</option>
-                  <option value="Bravo">Bravo Coy</option>
-                  <option value="Charlie">Charlie Coy</option>
-                  <option value="Delta">Delta Coy</option>
-                </select>
-                <select className="custom-select" value={batchPl} onChange={(e) => setBatchPl(e.target.value)}>
-                  <option value="1st Platoon">1st Pltn</option>
-                  <option value="2nd Platoon">2nd Pltn</option>
-                  <option value="3rd Platoon">3rd Pltn</option>
-                  <option value="4th Platoon">4th Pltn</option>
-                </select>
-              </div>
-
-              <button
-                type="button"
-                className="btn btn-primary"
-                style={{ width: '100%', fontSize: '0.82rem', justifyContent: 'center', padding: '0.5rem' }}
-                onClick={handleLoadPlatoonFromRoster}
-              >
-                <Users size={14} /> Load 37 Cadets into Batch Queue
-              </button>
-            </div>
 
             {/* Batch Queue Manager */}
             {printMode === 'batch' && (
@@ -469,100 +456,7 @@ export default function IDGenerator({ cadets = [] }) {
           <div className="preview-display-wrapper">
             <div className="batch-print-grid">
               {cardsToPrint.map((card, idx) => (
-                <div key={`${card.id}-${card.type}-${idx}`} className="double-sided-card-pair card-category-transition">
-
-                  {/* FRONT SIDE OF CR80 CARD */}
-                  <div className="cr80-id-card printable-card front-card">
-                    {/* Header Bar */}
-                    <div className="cr80-header">
-                      <img src="/rotc-seal-transparent.png" alt="ROTC Seal" className="cr80-logo-img" style={{ width: '40px', height: '40px', objectFit: 'contain', background: 'transparent' }} />
-                      <div className="cr80-header-titles">
-                        <div className="sub-title">ARESCOM • 15TH RCDG</div>
-                        <div className="main-title">1501st CDC ROTC UNIT</div>
-                        <div className="campus-title">CARAGA STATE UNIVERSITY MAIN CAMPUS</div>
-                      </div>
-                    </div>
-
-                    {/* Card Body */}
-                    <div className="cr80-body">
-                      {/* Official Photo Avatar Box */}
-                      <div className="cr80-photo-box">
-                        <User size={34} color="#9ca3af" />
-                        <span className="photo-label">OFFICIAL ID</span>
-                      </div>
-
-                      {/* Cadet Details */}
-                      <div className="cr80-info">
-                        <div className="cr80-name">{card.name || 'SANTOS, MARIA L.'}</div>
-                        <div className="cr80-rank">{card.rank || 'Cadet'}</div>
-                        
-                        {/* Echelon Badge */}
-                        <div style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: 'rgba(6,78,46,0.1)', padding: '2px 6px', borderRadius: '4px', display: 'inline-block', margin: '2px 0' }}>
-                          {card.type === 'officer' || card.battalion === 'CADET OFFICERS' || card.battalion === 'Brigade HQ'
-                            ? `CADET OFFICERS • ${card.company || '1CL'} • ${card.platoon || 'Officer Corps'}`
-                            : `${card.battalion || '1st Bn'} • ${card.company || 'Alpha'} Coy • ${card.platoon || '1st Pltn'}`}
-                        </div>
-
-                        {card.designation && card.designation !== 'None' && (
-                          <div className="cr80-designation">{card.designation}</div>
-                        )}
-                        <div className="cr80-id-no">
-                          <span>ID NO:</span> <strong>{card.id || '221-11101'}</strong>
-                        </div>
-                      </div>
-
-                      {/* Scannable QR Code (Encodes ID and Full Name) */}
-                      <div className="cr80-qr-section">
-                        <div className="qr-wrapper">
-                          <QRCodeSVG
-                            value={JSON.stringify({
-                              id: card.id || '221-11101',
-                              name: card.name || 'SANTOS, MARIA L.'
-                            })}
-                            size={64}
-                            level="M"
-                            includeMargin={false}
-                          />
-                        </div>
-                        <div className="qr-caption">QR CODE</div>
-                      </div>
-                    </div>
-
-                    {/* Motto Footer Bar */}
-                    <div className="cr80-footer">
-                      <span>HONOR • PATRIOTISM • DUTY</span>
-                    </div>
-                  </div>
-
-                  {/* BACK SIDE OF CR80 CARD */}
-                  <div className="cr80-id-card printable-card back-card">
-                    <div className="cr80-header" style={{ background: '#111827' }}>
-                      <div style={{ textAlign: 'center', width: '100%', fontFamily: 'Oswald, sans-serif', fontSize: '0.8rem', color: '#ffffff', letterSpacing: '0.5px' }}>
-                        OFFICIAL ROTC CADET IDENTIFICATION
-                      </div>
-                    </div>
-
-                    <div className="cr80-back-body">
-                      <p className="back-notice">This card certifies that the person named on the front is an officially enrolled cadet of CSU ROTC Unit.</p>
-
-                      <div className="back-emergency-section">
-                        <div className="emerg-title">IN CASE OF EMERGENCY NOTIFY:</div>
-                        <div className="emerg-detail">CSU ROTC Commandant Office / Duty Sergeant</div>
-                        <div className="emerg-detail">Unit Strength: 1,184 Cadets • 1501st CDC</div>
-                      </div>
-
-                      <div className="back-signature-box">
-                        <div className="sig-line"></div>
-                        <div className="sig-label">ROTC COMMANDANT SIGNATURE</div>
-                      </div>
-                    </div>
-
-                    <div className="cr80-footer">
-                      <span>HONOR • PATRIOTISM • DUTY</span>
-                    </div>
-                  </div>
-
-                </div>
+                <IDCardPreview key={`${card.id}-${card.type}-${idx}`} card={card} />
               ))}
             </div>
           </div>

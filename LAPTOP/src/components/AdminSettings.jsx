@@ -152,6 +152,33 @@ const DEFAULT_UNIT_STRUCTURE = [
   }
 ];
 
+export const DEFAULT_OFFICER_RANKS = [
+  'Cadet 2LT (ROTC) 4CL',
+  'Cadet 1LT (ROTC) 4CL',
+  'Cadet 1LT (ROTC) 3CL',
+  'Cadet CPT (ROTC) 3CL',
+  'Cadet CPT (ROTC) 2CL',
+  'Cadet MAJ (ROTC) 2CL',
+  'Cadet LT COL (ROTC) 1CL',
+  'Cadet COL (ROTC) 1CL'
+];
+
+export const DEFAULT_OFFICER_DESIGNATIONS = [
+  "Corps Commander",
+  "Deputy Commander",
+  "Adjutant",
+  "S1 Brigade (Admin)",
+  "S2 Brigade (Intelligence)",
+  "S3 Brigade (Operations)",
+  "S4 Brigade (Logistics)",
+  "S7 Brigade (Civil Military Operation)",
+  "S1 Assistant (Admin)",
+  "S2 Assistant (Intelligence)",
+  "S3 Assistant (Operations)",
+  "S4 Assistant (Logistics)",
+  "S7 Assistant (Civil Military Operation)"
+];
+
 const DEFAULT_SETTINGS = {
   // Tab 1: Attendance Rules
   morningCutoffTime: "07:30",
@@ -186,7 +213,9 @@ const DEFAULT_SETTINGS = {
   cardDimensions: "CR80", // 'CR80' (85.6mm x 53.98mm)
   printDpi: 300,
   enableSecurityBorder: true,
-  qrCodePosition: "top-right"
+  qrCodePosition: "top-right",
+  officerRanks: DEFAULT_OFFICER_RANKS,
+  officerDesignations: DEFAULT_OFFICER_DESIGNATIONS
 };
 
 export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefresh, serverOnline }) {
@@ -230,6 +259,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const signatureInputRef = useRef(null);
   const backupFileInputRef = useRef(null);
 
+  // Dynamic Ranks & Designations input states
+  const [newRankInput, setNewRankInput] = useState('');
+  const [newDesignationInput, setNewDesignationInput] = useState('');
+
   // Load Settings on Mount
   useEffect(() => {
     const loadSettings = async () => {
@@ -240,7 +273,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           setSettings(prev => ({
             ...prev,
             ...data,
-            unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE
+            unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
+            officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
+            officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
           }));
         } else {
           const local = localStorage.getItem('csu_rotc_admin_settings');
@@ -249,7 +284,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             setSettings(prev => ({
               ...prev,
               ...parsed,
-              unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE
+              unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
+              officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
+              officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
             }));
           }
         }
@@ -260,7 +297,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           setSettings(prev => ({
             ...prev,
             ...parsed,
-            unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE
+            unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
+            officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
+            officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
           }));
         }
       }
@@ -280,6 +319,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
     try {
       localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(toSave));
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: toSave }));
 
       const res = await fetch('/api/settings', {
         method: 'POST',
@@ -288,7 +329,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       });
 
       if (res.ok) {
-        setSaveSuccessToast('System parameters & unit echelons saved and applied successfully!');
+        setSaveSuccessToast('System parameters & unit settings saved and applied successfully!');
       } else {
         setSaveSuccessToast('Settings saved locally to browser storage.');
       }
@@ -297,6 +338,74 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     } finally {
       setIsSaving(false);
       setTimeout(() => setSaveSuccessToast(null), 4000);
+    }
+  };
+
+  // Handle Dynamic Ranks
+  const handleAddRank = () => {
+    const trimmed = newRankInput.trim();
+    if (!trimmed) return;
+    const currentRanks = settings.officerRanks || DEFAULT_OFFICER_RANKS;
+    if (currentRanks.includes(trimmed)) {
+      alert('This rank already exists.');
+      return;
+    }
+    const updated = [...currentRanks, trimmed];
+    const newSettings = { ...settings, officerRanks: updated };
+    setSettings(newSettings);
+    setNewRankInput('');
+    handleSaveSettings(null, newSettings);
+  };
+
+  const handleDeleteRank = (rankToDelete) => {
+    const currentRanks = settings.officerRanks || DEFAULT_OFFICER_RANKS;
+    if (currentRanks.length <= 1) {
+      alert('Must maintain at least one officer rank option.');
+      return;
+    }
+    const updated = currentRanks.filter(r => r !== rankToDelete);
+    const newSettings = { ...settings, officerRanks: updated };
+    setSettings(newSettings);
+    handleSaveSettings(null, newSettings);
+  };
+
+  // Handle Dynamic Designations
+  const handleAddDesignation = () => {
+    const trimmed = newDesignationInput.trim();
+    if (!trimmed) return;
+    const currentDesignations = settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS;
+    if (currentDesignations.includes(trimmed)) {
+      alert('This designation already exists.');
+      return;
+    }
+    const updated = [...currentDesignations, trimmed];
+    const newSettings = { ...settings, officerDesignations: updated };
+    setSettings(newSettings);
+    setNewDesignationInput('');
+    handleSaveSettings(null, newSettings);
+  };
+
+  const handleDeleteDesignation = (designationToDelete) => {
+    const currentDesignations = settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS;
+    if (currentDesignations.length <= 1) {
+      alert('Must maintain at least one officer designation option.');
+      return;
+    }
+    const updated = currentDesignations.filter(d => d !== designationToDelete);
+    const newSettings = { ...settings, officerDesignations: updated };
+    setSettings(newSettings);
+    handleSaveSettings(null, newSettings);
+  };
+
+  const handleResetRanksAndDesignations = () => {
+    if (window.confirm('Reset Officer Ranks and Staff Designations to military defaults?')) {
+      const newSettings = {
+        ...settings,
+        officerRanks: DEFAULT_OFFICER_RANKS,
+        officerDesignations: DEFAULT_OFFICER_DESIGNATIONS
+      };
+      setSettings(newSettings);
+      handleSaveSettings(null, newSettings);
     }
   };
 
@@ -945,7 +1054,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   onChange={(e) => handleChange('formationTardyGrace', parseInt(e.target.value) || 0)}
                   style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
-                
+
                 {/* Status Transition Legend */}
                 <div style={{ marginTop: '0.5rem', padding: '0.65rem 0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.75rem' }}>
                   <div style={{ fontWeight: 700, color: 'var(--text-dark)', marginBottom: '4px' }}>Automatic Scan Status Transition:</div>
@@ -984,7 +1093,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           ========================================================================= */}
       {activeTab === 'structure' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          
+
           {/* Unit Structure Summary Banner */}
           <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
@@ -992,7 +1101,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Layers size={22} color="var(--rotc-green-dark)" />
                   <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-dark)', fontFamily: 'Oswald, sans-serif' }}>
-                    UNIT ECHELON HIERARCHY MANAGEMENT
+                    UNIT MANAGEMENT
                   </h3>
                 </div>
                 <p style={{ margin: '4px 0 0 0', fontSize: '0.82rem', color: 'var(--text-muted)' }}>
@@ -1056,7 +1165,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
           {/* 3-Column Interactive Hierarchy Manager */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.25rem' }}>
-            
+
             {/* COLUMN 1: BATTALIONS (Theme: BLUE) */}
             <div className="card" style={{ border: '2px solid #bfdbfe', background: '#eff6ff' }}>
               <div className="card-header" style={{ paddingBottom: '0.75rem', borderBottom: '1.5px solid #dbeafe' }}>
@@ -1680,139 +1789,308 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           TAB 5: ID PRINTING SETUP
           ========================================================================= */}
       {activeTab === 'idprinting' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-          {/* Signatory Profile */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Printer size={20} />
-                <span>Command Signatory Profile</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Top Row: 2 Equal-Width Columns (Command Signatory & Physical Card Specs) */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: '1.5rem' }}>
+            {/* Card 1: Signatory Profile */}
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
+                  <Printer size={20} />
+                  <span>Command Signatory Profile</span>
+                </div>
+                <span className="badge badge-present">CARD SIGNATORY</span>
               </div>
-              <span className="badge badge-present">CARD SIGNATORY</span>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Authorized Signatory Full Name & Rank
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={settings.signatoryName}
+                    onChange={(e) => handleChange('signatoryName', e.target.value)}
+                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Signatory Designation / Position
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={settings.signatoryDesignation}
+                    onChange={(e) => handleChange('signatoryDesignation', e.target.value)}
+                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  />
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Digital Signature Image
+                  </label>
+                  <input
+                    type="file"
+                    ref={signatureInputRef}
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleImageUpload(e, 'signatureImageUrl')}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm"
+                    onClick={() => signatureInputRef.current?.click()}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
+                  >
+                    <Upload size={14} /> Upload Transparent PNG Signature
+                  </button>
+                </div>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Authorized Signatory Full Name & Rank
-                </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={settings.signatoryName}
-                  onChange={(e) => handleChange('signatoryName', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
+            {/* Card 2: CR80 Card Dimensions */}
+            <div className="card">
+              <div className="card-header">
+                <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
+                  <Sliders size={20} />
+                  <span>CR80 Physical Card Specs</span>
+                </div>
+                <span className="badge badge-present">CR80 PVC FORMAT</span>
               </div>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Signatory Designation / Position
-                </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={settings.signatoryDesignation}
-                  onChange={(e) => handleChange('signatoryDesignation', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
-              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                    Print Orientation
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => handleChange('cardOrientation', 'vertical')}
+                      style={{
+                        padding: '0.75rem',
+                        borderRadius: '8px',
+                        border: settings.cardOrientation === 'vertical' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
+                        background: settings.cardOrientation === 'vertical' ? '#ecfdf5' : '#ffffff',
+                        color: settings.cardOrientation === 'vertical' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      {settings.cardOrientation === 'vertical' && <Check size={16} />}
+                      <span>Vertical (Portrait)</span>
+                    </button>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Digital Signature Image
-                </label>
-                <input
-                  type="file"
-                  ref={signatureInputRef}
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => handleImageUpload(e, 'signatureImageUrl')}
-                />
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={() => signatureInputRef.current?.click()}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
-                >
-                  <Upload size={14} /> Upload Transparent PNG Signature
-                </button>
+                    <button
+                      type="button"
+                      onClick={() => handleChange('cardOrientation', 'horizontal')}
+                      style={{
+                        padding: '0.75rem',
+                        borderRadius: '8px',
+                        border: settings.cardOrientation === 'horizontal' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
+                        background: settings.cardOrientation === 'horizontal' ? '#ecfdf5' : '#ffffff',
+                        color: settings.cardOrientation === 'horizontal' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      {settings.cardOrientation === 'horizontal' && <Check size={16} />}
+                      <span>Horizontal (Landscape)</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>Card Format Specification</span>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
+                      ISO/IEC 7810 ID-1
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
+                    Standard CR80 (85.60 mm × 53.98 mm • 3.370" × 2.125")
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    Calibrated for PVC ID Card Printers (Evolis, Zebra, Fargo) and A4 8-card sheets.
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* CR80 Card Dimensions */}
+          {/* Card 3: Dynamic Cadet Ranks & Officer Designations */}
           <div className="card">
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Sliders size={20} />
-                <span>CR80 Physical Card Specs</span>
+                <Award size={20} />
+                <span>Manage Ranks & Officer Designations</span>
               </div>
-              <span className="badge badge-present">CR80 PVC FORMAT</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+                <span className="badge badge-present">DYNAMIC OPTIONS</span>
+              </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Print Orientation
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => handleChange('cardOrientation', 'vertical')}
-                    style={{
-                      padding: '0.75rem',
-                      borderRadius: '8px',
-                      border: settings.cardOrientation === 'vertical' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                      background: settings.cardOrientation === 'vertical' ? '#ecfdf5' : '#ffffff',
-                      color: settings.cardOrientation === 'vertical' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px'
-                    }}
-                  >
-                    {settings.cardOrientation === 'vertical' && <Check size={16} />}
-                    <span>Vertical (Portrait)</span>
-                  </button>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem' }}>
+              {/* Section A: Cadet / Officer Ranks */}
+              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Shield size={16} color="var(--rotc-green-dark)" />
+                    <span>Cadet Officer Ranks ({(settings.officerRanks || DEFAULT_OFFICER_RANKS).length})</span>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Shown on ID Generator</span>
+                </div>
 
+                {/* Add Rank Input Form */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g., Cadet COL (ROTC) 1CL"
+                    value={newRankInput}
+                    onChange={(e) => setNewRankInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddRank(); }}
+                    style={{ flex: 1, padding: '0.55rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', border: '1px solid var(--border-light)' }}
+                  />
                   <button
                     type="button"
-                    onClick={() => handleChange('cardOrientation', 'horizontal')}
-                    style={{
-                      padding: '0.75rem',
-                      borderRadius: '8px',
-                      border: settings.cardOrientation === 'horizontal' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                      background: settings.cardOrientation === 'horizontal' ? '#ecfdf5' : '#ffffff',
-                      color: settings.cardOrientation === 'horizontal' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px'
-                    }}
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAddRank}
+                    style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', padding: '0.55rem 0.85rem' }}
                   >
-                    {settings.cardOrientation === 'horizontal' && <Check size={16} />}
-                    <span>Horizontal (Landscape)</span>
+                    <Plus size={14} /> Add Rank
                   </button>
+                </div>
+
+                {/* Ranks Tag List / Pills */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '180px', overflowY: 'auto', padding: '2px' }}>
+                  {(settings.officerRanks || DEFAULT_OFFICER_RANKS).map((r, idx) => (
+                    <span
+                      key={`${r}-${idx}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '20px',
+                        padding: '4px 10px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        color: 'var(--text-dark)',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      }}
+                    >
+                      <span>{r}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteRank(r)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#94a3b8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 0,
+                          transition: 'color 0.15s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+                        onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                        title={`Delete ${r}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
                 </div>
               </div>
 
-              <div style={{ padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>Card Format Specification</span>
-                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
-                    ISO/IEC 7810 ID-1
-                  </span>
+              {/* Section B: Officer Designations */}
+              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Award size={16} color="var(--rotc-green-dark)" />
+                    <span>Officer Designations / Roles ({(settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS).length})</span>
+                  </div>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Shown on ID Generator</span>
                 </div>
-                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
-                  Standard CR80 (85.60 mm × 53.98 mm • 3.370" × 2.125")
+
+                {/* Add Designation Input Form */}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <input
+                    type="text"
+                    className="form-control"
+                    placeholder="e.g., S3 Assistant (Operations)"
+                    value={newDesignationInput}
+                    onChange={(e) => setNewDesignationInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddDesignation(); }}
+                    style={{ flex: 1, padding: '0.55rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', border: '1px solid var(--border-light)' }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={handleAddDesignation}
+                    style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', padding: '0.55rem 0.85rem' }}
+                  >
+                    <Plus size={14} /> Add Designation
+                  </button>
                 </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Calibrated for PVC ID Card Printers (Evolis, Zebra, Fargo) and A4 8-card sheets.
+
+                {/* Designations Tag List / Pills */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '180px', overflowY: 'auto', padding: '2px' }}>
+                  {(settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS).map((d, idx) => (
+                    <span
+                      key={`${d}-${idx}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        background: '#ffffff',
+                        border: '1px solid #cbd5e1',
+                        borderRadius: '20px',
+                        padding: '4px 10px',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        color: 'var(--rotc-green-dark)',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                      }}
+                    >
+                      <span>{d}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDesignation(d)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          cursor: 'pointer',
+                          color: '#94a3b8',
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: 0,
+                          transition: 'color 0.15s'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
+                        onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
+                        title={`Delete ${d}`}
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1847,13 +2125,12 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             maxWidth: '460px',
             padding: '1.75rem',
             boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
-            border: `2px solid ${
-              echelonModalConfig.level === 'battalion'
-                ? '#2563eb'
-                : echelonModalConfig.level === 'company'
+            border: `2px solid ${echelonModalConfig.level === 'battalion'
+              ? '#2563eb'
+              : echelonModalConfig.level === 'company'
                 ? '#059669'
                 : '#d97706'
-            }`
+              }`
           }}>
             {/* Modal Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
@@ -1866,14 +2143,14 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     echelonModalConfig.level === 'battalion'
                       ? '#dbeafe'
                       : echelonModalConfig.level === 'company'
-                      ? '#d1fae5'
-                      : '#fef3c7',
+                        ? '#d1fae5'
+                        : '#fef3c7',
                   color:
                     echelonModalConfig.level === 'battalion'
                       ? '#1e40af'
                       : echelonModalConfig.level === 'company'
-                      ? '#065f46'
-                      : '#92400e',
+                        ? '#065f46'
+                        : '#92400e',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -1917,8 +2194,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     echelonModalConfig.level === 'battalion'
                       ? 'e.g., 3rd Battalion'
                       : echelonModalConfig.level === 'company'
-                      ? 'e.g., Echo Company'
-                      : 'e.g., 5th Platoon'
+                        ? 'e.g., Echo Company'
+                        : 'e.g., 5th Platoon'
                   }
                   value={echelonModalConfig.item.name}
                   onChange={(e) => setEchelonModalConfig(prev => ({
@@ -1987,8 +2264,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     echelonModalConfig.level === 'battalion'
                       ? 'linear-gradient(135deg, #1e40af 0%, #2563eb 100%)'
                       : echelonModalConfig.level === 'company'
-                      ? 'linear-gradient(135deg, #065f46 0%, #059669 100%)'
-                      : 'linear-gradient(135deg, #92400e 0%, #d97706 100%)',
+                        ? 'linear-gradient(135deg, #065f46 0%, #059669 100%)'
+                        : 'linear-gradient(135deg, #92400e 0%, #d97706 100%)',
                   color: '#ffffff',
                   border: 'none',
                   borderRadius: '8px',

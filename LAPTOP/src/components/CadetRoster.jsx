@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Search, Filter, Edit, Trash2, Shield, UserCheck, X, Sparkles, RefreshCw, Layers } from 'lucide-react';
+import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
 
 export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDeleteCadet, onRefresh }) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +13,71 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
   const [formError, setFormError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Dynamic Ranks and Designations loaded from settings
+  const [officerRanks, setOfficerRanks] = useState(() => {
+    try {
+      const local = localStorage.getItem('csu_rotc_admin_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.officerRanks && parsed.officerRanks.length > 0) return parsed.officerRanks;
+      }
+    } catch (e) {}
+    return DEFAULT_OFFICER_RANKS;
+  });
+
+  const [officerDesignations, setOfficerDesignations] = useState(() => {
+    try {
+      const local = localStorage.getItem('csu_rotc_admin_settings');
+      if (local) {
+        const parsed = JSON.parse(local);
+        if (parsed.officerDesignations && parsed.officerDesignations.length > 0) {
+          return ['None', ...parsed.officerDesignations];
+        }
+      }
+    } catch (e) {}
+    return ['None', ...DEFAULT_OFFICER_DESIGNATIONS];
+  });
+
+  useEffect(() => {
+    const syncOptions = () => {
+      try {
+        const local = localStorage.getItem('csu_rotc_admin_settings');
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (parsed.officerRanks && parsed.officerRanks.length > 0) {
+            setOfficerRanks(parsed.officerRanks);
+          }
+          if (parsed.officerDesignations && parsed.officerDesignations.length > 0) {
+            setOfficerDesignations(['None', ...parsed.officerDesignations]);
+          }
+        }
+      } catch (e) {}
+    };
+
+    const fetchSettings = async () => {
+      try {
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.officerRanks && data.officerRanks.length > 0) {
+            setOfficerRanks(data.officerRanks);
+          }
+          if (data.officerDesignations && data.officerDesignations.length > 0) {
+            setOfficerDesignations(['None', ...data.officerDesignations]);
+          }
+        }
+      } catch (e) {}
+    };
+
+    fetchSettings();
+    window.addEventListener('storage', syncOptions);
+    window.addEventListener('csu_settings_updated', syncOptions);
+    return () => {
+      window.removeEventListener('storage', syncOptions);
+      window.removeEventListener('csu_settings_updated', syncOptions);
+    };
+  }, []);
+
   // Form State
   const [formData, setFormData] = useState({
     id: '',
@@ -23,36 +89,6 @@ export default function CadetRoster({ cadets, onAddCadet, onUpdateCadet, onDelet
     platoon: '1st Platoon',
     designation: 'N/A'
   });
-
-  const officerRanks = [
-    'Cadet 2LT (ROTC) 4CL',
-    'Cadet 1LT (ROTC) 4CL',
-    'Cadet 1LT (ROTC) 3CL',
-    'Cadet CPT (ROTC) 3CL',
-    'Cadet CPT (ROTC) 2CL',
-    'Cadet MAJ (ROTC) 2CL',
-    'Cadet LT COL (ROTC) 1CL',
-    'Cadet COL (ROTC) 1CL'
-  ];
-
-  const officerDesignations = [
-    'None',
-    'Corps Commander',
-    'Deputy Commander',
-    'Adjutant',
-    'S1 Brigade',
-    'S2 Brigade',
-    'S3 Brigade',
-    'S4 Brigade',
-    'S7 Brigade',
-    '1st Bn Commander',
-    '2nd Bn Commander',
-    'Alpha Coy Commander',
-    'Bravo Coy Commander',
-    'Charlie Coy Commander',
-    'Delta Coy Commander',
-    'Platoon Leader'
-  ];
 
   const handleOpenAddModal = () => {
     setEditingCadet(null);
