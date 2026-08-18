@@ -221,10 +221,41 @@ async function exportToExcel(records, sessionName = "Drill Session") {
     });
   }
 
-  // Find next row index
-  let startRow = worksheet.lastRow ? worksheet.lastRow.number + 1 : 4;
+  // Map existing Cadet IDs in worksheet for in-place updates
+  const existingCadetRowMap = new Map();
+  worksheet.eachRow((row, rowNumber) => {
+    if (rowNumber > 3) {
+      const rowCadetId = row.getCell(2).value;
+      const rowStatus = row.getCell(12).value;
+      if (rowCadetId) {
+        const cid = String(rowCadetId).trim().toUpperCase();
+        const mode = String(rowStatus || '').includes('TIME-OUT') ? 'Time-Out' : 'Time-In';
+        existingCadetRowMap.set(`${cid}__${mode}`, rowNumber);
+      }
+    }
+  });
+
+  const activeSettings = getSettings();
+  const cutoffStr = activeSettings.morningCutoffTime || activeSettings.formationCutoffTime || "07:30";
+  
+  let ch = 7;
+  let cm = 30;
+  const match = String(cutoffStr).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if (match) {
+    ch = parseInt(match[1], 10);
+    cm = parseInt(match[2], 10);
+    const meridiem = match[3] ? match[3].toUpperCase() : null;
+    if (meridiem === 'PM' && ch < 12) ch += 12;
+    if (meridiem === 'AM' && ch === 12) ch = 0;
+  }
+  const cutoffMins = ch * 60 + cm;
 
   records.forEach((rec, idx) => {
+    const cid = String(rec.cadetId || rec.id || '').trim().toUpperCase();
+    if (!cid) return;
+    const mode = rec.scanMode || 'Time-In';
+    const key = `${cid}__${mode}`;
+
     const directName = (rec.name && rec.name !== 'UNREGISTERED CADET' && rec.name.trim().length > 0)
       ? rec.name.trim()
       : (rec.cadetId ? `CADET ${rec.cadetId}` : 'CADET');
@@ -235,67 +266,85 @@ async function exportToExcel(records, sessionName = "Drill Session") {
     const directCo = rec.company && rec.company !== 'N/A' ? rec.company : 'Alpha Company';
     const directPl = rec.platoon && rec.platoon !== 'N/A' ? rec.platoon : '1st Platoon';
 
-    // Calculate Late vs Present based on formation cutoff (default 07:00 AM)
-    let calcStatus = rec.status;
-    if (!calcStatus) {
-      if (rec.scanMode === 'Time-Out') {
-        calcStatus = 'TIME-OUT';
-      } else if (rec.timestamp) {
-        const d = new Date(rec.timestamp);
+    // Calculate Late vs Present based on active formation cutoff setting
+    let calcStatus = 'PRESENT';
+    if (rec.scanMode === 'Time-Out' || (rec.status && String(rec.status).toUpperCase().includes('TIME-OUT'))) {
+      calcStatus = 'TIME-OUT';
+    } else if (rec.timestamp) {
+      const d = new Date(rec.timestamp);
+      if (!isNaN(d.getTime())) {
         const mins = d.getHours() * 60 + d.getMinutes();
-        const cutoffMins = 7 * 60; // 07:00 AM default
         calcStatus = mins > cutoffMins ? 'LATE' : 'PRESENT';
-      } else {
-        calcStatus = 'PRESENT';
       }
     }
 
-    const rowValues = [
-      startRow - 3 + idx,
-      rec.cadetId || rec.id || 'N/A',
-      directName,
-      directBn,
-      directCo,
-      directPl,
-      rec.rank || 'Cadet',
-      rec.designation || 'None',
-      rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString(),
-      rec.sessionName || sessionName,
-      rec.dutyOfficer || rec.d || 'Duty Officer',
-      calcStatus
-    ];
-    
-    const row = worksheet.addRow(rowValues);
-    row.height = 20;
-    row.eachCell((cell, colNumber) => {
-      cell.font = { name: 'Arial', size: 10 };
-      cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 || colNumber === 2 || colNumber === 4 || colNumber === 5 || colNumber === 6 || colNumber === 7 || colNumber === 12 ? 'center' : 'left' };
-      cell.border = {
-        top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-        right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
-      };
+    if (existingCadetRowMap.has(key)) {
+      // IN-PLACE UPDATE for existing row: Update timestamp, session, Duty Officer, and status
+      const targetRowNumber = existingCadetRowMap.get(key);
+      const row = worksheet.getRow(targetRowNumber);
+      row.getCell(9).value = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString();
+      row.getCell(10).value = rec.sessionName || sessionName;
+      row.getCell(11).value = rec.dutyOfficer || rec.d || 'Duty Officer';
+      row.getCell(12).value = calcStatus;
 
-      // Highlight Status column (col 12)
-      if (colNumber === 12) {
-        if (calcStatus === 'LATE') {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } }; // Light amber
-          cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFB45309' } };
-        } else if (calcStatus === 'PRESENT') {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Light emerald
-          cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF065F46' } };
-        }
+      // Update styling
+      if (calcStatus === 'LATE') {
+        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+        row.getCell(12).font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFB45309' } };
+      } else if (calcStatus === 'PRESENT') {
+        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+        row.getCell(12).font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF065F46' } };
       }
-    });
+    } else {
+      // INSERT NEW ROW
+      const startRow = worksheet.lastRow ? worksheet.lastRow.number + 1 : 4;
+      const rowValues = [
+        startRow - 3,
+        cid,
+        directName,
+        directBn,
+        directCo,
+        directPl,
+        rec.rank || 'Cadet',
+        rec.designation || 'None',
+        rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString(),
+        rec.sessionName || sessionName,
+        rec.dutyOfficer || rec.d || 'Duty Officer',
+        calcStatus
+      ];
+      
+      const row = worksheet.addRow(rowValues);
+      row.height = 20;
+      row.eachCell((cell, colNumber) => {
+        cell.font = { name: 'Arial', size: 10 };
+        cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 || colNumber === 2 || colNumber === 4 || colNumber === 5 || colNumber === 6 || colNumber === 7 || colNumber === 12 ? 'center' : 'left' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+        };
+
+        if (colNumber === 12) {
+          if (calcStatus === 'LATE') {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+            cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFB45309' } };
+          } else if (calcStatus === 'PRESENT') {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
+            cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF065F46' } };
+          }
+        }
+      });
+      existingCadetRowMap.set(key, row.number);
+    }
   });
 
-  // Auto column widths
-  worksheet.columns.forEach((col) => {
+  // Adjust column widths automatically
+  worksheet.columns.forEach((col, idx) => {
     let maxLen = 12;
-    col.eachCell({ includeEmpty: true }, (cell) => {
-      const len = cell.value ? cell.value.toString().length : 0;
-      if (len > maxLen) maxLen = len;
+    col.eachRow({ includeEmpty: false }, (r) => {
+      const val = r.getCell(idx + 1).value;
+      if (val) maxLen = Math.max(maxLen, val.toString().length);
     });
     col.width = Math.min(maxLen + 4, 35);
   });
@@ -384,7 +433,7 @@ app.delete('/api/cadets/:id', (req, res) => {
   res.json({ success: true, message: "Cadet removed from roster." });
 });
 
-// Mobile Sync Endpoint
+// Mobile Sync Endpoint with Ingestion Duty Officer & Timestamp Updates
 app.post('/api/sync', async (req, res) => {
   try {
     const { dutyOfficer, sessionName, records } = req.body;
@@ -396,35 +445,77 @@ app.post('/api/sync', async (req, res) => {
     const cadets = getCadets();
     const cadetMap = new Map(cadets.map(c => [c.id, c]));
 
-    const enrichedRecords = records.map(rec => {
-      const match = cadetMap.get(rec.cadetId);
-      return {
+    let currentLogs = [...getAttendanceLogs()];
+    let updatedCount = 0;
+    let newCount = 0;
+    const recordsForExcel = [];
+
+    for (const rec of records) {
+      const cid = String(rec.cadetId || '').trim().toUpperCase();
+      if (!cid) continue;
+
+      const scanDateStr = rec.timestamp ? new Date(rec.timestamp).toDateString() : new Date().toDateString();
+      const scanMode = rec.scanMode || 'Time-In';
+      const effectiveDO = dutyOfficer || rec.dutyOfficer || 'Duty Officer';
+      const effectiveSession = sessionName || rec.sessionName || 'Training Session';
+
+      const match = cadetMap.get(rec.cadetId) || cadetMap.get(cid);
+      const enriched = {
         ...rec,
+        cadetId: cid,
         name: match ? match.name : (rec.name || 'UNREGISTERED CADET'),
         rank: match ? match.rank : (rec.rank || 'Cadet'),
         battalion: match ? match.battalion : (rec.battalion || '1st Battalion'),
         company: match ? match.company : (rec.company || 'N/A'),
         platoon: match ? match.platoon : (rec.platoon || 'N/A'),
         designation: match ? match.designation : (rec.designation || 'N/A'),
-        dutyOfficer: dutyOfficer || rec.dutyOfficer || 'Duty Officer',
-        sessionName: sessionName || rec.sessionName || 'Training Session',
+        dutyOfficer: effectiveDO,
+        sessionName: effectiveSession,
+        scanMode: scanMode,
+        timestamp: rec.timestamp || new Date().toISOString(),
         receivedAt: new Date().toISOString()
       };
-    });
 
-    const currentLogs = getAttendanceLogs();
-    const updatedLogs = [...enrichedRecords, ...currentLogs];
-    saveAttendanceLogs(updatedLogs);
+      // Check if Cadet already has an entry today for this scanMode
+      const existingIndex = currentLogs.findIndex(l => {
+        const dStr = l.timestamp ? new Date(l.timestamp).toDateString() : '';
+        const lCid = String(l.cadetId || '').trim().toUpperCase();
+        const lMode = l.scanMode || (String(l.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
+        return lCid === cid && dStr === scanDateStr && lMode === scanMode;
+      });
 
-    const filename = await exportToExcel(enrichedRecords, sessionName);
+      if (existingIndex !== -1) {
+        // OVERWRITE: Update Duty Officer, timestamp, session details, and receivedAt
+        currentLogs[existingIndex] = {
+          ...currentLogs[existingIndex],
+          dutyOfficer: enriched.dutyOfficer,
+          timestamp: enriched.timestamp,
+          sessionName: enriched.sessionName,
+          status: enriched.status || currentLogs[existingIndex].status,
+          receivedAt: new Date().toISOString()
+        };
+        updatedCount++;
+        recordsForExcel.push(currentLogs[existingIndex]);
+      } else {
+        // NEW RECORD: Insert to front of list
+        currentLogs.unshift(enriched);
+        newCount++;
+        recordsForExcel.push(enriched);
+      }
+    }
 
-    console.log(`[SYNC RECEIVED] ${enrichedRecords.length} records processed from ${dutyOfficer || 'Mobile Officer'}.`);
+    saveAttendanceLogs(currentLogs);
+    const filename = await exportToExcel(recordsForExcel, sessionName);
+
+    console.log(`[SYNC INGESTION] Received: ${records.length} | Ingested: ${newCount} new, ${updatedCount} updated to Duty Officer "${dutyOfficer || 'Duty Officer'}".`);
 
     res.json({
       success: true,
-      count: enrichedRecords.length,
+      count: newCount,
+      updated: updatedCount,
+      totalLogs: currentLogs.length,
       filename: filename,
-      message: `Successfully synced ${enrichedRecords.length} records and exported to Excel (${filename}).`
+      message: `Synced ${records.length} records (${newCount} new, ${updatedCount} updated to Duty Officer "${dutyOfficer || 'Duty Officer'}").`
     });
   } catch (err) {
     console.error("Sync processing error:", err);

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal } from 'lucide-react';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock } from 'lucide-react';
+import { getAttendanceStatus, getScannedUnitEchelon } from '../utils/attendanceStatus';
+import { useAttendanceData } from '../hooks/useAttendanceData';
 
 // Default 1,184 Standard CSU ROTC Structure Template
 const DEFAULT_UNIT_STRUCTURE = [
@@ -117,7 +119,12 @@ const DEFAULT_UNIT_STRUCTURE = [
   }
 ];
 
-export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], onRefresh }) {
+export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanceLogs: propsLogs = [], onRefresh }) {
+  const { records: hookLogs, settings: hookSettings, activeCutoff } = useAttendanceData();
+  const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
+  const formationCutoff = activeCutoff || '07:30';
+  const unitStructure = hookSettings?.unitStructure?.length > 0 ? hookSettings.unitStructure : DEFAULT_UNIT_STRUCTURE;
+
   // Top-Level Category Selection ('BASIC_CADETS' | 'CADET_OFFICERS' | null)
   const [mainCategory, setMainCategory] = useState(null);
 
@@ -125,60 +132,6 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
   const [selectedBattalion, setSelectedBattalion] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedPlatoon, setSelectedPlatoon] = useState(null);
-
-  // Dynamic Unit Hierarchy loaded from localStorage / Settings API
-  const [unitStructure, setUnitStructure] = useState(() => {
-    try {
-      const local = localStorage.getItem('csu_rotc_admin_settings');
-      if (local) {
-        const parsed = JSON.parse(local);
-        if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
-          return parsed.unitStructure;
-        }
-      }
-    } catch (e) {}
-    return DEFAULT_UNIT_STRUCTURE;
-  });
-
-  // Load updated settings & listen to storage events
-  useEffect(() => {
-    const loadDynamicSettings = async () => {
-      try {
-        const local = localStorage.getItem('csu_rotc_admin_settings');
-        if (local) {
-          const parsed = JSON.parse(local);
-          if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
-            setUnitStructure(parsed.unitStructure);
-            return;
-          }
-        }
-        const res = await fetch('/api/settings');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.unitStructure && Array.isArray(data.unitStructure) && data.unitStructure.length > 0) {
-            setUnitStructure(data.unitStructure);
-          }
-        }
-      } catch (e) {}
-    };
-
-    loadDynamicSettings();
-
-    const handleStorageChange = () => {
-      try {
-        const local = localStorage.getItem('csu_rotc_admin_settings');
-        if (local) {
-          const parsed = JSON.parse(local);
-          if (parsed.unitStructure && Array.isArray(parsed.unitStructure) && parsed.unitStructure.length > 0) {
-            setUnitStructure(parsed.unitStructure);
-          }
-        }
-      } catch (e) {}
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, [onRefresh]);
 
   // Dynamic Calculated Quotas
   const totalBasicQuota = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || 1184;
@@ -294,7 +247,8 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
       if (selectedBattalion === 'CADET OFFICERS') {
         return isOfficerLog(log);
       }
-      return (log.battalion || '').toLowerCase().includes(bnSelectorClean);
+      const echelon = getScannedUnitEchelon(log);
+      return (echelon.battalion || '').toLowerCase().includes(bnSelectorClean);
     })
     : (isOfficerSelected ? attendanceLogs.filter(isOfficerLog) : attendanceLogs);
 
@@ -303,7 +257,8 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
     const bnName = bn.name;
     const clean = bnName.replace(' Battalion', '').toLowerCase().trim();
     const scanned = attendanceLogs.filter(l => {
-      const b = (l.battalion || '').toLowerCase();
+      const echelon = getScannedUnitEchelon(l);
+      const b = (echelon.battalion || '').toLowerCase();
       return !isOfficerLog(l) && (b.includes(bnName.toLowerCase()) || b.includes(clean));
     }).length;
     const target = Number(bn.targetQuota) || 592;
@@ -346,7 +301,8 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
     const cName = c.name;
     const cShort = c.shortCode || c.name.replace(' Company', '');
     const scanned = activeLogs.filter(log => {
-      const co = (log.company || '').toLowerCase().trim();
+      const echelon = getScannedUnitEchelon(log);
+      const co = (echelon.company || '').toLowerCase().trim();
       return co.includes(cName.toLowerCase().trim()) || co.includes(cShort.toLowerCase().trim());
     }).length;
     const percent = Math.min(100, Math.round((scanned / target) * 100));
@@ -386,8 +342,9 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
     const pClean = pName.replace(' Platoon', '').toLowerCase().trim();
     const pShort = (p.shortCode || '').toLowerCase().trim();
     const scanned = activeLogs.filter(log => {
-      const co = (log.company || '').toLowerCase().trim();
-      const pl = (log.platoon || '').toLowerCase().trim();
+      const echelon = getScannedUnitEchelon(log);
+      const co = (echelon.company || '').toLowerCase().trim();
+      const pl = (echelon.platoon || '').toLowerCase().trim();
       const sn = (log.sessionName || '').toLowerCase().trim();
       const matchCo = selectedCompany ? (co.includes(selectedCompany.toLowerCase().trim()) || (activeCoObj && co.includes(activeCoObj.name.toLowerCase()))) : true;
       const matchPl = pl.includes(pClean) || sn.includes(pClean) || (pShort && (pl.includes(pShort) || sn.includes(pShort)));
@@ -497,6 +454,8 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
 
   // 7. Interactive Filtered Table Records
   const tableFilteredLogs = attendanceLogs.filter(log => {
+    const echelon = getScannedUnitEchelon(log);
+
     // Top-Level Main Category Filter
     if (mainCategory === 'BASIC_CADETS') {
       if (isOfficerLog(log)) return false;
@@ -507,7 +466,7 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
     let matchesBn = true;
     if (selectedBattalion && selectedBattalion !== 'CADET OFFICERS') {
       const bnClean = selectedBattalion.replace(' Battalion', '').toLowerCase().trim();
-      matchesBn = (log.battalion || '').toLowerCase().trim().includes(bnClean);
+      matchesBn = (echelon.battalion || '').toLowerCase().trim().includes(bnClean);
     }
 
     let matchesCo = true;
@@ -516,14 +475,14 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
         matchesCo = matchesOfficerClass(log, selectedCompany);
       } else {
         const coClean = selectedCompany.toLowerCase().trim();
-        matchesCo = (log.company || '').toLowerCase().trim().includes(coClean);
+        matchesCo = (echelon.company || '').toLowerCase().trim().includes(coClean);
       }
     }
 
     let matchesPl = true;
     if (!isOfficerSelected && selectedPlatoon) {
       const plClean = selectedPlatoon.replace(' Platoon', '').toLowerCase().trim();
-      const logPl = (log.platoon || '').toLowerCase().trim();
+      const logPl = (echelon.platoon || '').toLowerCase().trim();
       const logSn = (log.sessionName || '').toLowerCase().trim();
       matchesPl = logPl.includes(plClean) || logSn.includes(plClean);
     }
@@ -1397,28 +1356,21 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
               </thead>
               <tbody>
                 {tableFilteredLogs.map((log, idx) => {
-                  const isTimeOut = log.scanMode === 'Time-Out' || (log.status && String(log.status).toUpperCase().includes('TIME-OUT'));
-                  let isLate = false;
-                  if (!isTimeOut && log.timestamp) {
-                    const cutoff = localStorage.getItem('csu_rotc_formation_cutoff') || '07:00';
-                    const [ch, cm] = cutoff.split(':').map(Number);
-                    const cutoffMinutes = (isNaN(ch) ? 7 : ch) * 60 + (isNaN(cm) ? 0 : cm);
-                    const d = new Date(log.timestamp);
-                    if (!isNaN(d.getTime())) {
-                      isLate = (d.getHours() * 60 + d.getMinutes()) > cutoffMinutes;
-                    }
-                  }
+                  const status = getAttendanceStatus(log, formationCutoff);
+                  const isTimeOut = status === 'TIME-OUT';
+                  const isLate = status === 'LATE';
 
                   const isOfficer = isOfficerLog(log);
+                  const echelon = getScannedUnitEchelon(log);
 
                   return (
                     <tr key={idx}>
                       <td>{idx + 1}</td>
                       <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{log.cadetId}</td>
                       <td style={{ fontWeight: 600 }}>{log.name}</td>
-                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{log.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
-                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{log.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
-                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{log.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
+                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{echelon.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
+                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{echelon.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
+                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{echelon.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
                       <td style={{ fontWeight: 600 }}>{log.rank || 'Cadet'}</td>
                       <td>{log.sessionName || 'Drill Session'}</td>
                       <td>{log.dutyOfficer || 'Duty Officer'}</td>
@@ -1430,7 +1382,7 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
                           </span>
                         ) : isLate ? (
                           <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
-                            ⏱️ LATE
+                            <Clock size={11} /> LATE
                           </span>
                         ) : (
                           <span className="badge badge-present" style={{ gap: '3px' }}>

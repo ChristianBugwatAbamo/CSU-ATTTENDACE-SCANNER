@@ -16,10 +16,35 @@ export async function getOfflineQueue() {
   }
 }
 
-// Save scan to offline queue
+// Save scan to offline queue (updates existing entry on re-scan, or prepends new)
 export async function saveOfflineScan(scanRecord) {
   const currentQueue = await getOfflineQueue();
-  const updatedQueue = [scanRecord, ...currentQueue];
+  const normalizedId = String(scanRecord.cadetId || '').trim().toUpperCase();
+  const scanMode = scanRecord.scanMode || 'Time-In';
+  const scanDate = scanRecord.timestamp ? new Date(scanRecord.timestamp).toDateString() : new Date().toDateString();
+
+  let updatedQueue = [...currentQueue];
+  const existingIndex = updatedQueue.findIndex(item => {
+    const itemDate = item.timestamp ? new Date(item.timestamp).toDateString() : new Date().toDateString();
+    return String(item.cadetId || '').trim().toUpperCase() === normalizedId &&
+      (item.scanMode || 'Time-In') === scanMode &&
+      itemDate === scanDate;
+  });
+
+  if (existingIndex !== -1) {
+    // OVERWRITE: Update with latest Duty Officer, timestamp, and details
+    updatedQueue[existingIndex] = {
+      ...updatedQueue[existingIndex],
+      ...scanRecord,
+      dutyOfficer: scanRecord.dutyOfficer || updatedQueue[existingIndex].dutyOfficer,
+      timestamp: scanRecord.timestamp,
+      sessionName: scanRecord.sessionName || updatedQueue[existingIndex].sessionName
+    };
+  } else {
+    // NEW RECORD: Prepend
+    updatedQueue.unshift(scanRecord);
+  }
+
   try {
     await set(QUEUE_KEY, updatedQueue);
   } catch (err) {

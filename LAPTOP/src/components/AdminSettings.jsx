@@ -219,12 +219,15 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefresh, serverOnline }) {
-  // Active top tab: 'attendance' | 'structure' | 'branding' | 'storage' | 'idprinting'
-  const [activeTab, setActiveTab] = useState('attendance');
+  // Active top tab: 'structure' | 'branding' | 'storage' | 'idprinting'
+  const [activeTab, setActiveTab] = useState('structure');
 
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [savedSettings, setSavedSettings] = useState(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessToast, setSaveSuccessToast] = useState(null);
+
+  const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(savedSettings);
 
   // Echelon Navigation in Structure Tab
   const [selectedBnId, setSelectedBnId] = useState('bn-1');
@@ -266,52 +269,67 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   // Load Settings on Mount
   useEffect(() => {
     const loadSettings = async () => {
+      let finalSettings = DEFAULT_SETTINGS;
       try {
         const res = await fetch('/api/settings');
         if (res.ok) {
           const data = await res.json();
-          setSettings(prev => ({
-            ...prev,
+          finalSettings = {
+            ...DEFAULT_SETTINGS,
             ...data,
             unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
             officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
             officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
-          }));
+          };
         } else {
           const local = localStorage.getItem('csu_rotc_admin_settings');
           if (local) {
             const parsed = JSON.parse(local);
-            setSettings(prev => ({
-              ...prev,
+            finalSettings = {
+              ...DEFAULT_SETTINGS,
               ...parsed,
               unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
               officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
               officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
-            }));
+            };
           }
         }
       } catch (err) {
         const local = localStorage.getItem('csu_rotc_admin_settings');
         if (local) {
           const parsed = JSON.parse(local);
-          setSettings(prev => ({
-            ...prev,
+          finalSettings = {
+            ...DEFAULT_SETTINGS,
             ...parsed,
             unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
             officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
             officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
-          }));
+          };
         }
       }
+      setSettings(finalSettings);
+      setSavedSettings(finalSettings);
     };
     loadSettings();
   }, []);
+
+  // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveSettings();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [settings]);
 
   const handleChange = (field, value) => {
     setSettings(prev => ({ ...prev, [field]: value }));
   };
 
-  // Save Settings Handler
+  // Save Settings Handler (Centralized for all 4 tabs)
   const handleSaveSettings = async (e, customSettings = null) => {
     if (e) e.preventDefault();
     setIsSaving(true);
@@ -320,6 +338,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     try {
       localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(toSave));
       window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
       window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: toSave }));
 
       const res = await fetch('/api/settings', {
@@ -328,12 +347,15 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         body: JSON.stringify(toSave)
       });
 
+      setSavedSettings(toSave);
+
       if (res.ok) {
-        setSaveSuccessToast('System parameters & unit settings saved and applied successfully!');
+        setSaveSuccessToast('All settings & unit configurations saved and applied successfully!');
       } else {
         setSaveSuccessToast('Settings saved locally to browser storage.');
       }
     } catch (err) {
+      setSavedSettings(toSave);
       setSaveSuccessToast('Settings saved locally (Server node offline).');
     } finally {
       setIsSaving(false);
@@ -341,7 +363,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Handle Dynamic Ranks
+  // Handle Dynamic Ranks (Draft only until Save All Settings)
   const handleAddRank = () => {
     const trimmed = newRankInput.trim();
     if (!trimmed) return;
@@ -351,10 +373,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       return;
     }
     const updated = [...currentRanks, trimmed];
-    const newSettings = { ...settings, officerRanks: updated };
-    setSettings(newSettings);
+    setSettings(prev => ({ ...prev, officerRanks: updated }));
     setNewRankInput('');
-    handleSaveSettings(null, newSettings);
   };
 
   const handleDeleteRank = (rankToDelete) => {
@@ -364,12 +384,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       return;
     }
     const updated = currentRanks.filter(r => r !== rankToDelete);
-    const newSettings = { ...settings, officerRanks: updated };
-    setSettings(newSettings);
-    handleSaveSettings(null, newSettings);
+    setSettings(prev => ({ ...prev, officerRanks: updated }));
   };
 
-  // Handle Dynamic Designations
+  // Handle Dynamic Designations (Draft only until Save All Settings)
   const handleAddDesignation = () => {
     const trimmed = newDesignationInput.trim();
     if (!trimmed) return;
@@ -379,10 +397,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       return;
     }
     const updated = [...currentDesignations, trimmed];
-    const newSettings = { ...settings, officerDesignations: updated };
-    setSettings(newSettings);
+    setSettings(prev => ({ ...prev, officerDesignations: updated }));
     setNewDesignationInput('');
-    handleSaveSettings(null, newSettings);
   };
 
   const handleDeleteDesignation = (designationToDelete) => {
@@ -392,20 +408,16 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       return;
     }
     const updated = currentDesignations.filter(d => d !== designationToDelete);
-    const newSettings = { ...settings, officerDesignations: updated };
-    setSettings(newSettings);
-    handleSaveSettings(null, newSettings);
+    setSettings(prev => ({ ...prev, officerDesignations: updated }));
   };
 
   const handleResetRanksAndDesignations = () => {
-    if (window.confirm('Reset Officer Ranks and Staff Designations to military defaults?')) {
-      const newSettings = {
-        ...settings,
+    if (window.confirm('Reset Officer Ranks and Staff Designations to military defaults in draft state? (Click "SAVE ALL SETTINGS" to commit)')) {
+      setSettings(prev => ({
+        ...prev,
         officerRanks: DEFAULT_OFFICER_RANKS,
         officerDesignations: DEFAULT_OFFICER_DESIGNATIONS
-      };
-      setSettings(newSettings);
-      handleSaveSettings(null, newSettings);
+      }));
     }
   };
 
@@ -451,6 +463,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
     try {
       const res = await fetch('/api/attendance', { method: 'DELETE' });
+      localStorage.removeItem('csu_rotc_master_attendance');
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
+
       if (res.ok) {
         setIsSecurePurgeModalOpen(false);
         setPurgePasswordInput('');
@@ -461,7 +477,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         setPurgeErrorMsg('Failed to clear logs on server.');
       }
     } catch (err) {
-      setPurgeErrorMsg('Error contacting server.');
+      localStorage.removeItem('csu_rotc_master_attendance');
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
+      setPurgeErrorMsg('Error contacting server (cleared locally).');
     } finally {
       setTimeout(() => setSaveSuccessToast(null), 4000);
     }
@@ -519,6 +538,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         if (data.settings) {
           setSettings(data.settings);
           localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(data.settings));
+        }
+
+        if (data.attendanceLogs && Array.isArray(data.attendanceLogs)) {
+          localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(data.attendanceLogs));
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('local-attendance-update'));
+        }
+
+        if (data.cadets && Array.isArray(data.cadets)) {
+          localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(data.cadets));
+          window.dispatchEvent(new Event('storage'));
+          window.dispatchEvent(new Event('local-attendance-update'));
         }
 
         const res = await fetch('/api/restore', {
@@ -735,7 +766,6 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     const newSettings = { ...settings, unitStructure: updatedStructure };
     setSettings(newSettings);
     setIsEchelonModalOpen(false);
-    handleSaveSettings(null, newSettings);
   };
 
   // Open Delete Confirmation
@@ -800,23 +830,20 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     const newSettings = { ...settings, unitStructure: updatedStructure };
     setSettings(newSettings);
     setIsEchelonDeleteModalOpen(false);
-    handleSaveSettings(null, newSettings);
   };
 
   // Restore Default 1,184 Echelon Structure
   const handleRestoreDefaultStructure = () => {
-    if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)?')) {
+    if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)? (Click "SAVE ALL SETTINGS" to commit)')) {
       const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE };
       setSettings(newSettings);
       setSelectedBnId('bn-1');
       setSelectedCoId('co-1-alpha');
-      handleSaveSettings(null, newSettings);
     }
   };
 
   const tabs = [
-    { id: 'attendance', label: 'Attendance Rules', icon: Clock, desc: 'Cutoff times & capacity buffers' },
-    { id: 'structure', label: 'Unit Structure & Echelons', icon: Layers, desc: 'Battalions, companies & platoons' },
+    { id: 'structure', label: 'Muster & Unit Configuration', icon: Layers, desc: 'Formation schedules & battalion structure' },
     { id: 'branding', label: 'Unit Branding', icon: Award, desc: 'Command profile & official seals' },
     { id: 'storage', label: 'Data & Storage', icon: Database, desc: 'Excel paths & JSON backups' },
     { id: 'idprinting', label: 'ID Printing Setup', icon: Printer, desc: 'Signatories & CR80 specs' }
@@ -861,12 +888,29 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             System & Unit Settings
           </h2>
           <p style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.9)', margin: 0, lineHeight: 1.5 }}>
-            Configure formation rules, dynamic echelon structure, official seals, and ID printing parameters.
+            Configure formation rules, dynamic organizational structure, official seals, and ID printing parameters.
           </p>
         </div>
 
         {/* Global Save Button in Hero */}
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          {hasUnsavedChanges && (
+            <span style={{
+              background: 'rgba(239, 68, 68, 0.25)',
+              color: '#fef08a',
+              border: '1px solid rgba(239, 68, 68, 0.5)',
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              padding: '5px 12px',
+              borderRadius: '6px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              letterSpacing: '0.5px'
+            }}>
+              ● UNSAVED DRAFT CHANGES
+            </span>
+          )}
           <button
             className="btn btn-gold"
             onClick={handleSaveSettings}
@@ -879,7 +923,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               display: 'flex',
               alignItems: 'center',
               gap: '0.65rem',
-              borderRadius: '10px'
+              borderRadius: '10px',
+              cursor: isSaving ? 'not-allowed' : 'pointer'
             }}
           >
             {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
@@ -910,10 +955,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         </div>
       )}
 
-      {/* Top 5-Tab Navigation Buttons Bar */}
+      {/* Top Navigation Buttons Bar */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: '0.75rem',
         marginBottom: '1.5rem'
       }}>
@@ -981,12 +1026,12 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       </div>
 
       {/* =========================================================================
-          TAB 1: ATTENDANCE RULES
+          TAB 1: ATTENDANCE & UNIT SETUP
           ========================================================================= */}
-      {activeTab === 'attendance' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-          {/* Formation Cutoff Times Card */}
-          <div className="card">
+      {activeTab === 'structure' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Formation Cutoff Schedule Card */}
+          <div className="card" style={{ width: '100%' }}>
             <div className="card-header">
               <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
                 <Clock size={20} />
@@ -998,7 +1043,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Morning Formation Cutoff (Time-In Assembly)
+                  Time-In Cutoff
                 </label>
                 <input
                   type="time"
@@ -1008,91 +1053,24 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Default morning muster deadline (e.g., 07:30 AM). Scans before this are marked Present.
+                  Default morning muster deadline (e.g., 07:30 AM). Scans on or before this are marked Present; scans after this are marked Late.
                 </span>
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Afternoon Formation Cutoff (Dismissal / Retreat)
-                </label>
-                <input
-                  type="time"
-                  className="form-control"
-                  value={settings.afternoonCutoffTime}
-                  onChange={(e) => handleChange('afternoonCutoffTime', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Standard afternoon formation dismissal time (e.g., 04:00 PM / 16:00).
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Tardy Grace Buffers & Capacity Limits */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Sliders size={20} />
-                <span>Grace Buffers & Platoon Limits</span>
-              </div>
-              <span className="badge badge-present">CAPACITY & GRACE</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Tardy Grace Period Buffer (Minutes)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="60"
-                  className="form-control"
-                  value={settings.formationTardyGrace}
-                  onChange={(e) => handleChange('formationTardyGrace', parseInt(e.target.value) || 0)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
 
                 {/* Status Transition Legend */}
-                <div style={{ marginTop: '0.5rem', padding: '0.65rem 0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.75rem' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--text-dark)', marginBottom: '4px' }}>Automatic Scan Status Transition:</div>
+                <div style={{ marginTop: '0.85rem', padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.78rem' }}>
+                  <div style={{ fontWeight: 700, color: 'var(--text-dark)', marginBottom: '6px' }}>Automatic Scan Status Transition (Exact Cutoff):</div>
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ color: '#065f46', fontWeight: 700 }}>🟢 Before 07:30 → PRESENT</span>
-                    <span style={{ color: '#92400e', fontWeight: 700 }}>🟡 07:31 - 07:45 → TARDY</span>
-                    <span style={{ color: '#991b1b', fontWeight: 700 }}>🔴 After 07:45 → LATE</span>
+                    <span style={{ color: '#065f46', fontWeight: 700, background: '#d1fae5', padding: '4px 10px', borderRadius: '4px' }}>
+                      🟢 On or Before {settings.morningCutoffTime || '07:30'} → PRESENT
+                    </span>
+                    <span style={{ color: '#991b1b', fontWeight: 700, background: '#fee2e2', padding: '4px 10px', borderRadius: '4px' }}>
+                      🔴 After {settings.morningCutoffTime || '07:30'} → LATE
+                    </span>
                   </div>
                 </div>
               </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Fixed Platoon Capacity Quota Limit
-                </label>
-                <input
-                  type="number"
-                  min="10"
-                  max="100"
-                  className="form-control"
-                  value={settings.cadetQuotaPerPlatoon}
-                  onChange={(e) => handleChange('cadetQuotaPerPlatoon', parseInt(e.target.value) || 37)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Standard active platoon limit. Hard guard blocks scanning once this capacity is reached on mobile.
-                </span>
-              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* =========================================================================
-          TAB 2: UNIT STRUCTURE & ECHELONS (DYNAMIC ORGANIZATIONAL MANAGEMENT)
-          ========================================================================= */}
-      {activeTab === 'structure' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
 
           {/* Unit Structure Summary Banner */}
           <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>

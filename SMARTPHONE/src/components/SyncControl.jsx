@@ -75,7 +75,7 @@ export default function SyncControl({
 
     return JSON.stringify({
       T: 'RBS',                      // ROTC Batch Sync
-      d: officer.slice(0, 24),       // Duty Officer
+      d: officer,                    // Duty Officer (Full string, e.g. "C/LT COL CHARIS S JALIQUE (ROTC) 1CL")
       bn: bn,                        // Battalion
       co: co,                        // Company
       pl: pl,                        // Platoon

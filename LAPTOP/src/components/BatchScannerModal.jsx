@@ -101,7 +101,19 @@ export default function BatchScannerModal({ isOpen, onClose, onSyncComplete, cad
   const finalizeImport = (allRecords, dutyOfficer, sessionName) => {
     const cadetMap = new Map((cadets || []).map(c => [c.id, c]));
 
-    const enrichedRecords = allRecords.map(rec => {
+    // Deduplicate records in the scanned batch
+    const seenBatchKeys = new Set();
+    const uniqueRecords = allRecords.filter(rec => {
+      const cid = String(rec.cadetId || '').trim().toUpperCase();
+      if (!cid) return false;
+      const mode = rec.scanMode || 'Time-In';
+      const key = `${cid}__${mode}`;
+      if (seenBatchKeys.has(key)) return false;
+      seenBatchKeys.add(key);
+      return true;
+    });
+
+    const enrichedRecords = uniqueRecords.map(rec => {
       const match = cadetMap.get(rec.cadetId);
 
       const directName = (rec.name && rec.name !== 'UNREGISTERED CADET' && rec.name.trim().length > 0)
@@ -145,6 +157,7 @@ export default function BatchScannerModal({ isOpen, onClose, onSyncComplete, cad
     if (onSyncComplete) {
       onSyncComplete(enrichedRecords);
     }
+    window.dispatchEvent(new Event('local-attendance-update'));
 
     // Best-effort background POST for Excel generation
     try {

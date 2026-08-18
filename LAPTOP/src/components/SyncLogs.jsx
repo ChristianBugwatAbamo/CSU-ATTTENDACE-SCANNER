@@ -1,17 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { FileSpreadsheet, Download, RefreshCw, CheckCircle, Clock, Camera, QrCode, Filter, Search, Trash2 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
+import { getAttendanceStatus, getScannedUnitEchelon } from '../utils/attendanceStatus';
+import { useAttendanceData } from '../hooks/useAttendanceData';
 
-export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpenScanner }) {
+export default function SyncLogs({ attendanceLogs: propsLogs, onRefresh, onClearLogs, onOpenScanner }) {
+  const { records: hookLogs, activeCutoff } = useAttendanceData();
+  const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : (propsLogs || []);
+
   const [excelReports, setExcelReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [battalionFilter, setBattalionFilter] = useState('ALL');
   const [companyFilter, setCompanyFilter] = useState('ALL');
   const [platoonFilter, setPlatoonFilter] = useState('ALL');
-  const [formationCutoff, setFormationCutoff] = useState(() => localStorage.getItem('csu_rotc_formation_cutoff') || '07:00');
+  const [formationCutoff, setFormationCutoff] = useState(() => activeCutoff || '07:30');
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [statusNotice, setStatusNotice] = useState(null);
+
+  // Sync formation cutoff when activeCutoff updates
+  useEffect(() => {
+    if (activeCutoff) {
+      setFormationCutoff(activeCutoff);
+    }
+  }, [activeCutoff]);
 
   const fetchReports = async () => {
     setLoadingReports(true);
@@ -32,8 +44,27 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
     fetchReports();
   }, []);
 
+  const handleUpdateCutoff = (newVal) => {
+    setFormationCutoff(newVal);
+    localStorage.setItem('csu_rotc_formation_cutoff', newVal);
+    try {
+      const current = localStorage.getItem('csu_rotc_admin_settings');
+      const parsed = current ? JSON.parse(current) : {};
+      const updated = { ...parsed, morningCutoffTime: newVal };
+      localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: updated }));
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
+      fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      }).catch(() => {});
+    } catch (_) {}
+  };
+
   const handleRefreshAll = () => {
-    onRefresh();
+    if (onRefresh) onRefresh();
     fetchReports();
   };
 
@@ -41,37 +72,23 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
     setIsClearModalOpen(false);
     if (onClearLogs) {
       await onClearLogs();
+      window.dispatchEvent(new Event('local-attendance-update'));
       setStatusNotice("Master Attendance Logs successfully cleared.");
       setTimeout(() => setStatusNotice(null), 4000);
     }
   };
 
-  const getAttendanceStatus = (log) => {
-    if (log.scanMode === 'Time-Out' || (log.status && String(log.status).toUpperCase().includes('TIME-OUT'))) {
-      return 'TIME-OUT';
-    }
-    if (!log.timestamp) return 'PRESENT';
-
-    const d = new Date(log.timestamp);
-    if (isNaN(d.getTime())) return 'PRESENT';
-
-    const logMinutes = d.getHours() * 60 + d.getMinutes();
-    const [cutoffH, cutoffM] = (formationCutoff || '07:00').split(':').map(Number);
-    const cutoffMinutes = (isNaN(cutoffH) ? 7 : cutoffH) * 60 + (isNaN(cutoffM) ? 0 : cutoffM);
-
-    return logMinutes > cutoffMinutes ? 'LATE' : 'PRESENT';
-  };
-
   const filteredLogs = attendanceLogs.filter(log => {
+    const echelon = getScannedUnitEchelon(log);
     const matchesSearch = (log.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || (log.cadetId || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesBn = battalionFilter === 'ALL' || (log.battalion || '').toLowerCase().includes(battalionFilter.replace(' Battalion', '').toLowerCase());
-    const matchesCo = companyFilter === 'ALL' || (log.company || '').toLowerCase().includes(companyFilter.toLowerCase());
-    const matchesPl = platoonFilter === 'ALL' || (log.platoon || '').toLowerCase().includes(platoonFilter.replace(' Platoon', '').toLowerCase()) || (log.sessionName || '').toLowerCase().includes(platoonFilter.toLowerCase());
+    const matchesBn = battalionFilter === 'ALL' || (echelon.battalion || '').toLowerCase().includes(battalionFilter.replace(' Battalion', '').toLowerCase());
+    const matchesCo = companyFilter === 'ALL' || (echelon.company || '').toLowerCase().includes(companyFilter.toLowerCase());
+    const matchesPl = platoonFilter === 'ALL' || (echelon.platoon || '').toLowerCase().includes(platoonFilter.replace(' Platoon', '').toLowerCase()) || (log.sessionName || '').toLowerCase().includes(platoonFilter.toLowerCase());
     return matchesSearch && matchesBn && matchesCo && matchesPl;
   });
 
-  const presentCount = filteredLogs.filter(l => getAttendanceStatus(l) === 'PRESENT').length;
-  const lateCount = filteredLogs.filter(l => getAttendanceStatus(l) === 'LATE').length;
+  const presentCount = filteredLogs.filter(l => getAttendanceStatus(l, formationCutoff) === 'PRESENT').length;
+  const lateCount = filteredLogs.filter(l => getAttendanceStatus(l, formationCutoff) === 'LATE').length;
 
   return (
     <div>
@@ -119,10 +136,7 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
                 className="form-control form-control-sm"
                 style={{ width: '115px', padding: '2px 6px', fontWeight: 700, fontSize: '0.82rem' }}
                 value={formationCutoff}
-                onChange={(e) => {
-                  setFormationCutoff(e.target.value);
-                  localStorage.setItem('csu_rotc_formation_cutoff', e.target.value);
-                }}
+                onChange={(e) => handleUpdateCutoff(e.target.value)}
                 title="Cadets scanned after this time will be marked LATE"
               />
             </div>
@@ -262,17 +276,18 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
                 </tr>
               ) : (
                 filteredLogs.map((log, idx) => {
-                  const status = getAttendanceStatus(log);
+                  const status = getAttendanceStatus(log, formationCutoff);
                   const isLate = status === 'LATE';
+                  const echelon = getScannedUnitEchelon(log);
 
                   return (
                     <tr key={idx}>
                       <td>{idx + 1}</td>
                       <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{log.cadetId}</td>
                       <td style={{ fontWeight: 600 }}>{log.name}</td>
-                      <td><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>{log.battalion || '1st Battalion'}</span></td>
-                      <td><span className="badge badge-company">{log.company}</span></td>
-                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{log.platoon || '1st Platoon'}</span></td>
+                      <td><span className="badge" style={{ background: '#e0e7ff', color: '#3730a3' }}>{echelon.battalion}</span></td>
+                      <td><span className="badge badge-company">{echelon.company}</span></td>
+                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e' }}>{echelon.platoon}</span></td>
                       <td>{log.rank || 'Cadet'}</td>
                       <td style={{ fontSize: '0.8rem' }}>{log.sessionName || 'Drill Session'}</td>
                       <td>{log.dutyOfficer || 'Duty Officer'}</td>

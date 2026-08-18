@@ -11,12 +11,30 @@ import { Camera, QrCode } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [cadets, setCadets] = useState([]);
-  const [attendanceLogs, setAttendanceLogs] = useState([]);
+
+  // Hydrate Cadets & Master Attendance from localStorage on initial render
+  const [cadets, setCadets] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_cadets_roster');
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [attendanceLogs, setAttendanceLogs] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_master_attendance');
+      return saved ? JSON.parse(saved) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
   const [serverOnline, setServerOnline] = useState(true);
   const [isBatchScannerOpen, setIsBatchScannerOpen] = useState(false);
 
-  // Fetch Cadets & Attendance Logs
+  // Fetch Cadets & Attendance Logs from server or fallback to persistent storage
   const fetchData = async () => {
     try {
       const [cadetsRes, logsRes, healthRes] = await Promise.allSettled([
@@ -30,6 +48,7 @@ export default function App() {
           const cadetsData = await cadetsRes.value.json();
           if (Array.isArray(cadetsData)) {
             setCadets(cadetsData);
+            localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(cadetsData));
           }
         } catch (_) {}
       }
@@ -39,6 +58,16 @@ export default function App() {
           const logsData = await logsRes.value.json();
           if (Array.isArray(logsData)) {
             setAttendanceLogs(logsData);
+            localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(logsData));
+            window.dispatchEvent(new Event('local-attendance-update'));
+          }
+        } catch (_) {}
+      } else {
+        // Offline / server error fallback: hydrate from localStorage
+        try {
+          const savedLogs = localStorage.getItem('csu_rotc_master_attendance');
+          if (savedLogs) {
+            setAttendanceLogs(JSON.parse(savedLogs));
           }
         } catch (_) {}
       }
@@ -47,24 +76,53 @@ export default function App() {
     } catch (err) {
       console.warn("Backend offline, running in offline React mode:", err);
       setServerOnline(false);
+      try {
+        const savedLogs = localStorage.getItem('csu_rotc_master_attendance');
+        if (savedLogs) {
+          setAttendanceLogs(JSON.parse(savedLogs));
+        }
+      } catch (_) {}
     }
   };
 
   useEffect(() => {
     fetchData();
     const interval = setInterval(fetchData, 5000); // Poll every 5s for live sync updates
-    return () => clearInterval(interval);
+
+    const handleStorage = (e) => {
+      if (!e || e.key === 'csu_rotc_master_attendance' || e.type === 'local-attendance-update') {
+        try {
+          const saved = localStorage.getItem('csu_rotc_master_attendance');
+          if (saved) setAttendanceLogs(JSON.parse(saved));
+        } catch (_) {}
+      }
+      if (!e || e.key === 'csu_rotc_cadets_roster' || e.type === 'local-attendance-update') {
+        try {
+          const savedCadets = localStorage.getItem('csu_rotc_cadets_roster');
+          if (savedCadets) setCadets(JSON.parse(savedCadets));
+        } catch (_) {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('local-attendance-update', handleStorage);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('local-attendance-update', handleStorage);
+    };
   }, []);
 
   const handleClearAttendance = async () => {
     try {
       await fetch('/api/attendance', { method: 'DELETE' });
-      setAttendanceLogs([]);
-      fetchData();
     } catch (err) {
-      console.error('Failed to clear attendance logs:', err);
-      setAttendanceLogs([]);
+      console.error('Failed to clear attendance logs on server:', err);
     }
+    localStorage.removeItem('csu_rotc_master_attendance');
+    setAttendanceLogs([]);
+    window.dispatchEvent(new Event('storage'));
+    window.dispatchEvent(new Event('local-attendance-update'));
   };
 
   return (
@@ -142,8 +200,45 @@ export default function App() {
         onClose={() => setIsBatchScannerOpen(false)}
         cadets={cadets}
         onSyncComplete={(enrichedRecords) => {
-          // Merge parsed records directly into local React state
-          setAttendanceLogs(prev => [...enrichedRecords, ...prev]);
+          // Ingest batch with in-place Duty Officer & Timestamp updates
+          setAttendanceLogs(prev => {
+            let updated = [...prev];
+
+            enrichedRecords.forEach(newRecord => {
+              const scanDateStr = newRecord.timestamp ? new Date(newRecord.timestamp).toDateString() : new Date().toDateString();
+              const cid = String(newRecord.cadetId || '').trim().toUpperCase();
+              const mode = newRecord.scanMode || (String(newRecord.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
+
+              const existingIndex = updated.findIndex(l => {
+                const dStr = l.timestamp ? new Date(l.timestamp).toDateString() : '';
+                const lCid = String(l.cadetId || '').trim().toUpperCase();
+                const lMode = l.scanMode || (String(l.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
+                return lCid === cid && dStr === scanDateStr && lMode === mode;
+              });
+
+              if (existingIndex !== -1) {
+                // OVERWRITE: Update Duty Officer, Timestamp, and Session Details
+                updated[existingIndex] = {
+                  ...updated[existingIndex],
+                  dutyOfficer: newRecord.dutyOfficer,
+                  timestamp: newRecord.timestamp,
+                  sessionName: newRecord.sessionName || updated[existingIndex].sessionName,
+                  status: newRecord.status || updated[existingIndex].status,
+                  receivedAt: new Date().toISOString()
+                };
+              } else {
+                // NEW RECORD: Prepend to list
+                updated.unshift(newRecord);
+              }
+            });
+
+            try {
+              localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(updated));
+              window.dispatchEvent(new Event('storage'));
+              window.dispatchEvent(new Event('local-attendance-update'));
+            } catch (_) {}
+            return updated;
+          });
         }}
       />
     </div>

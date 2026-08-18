@@ -7,7 +7,7 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline }) {
     { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
     { id: 'scanner', label: 'Webcam Batch Scanner', icon: Camera },
     { id: 'synclogs', label: 'Attendance & Excel Reports', icon: FileSpreadsheet },
-    { id: 'settings', label: 'Unit & System Settings', icon: Settings }
+    { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
   return (
