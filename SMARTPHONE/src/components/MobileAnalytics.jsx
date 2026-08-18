@@ -60,6 +60,8 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
   const formattedCoy = activeCoy.replace(' Company', ' COY').toUpperCase();
   const formattedPltn = activePltn.toUpperCase();
 
+  const [selectedScanDetail, setSelectedScanDetail] = React.useState(null);
+
   return (
     <div>
       {/* Active Platoon Attendance & Progress Card */}
@@ -138,42 +140,47 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 borderRadius: '9999px',
                 background: activeScannedCount >= PLATOON_CAPACITY ? '#d1fae5' : '#fef3c7',
                 color: activeScannedCount >= PLATOON_CAPACITY ? '#065f46' : '#92400e',
-                border: `1px solid ${activeScannedCount >= PLATOON_CAPACITY ? '#6ee7b7' : '#fde68a'}`
+                border: `1px solid ${activeScannedCount >= PLATOON_CAPACITY ? '#6ee7b7' : '#fde68a'}`,
+                transition: 'all 0.4s ease'
               }}>
                 {activeScannedCount >= PLATOON_CAPACITY ? '100% COMPLETE' : `${remaining} REMAINING`}
               </span>
             </div>
           </div>
 
-          {/* Clean Visual Progress Bar */}
+          {/* Smooth Animated Visual Progress Bar */}
           <div style={{
             width: '100%',
-            height: '10px',
+            height: '11px',
             background: '#e2e8f0',
             borderRadius: '9999px',
             overflow: 'hidden',
-            marginTop: '0.4rem'
+            marginTop: '0.4rem',
+            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
           }}>
-            <div style={{
-              width: `${progressPercent}%`,
-              height: '100%',
-              background: activeScannedCount >= PLATOON_CAPACITY
-                ? 'linear-gradient(90deg, #059669, #10b981)'
-                : 'linear-gradient(90deg, #064e2e, var(--rotc-yellow-gold))',
-              borderRadius: '9999px',
-              transition: 'width 0.4s ease'
-            }} />
+            <div
+              className="animated-progress-fill"
+              style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                background: activeScannedCount >= PLATOON_CAPACITY
+                  ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
+                  : 'linear-gradient(90deg, #064e2e 0%, #059669 50%, var(--rotc-yellow-gold) 100%)',
+                borderRadius: '9999px',
+                transition: 'width 0.8s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.5s ease'
+              }}
+            />
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px', fontWeight: 600 }}>
             <span>0 Cadets</span>
-            <span>{progressPercent}% of {activePltn}</span>
+            <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 800 }}>{progressPercent}% of {activePltn}</span>
             <span>37 Cadets Quota</span>
           </div>
         </div>
       </div>
 
-      {/* Recent Field Scans List View (Scoped strictly to active unit context) */}
+      {/* Recent Field Scans List View (Interactive tap-to-view items) */}
       <div className="mobile-card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
           <div className="mobile-card-title" style={{ margin: 0 }}>
@@ -204,7 +211,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '3px',
-                  transition: 'background 0.2s ease'
+                  transition: 'all 0.2s ease'
                 }}
                 title="Clear all scans from offline device storage"
               >
@@ -225,24 +232,42 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
             )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '280px', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem', maxHeight: '290px', overflowY: 'auto' }}>
             {activeUnitScans.map((scan, idx) => (
-              <div key={`${scan.cadetId}-${idx}`} className="scan-log-item" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.7rem 0.85rem', background: '#ffffff', borderRadius: '10px', border: '1px solid var(--border-light)', boxShadow: 'var(--shadow-sm)' }}>
-                
+              <div
+                key={`${scan.cadetId}-${idx}`}
+                className="scan-log-item interactive-scan-row"
+                onClick={() => setSelectedScanDetail(scan)}
+                role="button"
+                tabIndex={0}
+                title="Tap to view cadet attendance details"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '0.75rem 0.9rem',
+                  background: '#ffffff',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-light)',
+                  boxShadow: 'var(--shadow-sm)',
+                  cursor: 'pointer',
+                  transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
+                }}
+              >
                 {/* Left Side: Top Line = Cadet Name/ID, Bottom Line = ID + Timestamp */}
                 <div>
-                  {/* Top Line (Primary): CADET SANTOS, MARIA L. */}
+                  {/* Top Line: CADET SANTOS, MARIA L. */}
                   <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--rotc-green-dark)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
                     {getDisplayHeading(scan)}
                   </div>
 
-                  {/* Bottom Line (Secondary): ID: 221-01001 • 09:05 AM */}
+                  {/* Bottom Line: ID: 221-01001 • 09:05 AM */}
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
                     <span style={{ fontWeight: 700, color: 'var(--text-dark)' }}>ID: {scan.cadetId}</span>
                     <span>•</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                       <Clock size={11} />
-                      {scan.timestamp ? new Date(scan.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Just now'}
+                      {scan.timestamp ? new Date(scan.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Just now'}
                     </span>
                   </div>
                 </div>
@@ -252,7 +277,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                   <span style={{
                     fontSize: '0.65rem',
                     fontWeight: 800,
-                    padding: '2px 8px',
+                    padding: '3px 9px',
                     borderRadius: '9999px',
                     background: scan.scanMode === 'Time-Out' ? '#fef3c7' : '#d1fae5',
                     color: scan.scanMode === 'Time-Out' ? '#92400e' : '#065f46',
@@ -261,12 +286,77 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                     {scan.scanMode ? scan.scanMode.toUpperCase() : 'PRESENT'}
                   </span>
                 </div>
-
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Tap-to-View Cadet Detail Modal */}
+      {selectedScanDetail && (
+        <div className="modal-overlay" onClick={() => setSelectedScanDetail(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px', padding: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--rotc-green-dark)', fontWeight: 800, fontSize: '0.95rem' }}>
+                <CheckCircle2 size={20} color="var(--rotc-green-primary)" />
+                <span>CADET SCAN DETAILS</span>
+              </div>
+              <button
+                type="button"
+                className="btn-close"
+                onClick={() => setSelectedScanDetail(null)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'var(--text-muted)' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '1rem', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              <div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Cadet Name</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{getDisplayHeading(selectedScanDetail)}</div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Cadet ID</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800 }}>{selectedScanDetail.cadetId}</div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Scan Mode</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: selectedScanDetail.scanMode === 'Time-Out' ? '#d97706' : '#059669' }}>
+                    {selectedScanDetail.scanMode || 'Time-In'}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Unit Hierarchy</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>
+                  {selectedScanDetail.battalion || activeBn} • {selectedScanDetail.company || activeCoy} • {selectedScanDetail.platoon || activePltn}
+                </div>
+              </div>
+
+              <div>
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Logged System Timestamp</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-dark)' }}>
+                  {selectedScanDetail.timestamp ? new Date(selectedScanDetail.timestamp).toLocaleString() : 'N/A'}
+                </div>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setSelectedScanDetail(null)}
+              style={{ width: '100%', marginTop: '1rem', padding: '0.75rem', fontWeight: 800, borderRadius: '10px' }}
+            >
+              Close Details
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

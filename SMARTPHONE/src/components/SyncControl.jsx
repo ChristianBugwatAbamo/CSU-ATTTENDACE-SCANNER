@@ -3,14 +3,32 @@ import { QRCodeSVG } from 'qrcode.react';
 import { QrCode, X, CheckCircle2, Smartphone, ShieldCheck, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 
-// Max cadets per QR chunk (8 cadets keeps QR matrix super low-density and instantly readable by laptop webcams)
-const CHUNK_SIZE = 8;
+// Max cadets per QR chunk (10 cadets maximum per page splits a full 37-cadet platoon into 4 low-density, easy-to-read QR pages)
+const CHUNK_SIZE = 10;
 
-export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOfficer, sessionName, onSyncSuccess, onResetQueue }) {
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
+export default function SyncControl({
+  offlineQueue = [],
+  sessionSetup,
+  dutyOfficer,
+  sessionName,
+  onSyncSuccess,
+  onResetQueue,
+  isOpen,
+  onClose,
+  hideBottomBar = false
+}) {
+  const [internalQrModalOpen, setInternalQrModalOpen] = useState(false);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState(null);
   const [currentChunk, setCurrentChunk] = useState(0);
+
+  const isQrModalOpen = isOpen !== undefined ? isOpen : internalQrModalOpen;
+  const setQrModalOpen = (val) => {
+    if (onClose && !val) {
+      onClose();
+    }
+    setInternalQrModalOpen(val);
+  };
 
   const handleOpenQrModal = () => {
     if (offlineQueue.length === 0) {
@@ -22,7 +40,7 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
       return;
     }
     setCurrentChunk(0);
-    setIsQrModalOpen(true);
+    setQrModalOpen(true);
   };
 
   const handleClearAndFinish = () => {
@@ -32,7 +50,7 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
   const handleConfirmSyncFinish = async () => {
     await onSyncSuccess();
     setIsSyncConfirmOpen(false);
-    setIsQrModalOpen(false);
+    setQrModalOpen(false);
     setSyncStatusMsg({
       type: 'success',
       text: `Queue cleared! Records transferred to Laptop Admin HQ.`
@@ -107,43 +125,45 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
       )}
 
       {/* Fixed Bottom Action Bar */}
-      <div className="bottom-sync-bar">
-        <button
-          className="btn-sync-gold"
-          onClick={handleOpenQrModal}
-        >
-          <QrCode size={20} />
-          <span>PRESENT BATCH SYNC QR</span>
-        </button>
+      {!hideBottomBar && (
+        <div className="bottom-sync-bar">
+          <button
+            className="btn-sync-gold"
+            onClick={handleOpenQrModal}
+          >
+            <QrCode size={20} />
+            <span>PRESENT BATCH SYNC QR</span>
+          </button>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div className="queue-badge" title="Pending Offline Scans in Local Storage">
-            QUEUE: {offlineQueue.length}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div className="queue-badge" title="Pending Offline Scans in Local Storage">
+              QUEUE: {offlineQueue.length}
+            </div>
+
+            {offlineQueue.length > 0 && onResetQueue && (
+              <button
+                onClick={onResetQueue}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.25)',
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  color: '#ffffff',
+                  borderRadius: '8px',
+                  padding: '6px 8px',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s ease'
+                }}
+                title="Clear / Reset Offline Queue"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
           </div>
-
-          {offlineQueue.length > 0 && onResetQueue && (
-            <button
-              onClick={onResetQueue}
-              style={{
-                background: 'rgba(239, 68, 68, 0.25)',
-                border: '1px solid rgba(239, 68, 68, 0.45)',
-                color: '#ffffff',
-                borderRadius: '8px',
-                padding: '6px 8px',
-                fontSize: '0.75rem',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'background 0.2s ease'
-              }}
-              title="Clear / Reset Offline Queue"
-            >
-              <Trash2 size={15} />
-            </button>
-          )}
         </div>
-      </div>
+      )}
 
       {/* Batch Sync QR Modal */}
       {isQrModalOpen && (
@@ -180,7 +200,7 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
                 <Smartphone size={20} />
                 <span>OFFLINE BATCH SYNC QR CODE</span>
               </div>
-              <button onClick={() => setIsQrModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+              <button onClick={() => setQrModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
                 <X size={22} />
               </button>
             </div>
@@ -193,33 +213,44 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
             {totalChunks > 1 && (
               <div style={{
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
-                gap: '0.75rem',
+                gap: '0.35rem',
                 marginBottom: '0.75rem',
                 background: '#f8fafc',
                 padding: '0.5rem 1rem',
-                borderRadius: '10px',
-                border: '1px solid var(--border-light)'
+                borderRadius: '12px',
+                border: '1px solid var(--border-light)',
+                width: '100%'
               }}>
-                <button
-                  onClick={() => setCurrentChunk(prev => Math.max(0, prev - 1))}
-                  disabled={currentChunk === 0}
-                  style={{ background: 'none', border: 'none', cursor: currentChunk === 0 ? 'default' : 'pointer', color: currentChunk === 0 ? '#cbd5e1' : 'var(--rotc-green-dark)', padding: '4px' }}
-                >
-                  <ChevronLeft size={22} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                  <button
+                    onClick={() => setCurrentChunk(prev => Math.max(0, prev - 1))}
+                    disabled={currentChunk === 0}
+                    style={{ background: 'none', border: 'none', cursor: currentChunk === 0 ? 'default' : 'pointer', color: currentChunk === 0 ? '#cbd5e1' : 'var(--rotc-green-dark)', padding: '4px' }}
+                    title="Previous QR Chunk Page"
+                  >
+                    <ChevronLeft size={24} />
+                  </button>
 
-                <div style={{ fontWeight: 800, fontSize: '0.9rem', color: 'var(--rotc-green-dark)', minWidth: '100px' }}>
-                  PAGE {currentChunk + 1} / {totalChunks}
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--rotc-green-dark)' }}>
+                      PAGE {currentChunk + 1} OF {totalChunks}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                      Cadets {currentChunk * CHUNK_SIZE + 1}–{Math.min(offlineQueue.length, (currentChunk + 1) * CHUNK_SIZE)} of {offlineQueue.length}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentChunk(prev => Math.min(totalChunks - 1, prev + 1))}
+                    disabled={currentChunk === totalChunks - 1}
+                    style={{ background: 'none', border: 'none', cursor: currentChunk === totalChunks - 1 ? 'default' : 'pointer', color: currentChunk === totalChunks - 1 ? '#cbd5e1' : 'var(--rotc-green-dark)', padding: '4px' }}
+                    title="Next QR Chunk Page"
+                  >
+                    <ChevronRight size={24} />
+                  </button>
                 </div>
-
-                <button
-                  onClick={() => setCurrentChunk(prev => Math.min(totalChunks - 1, prev + 1))}
-                  disabled={currentChunk === totalChunks - 1}
-                  style={{ background: 'none', border: 'none', cursor: currentChunk === totalChunks - 1 ? 'default' : 'pointer', color: currentChunk === totalChunks - 1 ? '#cbd5e1' : 'var(--rotc-green-dark)', padding: '4px' }}
-                >
-                  <ChevronRight size={22} />
-                </button>
               </div>
             )}
 
@@ -293,7 +324,7 @@ export default function SyncControl({ offlineQueue = [], sessionSetup, dutyOffic
                   color: 'var(--text-muted)',
                   cursor: 'pointer'
                 }}
-                onClick={() => setIsQrModalOpen(false)}
+                onClick={() => setQrModalOpen(false)}
               >
                 Close QR Code
               </button>

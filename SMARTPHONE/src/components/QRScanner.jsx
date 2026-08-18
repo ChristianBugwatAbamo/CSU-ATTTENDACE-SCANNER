@@ -1,9 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Camera, CheckCircle2, AlertTriangle, Shield } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
 
-export default function QRScanner({ onScanSuccess, activeSessionScans, scanMode, sessionSetup }) {
+export default function QRScanner({
+  onScanSuccess,
+  activeSessionScans,
+  scanMode,
+  sessionSetup,
+  facingMode = 'environment',
+  isTorchOn = false
+}) {
   const html5QrcodeScannerRef = useRef(null);
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -24,17 +31,11 @@ export default function QRScanner({ onScanSuccess, activeSessionScans, scanMode,
         const matchBn = !sessionSetup?.battalion || sessionSetup.battalion === 'All Battalions' || scan.battalion === sessionSetup.battalion || (scan.sessionName || '').includes(sessionSetup.battalion);
         const setupCoClean = (sessionSetup?.company || '').replace(' Company', '');
         const matchCo = !sessionSetup?.company || sessionSetup.company === 'All Companies' || (scan.company || '').includes(setupCoClean) || (scan.sessionName || '').includes(setupCoClean);
-        const setupPlClean = (sessionSetup?.platoon || '').replace(' Platoon', '');
-        const matchPl = !sessionSetup?.platoon || sessionSetup.platoon === 'All Platoons' || (scan.platoon || '').includes(setupPlClean) || (scan.sessionName || '').includes(setupPlClean);
-        const matchMode = !scanMode || scan.scanMode === scanMode;
-
-        if (matchBn && matchCo && matchPl && matchMode) {
-          currentSet.add(scan.cadetId.trim().toUpperCase());
-        }
+        if (scan.cadetId) currentSet.add(scan.cadetId);
       });
     }
     scannedIdsSetRef.current = currentSet;
-  }, [activeSessionScans, sessionSetup, scanMode]);
+  }, [activeSessionScans]);
 
   // Audio Synthesizer Beep
   const playBeep = (freq = 880, type = 'sine', duration = 0.15) => {
@@ -64,83 +65,175 @@ export default function QRScanner({ onScanSuccess, activeSessionScans, scanMode,
     }
   };
 
+  // Flashlight / Torch Control using MediaStreamTrack API
   useEffect(() => {
-    let html5QrcodeScanner = new Html5Qrcode("reader");
-    html5QrcodeScannerRef.current = html5QrcodeScanner;
-
-    const config = {
-      fps: 15,
-      qrbox: { width: 220, height: 220 },
-      aspectRatio: 1.333333,
-      formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
-    };
-
-    html5QrcodeScanner.start(
-      { facingMode: "environment" },
-      config,
-      (decodedText) => {
-        handleScannedCode(decodedText);
-      },
-      () => {}
-    ).then(() => {
-      setIsScanning(true);
-      setCameraError('');
-    }).catch(err => {
-      console.warn("Unable to start environment camera, trying default fallback:", err);
-      html5QrcodeScanner.start(
-        { facingMode: "user" },
-        config,
-        (decodedText) => {
-          handleScannedCode(decodedText);
-        },
-        () => {}
-      ).then(() => {
-        setIsScanning(true);
-        setCameraError('');
-      }).catch(err2 => {
-        setCameraError('Camera access required for QR field scanner. Please grant camera permission.');
-        setIsScanning(false);
-      });
-    });
-
-    return () => {
-      if (html5QrcodeScannerRef.current && html5QrcodeScannerRef.current.isScanning) {
-        html5QrcodeScannerRef.current.stop().catch(e => console.error("Error stopping scanner:", e));
+    const applyTorch = async () => {
+      try {
+        const videoElem = document.querySelector("#reader video");
+        if (videoElem && videoElem.srcObject) {
+          const track = videoElem.srcObject.getVideoTracks()[0];
+          if (track && typeof track.applyConstraints === 'function') {
+            await track.applyConstraints({ advanced: [{ torch: isTorchOn }] });
+          }
+        }
+      } catch (err) {
+        console.warn("Torch constraint not supported or failed on this device:", err);
       }
     };
-  }, []);
+    applyTorch();
+  }, [isTorchOn, isScanning]);
 
-  const handleScannedCode = (codePayload) => {
-    const trimmedPayload = codePayload.trim();
+  // Start / Restart Camera with current facingMode (Front vs Back) and proper track lifecycle
+  useEffect(() => {
+    let isMounted = true;
+
+    const stopVideoTracks = () => {
+      try {
+        const videoElem = document.querySelector("#reader video");
+        if (videoElem && videoElem.srcObject) {
+          const stream = videoElem.srcObject;
+          stream.getTracks().forEach(track => {
+            try { track.stop(); } catch (_) {}
+          });
+          videoElem.srcObject = null;
+        }
+      } catch (_) {}
+    };
+
+    const initCameraScanner = async () => {
+      try {
+        // Stop any running scanner instance
+        if (html5QrcodeScannerRef.current) {
+          try {
+            if (html5QrcodeScannerRef.current.isScanning) {
+              await html5QrcodeScannerRef.current.stop();
+            }
+            await html5QrcodeScannerRef.current.clear();
+          } catch (_) {}
+        }
+        stopVideoTracks();
+
+        const readerElem = document.getElementById("reader");
+        if (!readerElem) return;
+
+        const html5Qrcode = new Html5Qrcode("reader");
+        html5QrcodeScannerRef.current = html5Qrcode;
+
+        const cameraConfig = { facingMode: facingMode || "environment" };
+        const scanConfig = {
+          fps: 15,
+          qrbox: { width: 300, height: 300 },
+          aspectRatio: 1.0,
+          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+        };
+
+        await html5Qrcode.start(
+          cameraConfig,
+          scanConfig,
+          (decodedText) => {
+            if (isMounted) handleScannedCode(decodedText);
+          },
+          () => {} // Silent on non-detection frame ticks
+        );
+
+        if (isMounted) {
+          setIsScanning(true);
+          setCameraError('');
+        }
+      } catch (err) {
+        console.error("Camera start error, trying fallback facingMode:", err);
+        if (!isMounted) return;
+
+        try {
+          stopVideoTracks();
+          const fallbackFacing = facingMode === 'environment' ? 'user' : 'environment';
+          const fallbackScanner = new Html5Qrcode("reader");
+          html5QrcodeScannerRef.current = fallbackScanner;
+
+          await fallbackScanner.start(
+            { facingMode: fallbackFacing },
+            {
+              fps: 15,
+              qrbox: { width: 300, height: 300 },
+              aspectRatio: 1.0,
+              formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
+            },
+            (decodedText) => {
+              if (isMounted) handleScannedCode(decodedText);
+            },
+            () => {}
+          );
+
+          if (isMounted) {
+            setIsScanning(true);
+            setCameraError('');
+          }
+        } catch (fallbackErr) {
+          console.error("Camera fallback failed:", fallbackErr);
+          if (isMounted) {
+            setCameraError('Camera access required. Please check camera permissions in browser.');
+            setIsScanning(false);
+          }
+        }
+      }
+    };
+
+    initCameraScanner();
+
+    return () => {
+      isMounted = false;
+      if (html5QrcodeScannerRef.current) {
+        try {
+          if (html5QrcodeScannerRef.current.isScanning) {
+            html5QrcodeScannerRef.current.stop().catch(e => console.warn(e));
+          }
+        } catch (_) {}
+      }
+      stopVideoTracks();
+    };
+  }, [facingMode]);
+
+  const handleScannedCode = (decodedText) => {
+    console.log("Scanned QR Text:", decodedText);
+    if (!decodedText) return;
+
+    let data = decodedText;
+    try {
+      if (typeof decodedText === 'string' && decodedText.trim().startsWith('{')) {
+        data = JSON.parse(decodedText.trim());
+      }
+    } catch (e) {
+      console.warn("JSON parse fallback to plain string:", e);
+    }
+
     let rawId = '';
     let embeddedName = '';
 
-    // 1. Check if scanned payload is JSON (e.g., { id: "221-00003", name: "AUREA, REYMARK" })
-    if (trimmedPayload.startsWith('{')) {
-      try {
-        const parsed = JSON.parse(trimmedPayload);
-
-        // If it's a Laptop Batch Sync QR payload, silently ignore it
-        if (parsed.T === 'RBS' || parsed.TYPE === 'ROTC_BATCH_SYNC' || parsed.records || parsed.r) {
-          return;
-        }
-
-        // Extract Cadet ID and Full Name directly from QR JSON
-        if (parsed.id) {
-          rawId = String(parsed.id).trim().toUpperCase();
-        }
-        if (parsed.name) {
-          embeddedName = String(parsed.name).trim().toUpperCase();
-        }
-      } catch (err) {
-        // Fallback if malformed JSON
+    if (typeof data === 'object' && data !== null) {
+      // If it's a Laptop Batch Sync QR payload, silently ignore it
+      if (data.T === 'RBS' || data.TYPE === 'ROTC_BATCH_SYNC' || data.records || data.r) {
+        return;
       }
-    } else if (trimmedPayload.startsWith('[') || trimmedPayload.startsWith('http')) {
-      // Silently ignore array payloads or web URLs
-      return;
+
+      // Extract Cadet ID and Full Name directly from QR JSON
+      rawId = data.id || data.cadetId || data.ID || data.CADET_ID || data.cadet_id || '';
+      embeddedName = data.name || data.fullName || data.NAME || data.full_name || '';
     } else {
-      // Plain text Cadet ID (e.g. "221-00003")
-      rawId = trimmedPayload.toUpperCase();
+      const textStr = String(decodedText).trim();
+      if (textStr.startsWith('[') || textStr.startsWith('http')) {
+        return;
+      }
+      const match = textStr.match(/\b\d{3}-\d{5}\b/) || textStr.match(/\b\d{5,8}\b/);
+      if (match) {
+        rawId = match[0];
+      } else {
+        rawId = textStr.split(/[\n,;]/)[0].trim();
+      }
+    }
+
+    rawId = String(rawId).trim().toUpperCase();
+    if (embeddedName) {
+      embeddedName = String(embeddedName).trim().toUpperCase();
     }
 
     if (!rawId) return;
@@ -204,60 +297,66 @@ export default function QRScanner({ onScanSuccess, activeSessionScans, scanMode,
     setTimeout(() => setLastScanToast(null), 3000);
   };
 
+  // Formatted active unit echelon banner text
+  const activeBn = (sessionSetup?.battalion || '1st Battalion').toUpperCase();
+  const activeCoy = (sessionSetup?.company || 'Alpha Company').replace(' Company', ' COY').toUpperCase();
+  const activePltn = (sessionSetup?.platoon || '1st Platoon').toUpperCase();
+  const formattedUnitBanner = `${activeBn} • ${activeCoy} • ${activePltn}`;
+
   return (
-    <div className={`scanner-card ${scanFlash ? `flash-${scanFlash}` : ''}`}>
-      {/* Top Header & Badges */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'nowrap' }}>
-        <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', gap: '0.4rem', letterSpacing: '0.3px', flexShrink: 0 }}>
-          <Camera size={18} />
-          <span>FIELD QR SCANNER</span>
-        </div>
-
-        {/* Top-Right Badges: TIME-IN MODE & LIVE Indicator */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-          <span style={{
-            fontSize: '0.68rem',
-            fontWeight: 800,
-            padding: '2px 8px',
-            borderRadius: '9999px',
-            background: scanMode === 'Time-In' ? '#d1fae5' : '#fef3c7',
-            color: scanMode === 'Time-In' ? '#065f46' : '#92400e',
-            border: `1px solid ${scanMode === 'Time-In' ? '#6ee7b7' : '#fde68a'}`,
-            whiteSpace: 'nowrap'
-          }}>
-            {scanMode === 'Time-In' ? '🟢 TIME-IN' : '🟡 TIME-OUT'}
-          </span>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.68rem', fontWeight: 800, color: isScanning ? '#059669' : '#dc2626', background: 'rgba(0,0,0,0.05)', padding: '2px 6px', borderRadius: '6px', whiteSpace: 'nowrap' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isScanning ? '#059669' : '#dc2626' }}></span>
-            {isScanning ? 'LIVE' : 'INIT'}
-          </div>
+    <div className="scanner-page-layout">
+      {/* Active Unit Header Banner */}
+      <div className="active-unit-scanner-banner">
+        <div className="unit-banner-content">
+          <Shield size={15} className="unit-banner-shield" />
+          <span className="unit-banner-text">{formattedUnitBanner}</span>
         </div>
       </div>
 
-      {/* Toast Feedback */}
-      {lastScanToast && (
-        <div className="scan-toast" style={{ borderColor: lastScanToast.type === 'warning' ? '#ef4444' : 'var(--rotc-yellow-gold)' }}>
-          {lastScanToast.type === 'warning' ? (
-            <AlertTriangle size={28} color="#ef4444" />
-          ) : (
-            <CheckCircle2 size={28} color="var(--rotc-green-primary)" />
-          )}
-          <div>
-            <div style={{ fontWeight: 800, fontSize: '0.85rem', color: lastScanToast.type === 'warning' ? '#dc2626' : 'var(--rotc-green-dark)' }}>
-              {lastScanToast.title}
-            </div>
-            <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{lastScanToast.cadetId}</div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{lastScanToast.message}</div>
-          </div>
-        </div>
-      )}
-
-      {/* Camera Viewport Container (Fixed 4:3 with Border Radius 12px) */}
-      <div className="camera-container">
+      {/* Centered Camera Container Card */}
+      <div className={`camera-container-card ${scanFlash ? `flash-${scanFlash}` : ''}`}>
+        {/* Underlying Camera Feed (Constrained inside centered card) */}
         <div id="reader"></div>
 
-        {/* Slim Corner Marks Overlay Frame */}
+        {/* Floating Top Header Bar on Camera Feed */}
+        <div className="scanner-floating-topbar">
+          <div className="scanner-topbar-title">
+            <Camera size={18} />
+            <span>FIELD QR SCANNER</span>
+          </div>
+
+          {/* Top-Right Badges: TIME-IN MODE & LIVE Indicator */}
+          <div className="scanner-topbar-badges">
+            <span className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : 'mode-timeout'}`}>
+              {scanMode === 'Time-In' ? '🟢 TIME-IN' : '🟡 TIME-OUT'}
+            </span>
+
+            <div className="scanner-live-pill">
+              <span className={`live-dot ${isScanning ? 'dot-active' : 'dot-inactive'}`}></span>
+              <span>{isScanning ? 'LIVE' : 'INIT'}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Toast Feedback */}
+        {lastScanToast && (
+          <div className="scan-toast" style={{ borderColor: lastScanToast.type === 'warning' ? '#ef4444' : 'var(--rotc-yellow-gold)' }}>
+            {lastScanToast.type === 'warning' ? (
+              <AlertTriangle size={28} color="#ef4444" />
+            ) : (
+              <CheckCircle2 size={28} color="var(--rotc-green-primary)" />
+            )}
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: lastScanToast.type === 'warning' ? '#dc2626' : 'var(--rotc-green-dark)' }}>
+                {lastScanToast.title}
+              </div>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{lastScanToast.cadetId}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{lastScanToast.message}</div>
+            </div>
+          </div>
+        )}
+
+        {/* Viewfinder Reticles & Sweeping Laser Overlay */}
         <div className="scanner-overlay">
           <div className="target-box">
             <div className="corner-mark corner-tl"></div>
@@ -266,19 +365,34 @@ export default function QRScanner({ onScanSuccess, activeSessionScans, scanMode,
             <div className="corner-mark corner-br"></div>
             <div className="scan-laser-line"></div>
           </div>
-        </div>
-      </div>
 
-      {cameraError && (
-        <div style={{ background: '#fee2e2', color: '#b91c1c', padding: '0.75rem', borderRadius: '8px', fontSize: '0.8rem', marginTop: '0.65rem', textAlign: 'center' }}>
-          {cameraError}
+          {/* Floating Guide Prompt below target reticle */}
+          <div className="scanner-floating-guide">
+            Point camera at Cadet QR Code ID card
+          </div>
         </div>
-      )}
 
-      {/* Centered Scanning Guide Text */}
-      <div style={{ marginTop: '0.65rem', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-        Point camera at Cadet QR Code ID card
+        {cameraError && (
+          <div style={{
+            position: 'absolute',
+            bottom: '24px',
+            left: '16px',
+            right: '16px',
+            background: 'rgba(239, 68, 68, 0.92)',
+            color: '#ffffff',
+            padding: '0.75rem 1rem',
+            borderRadius: '10px',
+            fontSize: '0.8rem',
+            textAlign: 'center',
+            zIndex: 35,
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)'
+          }}>
+            {cameraError}
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+export { QRScanner as FieldScannerView };

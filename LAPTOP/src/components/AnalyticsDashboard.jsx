@@ -499,13 +499,16 @@ export default function AnalyticsDashboard({ cadets = [], attendanceLogs = [], o
               </thead>
               <tbody>
                 {tableFilteredLogs.map((log, idx) => {
-                  const isTimeOut = log.scanMode === 'Time-Out';
-                  let isLate = log.status === 'LATE';
-                  if (!log.status && log.timestamp && !isTimeOut) {
+                  const isTimeOut = log.scanMode === 'Time-Out' || (log.status && String(log.status).toUpperCase().includes('TIME-OUT'));
+                  let isLate = false;
+                  if (!isTimeOut && log.timestamp) {
                     const cutoff = localStorage.getItem('csu_rotc_formation_cutoff') || '07:00';
                     const [ch, cm] = cutoff.split(':').map(Number);
+                    const cutoffMinutes = (isNaN(ch) ? 7 : ch) * 60 + (isNaN(cm) ? 0 : cm);
                     const d = new Date(log.timestamp);
-                    isLate = (d.getHours() * 60 + d.getMinutes()) > ((ch || 7) * 60 + (cm || 0));
+                    if (!isNaN(d.getTime())) {
+                      isLate = (d.getHours() * 60 + d.getMinutes()) > cutoffMinutes;
+                    }
                   }
 
                   return (

@@ -3,6 +3,9 @@ import HeaderBar from './components/HeaderBar';
 import SessionSetup from './components/SessionSetup';
 import QRScanner from './components/QRScanner';
 import MobileAnalytics from './components/MobileAnalytics';
+import AboutUs from './components/AboutUs';
+import MobileSettings from './components/MobileSettings';
+import MobileBottomNav from './components/MobileBottomNav';
 import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
 import { getOfflineQueue, saveOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp } from './services/storage';
@@ -11,6 +14,12 @@ export default function App() {
   const [adminIpState, setAdminIpState] = useState(getAdminIp());
   const [offlineQueue, setOfflineQueue] = useState([]);
   const [serverConnected, setServerConnected] = useState(false);
+
+  // Active Bottom Navigation Tab: 'scanner' | 'dashboard' | 'about' | 'settings'
+  const [activeTab, setActiveTab] = useState('scanner');
+
+  // Center FAB Batch Sync Modal State
+  const [isBatchSyncOpen, setIsBatchSyncOpen] = useState(false);
 
   // Custom Modal State
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
@@ -63,6 +72,7 @@ export default function App() {
   const handleStartSession = (setupData) => {
     setSessionSetup(setupData);
     setIsSessionActive(true);
+    setActiveTab('scanner');
   };
 
   // Toggle Mode Handler (Time-In <-> Time-Out)
@@ -97,6 +107,7 @@ export default function App() {
   const handleSyncSuccess = async () => {
     await clearOfflineQueue();
     setOfflineQueue([]);
+    setIsBatchSyncOpen(false);
   };
 
   // Trigger Custom Reset Modal
@@ -115,8 +126,20 @@ export default function App() {
     setIsResetModalOpen(false);
   };
 
+  // Camera Switcher & Torch State
+  const [cameraFacingMode, setCameraFacingMode] = useState('environment');
+  const [isTorchOn, setIsTorchOn] = useState(false);
+
+  const handleToggleTorch = () => {
+    setIsTorchOn(prev => !prev);
+  };
+
+  const handleSwitchCamera = () => {
+    setCameraFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
+  };
+
   return (
-    <div className="mobile-container">
+    <div className={`mobile-container ${activeTab === 'settings' || activeTab === 'about' || !isSessionActive ? 'settings-theme-bg' : ''}`}>
       <HeaderBar
         adminIp={adminIpState}
         setAdminIp={handleUpdateAdminIp}
@@ -125,9 +148,17 @@ export default function App() {
         onToggleScanMode={handleToggleScanMode}
         onEditSetup={handleEditSetup}
         serverConnected={serverConnected}
+        queueCount={offlineQueue.length}
+        onOpenBatchSync={() => setIsBatchSyncOpen(true)}
+        isTorchOn={isTorchOn}
+        onToggleTorch={handleToggleTorch}
+        cameraFacingMode={cameraFacingMode}
+        onSwitchCamera={handleSwitchCamera}
+        isOfflineStorageActive={true}
+        activeTab={activeTab}
       />
 
-      <main style={{ flexGrow: 1 }}>
+      <main style={{ flexGrow: 1, paddingBottom: activeTab === 'settings' || activeTab === 'scanner' || activeTab === 'about' ? '0' : '80px', display: 'flex', flexDirection: 'column' }}>
         {!isSessionActive ? (
           /* Pre-Scanning Session Setup Screen */
           <SessionSetup
@@ -135,26 +166,60 @@ export default function App() {
             onStartSession={handleStartSession}
           />
         ) : (
-          /* Active Field Scanner & Analytics */
+          /* Active 4-Tab Mobile Navigation Views */
           <>
-            <QRScanner
-              onScanSuccess={handleScanSuccess}
-              activeSessionScans={offlineQueue}
-              scanMode={sessionSetup.scanMode}
-              sessionSetup={sessionSetup}
-            />
+            {activeTab === 'scanner' && (
+              <QRScanner
+                onScanSuccess={handleScanSuccess}
+                activeSessionScans={offlineQueue}
+                scanMode={sessionSetup.scanMode}
+                sessionSetup={sessionSetup}
+                facingMode={cameraFacingMode}
+                isTorchOn={isTorchOn}
+              />
+            )}
 
-            <MobileAnalytics
-              scanLogs={offlineQueue}
-              sessionSetup={sessionSetup}
-              onResetQueue={handleOpenResetModal}
-            />
+            {activeTab === 'dashboard' && (
+              <MobileAnalytics
+                scanLogs={offlineQueue}
+                sessionSetup={sessionSetup}
+                onResetQueue={handleOpenResetModal}
+              />
+            )}
+
+            {(activeTab === 'about' || activeTab === 'idcards') && (
+              <AboutUs />
+            )}
+
+            {activeTab === 'settings' && (
+              <SessionSetup
+                initialSetup={sessionSetup}
+                onStartSession={(updatedSetup) => {
+                  setSessionSetup(updatedSetup);
+                  setIsSessionActive(true);
+                  setActiveTab('scanner');
+                }}
+                isEditing={true}
+              />
+            )}
           </>
         )}
       </main>
 
-      {/* Admin Sync Action Bar */}
+      {/* Fixed Bottom Navigation Bar with Raised Center Batch Sync FAB */}
+      {isSessionActive && (
+        <MobileBottomNav
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onPresentBatchSync={() => setIsBatchSyncOpen(true)}
+          queueCount={offlineQueue.length}
+        />
+      )}
+
+      {/* Duty Officer Batch Sync QR Presentation Modal */}
       <SyncControl
+        isOpen={isBatchSyncOpen}
+        onClose={() => setIsBatchSyncOpen(false)}
         offlineQueue={offlineQueue}
         adminIp={adminIpState}
         sessionSetup={sessionSetup}
@@ -162,6 +227,7 @@ export default function App() {
         sessionName={`${sessionSetup.battalion} - ${sessionSetup.company} (${sessionSetup.platoon})`}
         onSyncSuccess={handleSyncSuccess}
         onResetQueue={handleOpenResetModal}
+        hideBottomBar={true}
       />
 
       {/* Custom UI Confirmation Modal */}

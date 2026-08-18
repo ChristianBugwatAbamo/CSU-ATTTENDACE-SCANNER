@@ -47,13 +47,18 @@ export default function SyncLogs({ attendanceLogs, onRefresh, onClearLogs, onOpe
   };
 
   const getAttendanceStatus = (log) => {
-    if (log.status === 'LATE' || log.status === 'PRESENT') return log.status;
-    if (log.scanMode === 'Time-Out') return 'TIME-OUT';
+    if (log.scanMode === 'Time-Out' || (log.status && String(log.status).toUpperCase().includes('TIME-OUT'))) {
+      return 'TIME-OUT';
+    }
     if (!log.timestamp) return 'PRESENT';
+
     const d = new Date(log.timestamp);
+    if (isNaN(d.getTime())) return 'PRESENT';
+
     const logMinutes = d.getHours() * 60 + d.getMinutes();
     const [cutoffH, cutoffM] = (formationCutoff || '07:00').split(':').map(Number);
-    const cutoffMinutes = (cutoffH || 7) * 60 + (cutoffM || 0);
+    const cutoffMinutes = (isNaN(cutoffH) ? 7 : cutoffH) * 60 + (isNaN(cutoffM) ? 0 : cutoffM);
+
     return logMinutes > cutoffMinutes ? 'LATE' : 'PRESENT';
   };
 

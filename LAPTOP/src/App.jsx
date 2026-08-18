@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
+import MobileBottomNav from './components/MobileBottomNav';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import IDGenerator from './components/IDGenerator';
 import ScannerPage from './components/ScannerPage';
@@ -117,6 +118,13 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* Mobile Sticky Bottom Navigation Bar */}
+      <MobileBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenScanner={() => setIsBatchScannerOpen(true)}
+      />
 
       {/* Webcam Offline Batch QR Code Scanner Modal */}
       <BatchScannerModal
