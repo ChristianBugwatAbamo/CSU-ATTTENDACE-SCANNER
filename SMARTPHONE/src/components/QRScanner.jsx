@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus } from 'lucide-react';
+import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus, Info } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
 import ConfirmModal from './ConfirmModal';
 
@@ -281,31 +281,33 @@ export default function QRScanner({
     if (!rawId) return;
 
     const activeMode = scanMode || 'Time-In';
+    const nowIso = new Date().toISOString();
+
     const scanRecord = {
       cadetId: rawId,
       name: embeddedName || '',
       rank: 'Cadet',
       scanMode: activeMode,
-      timestamp: new Date().toISOString(),
+      timestamp: nowIso,
       battalion: sessionSetup ? sessionSetup.battalion : '1st Battalion',
       company: sessionSetup ? sessionSetup.company : 'Alpha Company',
       platoon: sessionSetup ? sessionSetup.platoon : '1st Platoon',
-      status: activeMode === 'Time-In' ? 'TIME-IN RECORDED' : 'TIME-OUT RECORDED'
+      status: activeMode === 'Time-In' ? 'TIME-IN' : 'TIME-OUT'
     };
     const headingName = formatCadetHeading(scanRecord);
 
     // 1. STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
     if (scannedIdsSetRef.current.has(rawId)) {
-      playBeep(400, 'sawtooth', 0.25);
-      triggerHaptic([200, 100, 200, 100, 200]);
-      setScanFlash('warning');
+      playBeep(523.25, 'sine', 0.18); // Pleasant confirmation chime
+      triggerHaptic([60, 40, 60]);
+      setScanFlash('success');
       setTimeout(() => setScanFlash(null), 850);
 
       setLastScanToast({
-        type: 'warning',
-        title: 'DUPLICATE CADET QR BLOCKED',
+        type: 'info',
+        title: 'CADET ALREADY RECORDED',
         cadetId: headingName,
-        message: `Cadet ${rawId} has ALREADY been scanned in this session!`
+        message: `${headingName} has already logged attendance for this session!`
       });
       setTimeout(() => setLastScanToast(null), 3000);
       return;
@@ -338,7 +340,7 @@ export default function QRScanner({
     // 3. UNDER CAPACITY: Process normal scan
     scannedIdsSetRef.current.add(rawId);
 
-    // Success feedback
+    // Standard Neutral Success feedback
     playBeep(1046.5, 'sine', 0.15); // High C pitch beep
     triggerHaptic([80, 40, 80]);
     setScanFlash('success');
@@ -348,7 +350,7 @@ export default function QRScanner({
 
     setLastScanToast({
       type: 'success',
-      title: `${activeMode.toUpperCase()} CONFIRMED`,
+      title: `✅ SCANNED / RECORDED (${activeMode.toUpperCase()})`,
       cadetId: headingName,
       message: `ID: ${rawId} • ${sessionSetup?.platoon || '1st Platoon'} (${scannedIdsSetRef.current.size}/${PLATOON_QUOTA})`
     });
@@ -477,18 +479,52 @@ export default function QRScanner({
 
         {/* Toast Feedback */}
         {lastScanToast && (
-          <div className="scan-toast" style={{ borderColor: lastScanToast.type === 'warning' ? '#ef4444' : 'var(--rotc-yellow-gold)' }}>
+          <div
+            className="scan-toast"
+            style={{
+              border: `1.5px solid ${
+                lastScanToast.type === 'warning' ? '#ef4444' : '#10b981'
+              }`,
+              background: lastScanToast.type === 'warning' ? '#fef2f2' : '#ecfdf5',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
+              borderRadius: '12px'
+            }}
+          >
             {lastScanToast.type === 'warning' ? (
               <AlertTriangle size={28} color="#ef4444" />
+            ) : lastScanToast.type === 'info' ? (
+              <CheckCircle2 size={28} color="#059669" />
             ) : (
-              <CheckCircle2 size={28} color="var(--rotc-green-primary)" />
+              <CheckCircle2 size={28} color="#059669" />
             )}
             <div>
-              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: lastScanToast.type === 'warning' ? '#dc2626' : 'var(--rotc-green-dark)' }}>
+              <div
+                style={{
+                  fontWeight: 850,
+                  fontSize: '0.85rem',
+                  color: lastScanToast.type === 'warning' ? '#dc2626' : '#065f46'
+                }}
+              >
                 {lastScanToast.title}
               </div>
-              <div style={{ fontSize: '0.8rem', fontWeight: 700 }}>{lastScanToast.cadetId}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{lastScanToast.message}</div>
+              <div
+                style={{
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  color: lastScanToast.type === 'warning' ? '#7f1d1d' : '#047857'
+                }}
+              >
+                {lastScanToast.cadetId}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.75rem',
+                  color: lastScanToast.type === 'warning' ? '#991b1b' : '#065f46',
+                  fontWeight: 500
+                }}
+              >
+                {lastScanToast.message}
+              </div>
             </div>
           </div>
         )}

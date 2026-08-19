@@ -1,6 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock } from 'lucide-react';
-import { getAttendanceStatus, getScannedUnitEchelon } from '../utils/attendanceStatus';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X } from 'lucide-react';
+import {
+  getAttendanceStatus,
+  getScannedUnitEchelon,
+  evaluateSingleScan,
+  reconcileCadetDailyStatus,
+  reconcileRosterAttendance,
+  getActiveFormationCutoff,
+  normalizeBattalion,
+  normalizeCompany,
+  normalizePlatoon
+} from '../utils/attendanceStatus';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 
 // Default 1,184 Standard CSU ROTC Structure Template
@@ -122,7 +132,7 @@ const DEFAULT_UNIT_STRUCTURE = [
 export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanceLogs: propsLogs = [], onRefresh }) {
   const { records: hookLogs, settings: hookSettings, activeCutoff } = useAttendanceData();
   const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
-  const formationCutoff = activeCutoff || '07:30';
+  const formationCutoff = activeCutoff || getActiveFormationCutoff();
   const unitStructure = hookSettings?.unitStructure?.length > 0 ? hookSettings.unitStructure : DEFAULT_UNIT_STRUCTURE;
 
   // Top-Level Category Selection ('BASIC_CADETS' | 'CADET_OFFICERS' | null)
@@ -132,6 +142,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   const [selectedBattalion, setSelectedBattalion] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [selectedPlatoon, setSelectedPlatoon] = useState(null);
+
+  // Search input state for filtering by Cadet ID or Name
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Calculated Quotas
   const totalBasicQuota = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || 1184;
@@ -194,7 +207,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     const p = (log.platoon || '').toLowerCase();
     const d = (log.designation || '').toLowerCase();
     const t = (log.type || log.category || '').toLowerCase();
-    
+
     return t === 'officer' || t.includes('officer') ||
       b.includes('officer') || b.includes('brigade') ||
       c.includes('officer') || c.includes('headquarters') ||
@@ -230,6 +243,14 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   };
 
   // 1. Dynamic Counts calculated directly from attendanceLogs
+  // Full Roster Reconciliation against Attendance Logs
+  const { reconciledRoster, summary: attendanceSummary } = reconcileRosterAttendance(
+    propsCadets,
+    attendanceLogs,
+    null,
+    formationCutoff
+  );
+
   const totalAttendanceScans = attendanceLogs.length;
   const uniqueCadetIds = new Set(attendanceLogs.map(l => (l.cadetId || '').trim()).filter(Boolean));
   const uniqueCadetsCount = uniqueCadetIds.size;
@@ -255,11 +276,12 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   // 3. Dynamic Basic Cadet Battalions from unitStructure
   const basicBattalions = unitStructure.map((bn, idx) => {
     const bnName = bn.name;
-    const clean = bnName.replace(' Battalion', '').toLowerCase().trim();
+    const bnNorm = normalizeBattalion(bnName);
     const scanned = attendanceLogs.filter(l => {
+      if (isOfficerLog(l)) return false;
       const echelon = getScannedUnitEchelon(l);
-      const b = (echelon.battalion || '').toLowerCase();
-      return !isOfficerLog(l) && (b.includes(bnName.toLowerCase()) || b.includes(clean));
+      const lBnNorm = normalizeBattalion(echelon.battalion || l.battalion);
+      return bnNorm && lBnNorm ? (bnNorm === lBnNorm) : false;
     }).length;
     const target = Number(bn.targetQuota) || 592;
     const coys = bn.companies || [];
@@ -282,35 +304,34 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   // 4. Dynamic Active Battalion & Company Objects for Step 2 and Step 3
   const activeBnObj = unitStructure.find(b => {
     if (!selectedBattalion) return false;
-    return b.name.toLowerCase().trim() === selectedBattalion.toLowerCase().trim() ||
-      b.name.toLowerCase().includes(bnSelectorClean) ||
-      selectedBattalion.toLowerCase().includes(b.name.toLowerCase());
+    const selNorm = normalizeBattalion(selectedBattalion);
+    const bNorm = normalizeBattalion(b.name);
+    return selNorm && bNorm ? (selNorm === bNorm) : b.name.toLowerCase().includes(selectedBattalion.toLowerCase());
   }) || unitStructure[0] || null;
 
   const activeCoysList = activeBnObj && activeBnObj.companies && activeBnObj.companies.length > 0
     ? activeBnObj.companies
     : [
-        { id: 'co-alpha', name: 'Alpha Company', shortCode: 'ALPHA', targetQuota: 148, platoons: [] },
-        { id: 'co-bravo', name: 'Bravo Company', shortCode: 'BRAVO', targetQuota: 148, platoons: [] },
-        { id: 'co-charlie', name: 'Charlie Company', shortCode: 'CHARLIE', targetQuota: 148, platoons: [] },
-        { id: 'co-delta', name: 'Delta Company', shortCode: 'DELTA', targetQuota: 148, platoons: [] }
-      ];
+      { id: 'co-alpha', name: 'Alpha Company', shortCode: 'ALPHA', targetQuota: 148, platoons: [] },
+      { id: 'co-bravo', name: 'Bravo Company', shortCode: 'BRAVO', targetQuota: 148, platoons: [] },
+      { id: 'co-charlie', name: 'Charlie Company', shortCode: 'CHARLIE', targetQuota: 148, platoons: [] },
+      { id: 'co-delta', name: 'Delta Company', shortCode: 'DELTA', targetQuota: 148, platoons: [] }
+    ];
 
   const companyCounts = activeCoysList.map(c => {
     const target = Number(c.targetQuota) || 148;
-    const cName = c.name;
-    const cShort = c.shortCode || c.name.replace(' Company', '');
+    const cNorm = normalizeCompany(c.name);
     const scanned = activeLogs.filter(log => {
       const echelon = getScannedUnitEchelon(log);
-      const co = (echelon.company || '').toLowerCase().trim();
-      return co.includes(cName.toLowerCase().trim()) || co.includes(cShort.toLowerCase().trim());
+      const coNorm = normalizeCompany(echelon.company || log.company);
+      return cNorm && coNorm ? (cNorm === coNorm) : false;
     }).length;
     const percent = Math.min(100, Math.round((scanned / target) * 100));
     return {
       key: c.shortCode || c.name,
       title: c.name,
       name: c.name,
-      shortName: cShort,
+      shortName: c.shortCode || c.name.replace(' Company', ''),
       desc: `${c.platoons?.length || 4} Platoons × Quota: ${target}`,
       target,
       scanned,
@@ -321,33 +342,31 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   // 5. Dynamic Active Company & Platoon Objects for Step 3
   const activeCoObj = activeBnObj?.companies?.find(c => {
     if (!selectedCompany) return false;
-    const clean = selectedCompany.toLowerCase().trim();
-    return c.name.toLowerCase().trim() === clean ||
-      (c.shortCode && c.shortCode.toLowerCase().trim() === clean) ||
-      c.name.toLowerCase().includes(clean) ||
-      clean.includes(c.name.toLowerCase());
+    const selNorm = normalizeCompany(selectedCompany);
+    const cNorm = normalizeCompany(c.name);
+    return selNorm && cNorm ? (selNorm === cNorm) : c.name.toLowerCase().includes(selectedCompany.toLowerCase());
   }) || activeBnObj?.companies?.[0] || null;
 
   const activePltnsList = activeCoObj && activeCoObj.platoons && activeCoObj.platoons.length > 0
     ? activeCoObj.platoons
     : [
-        { id: 'pl-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-        { id: 'pl-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-        { id: 'pl-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-        { id: 'pl-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
-      ];
+      { id: 'pl-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
+      { id: 'pl-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
+      { id: 'pl-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
+      { id: 'pl-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+    ];
 
   const platoonCounts = activePltnsList.map(p => {
     const pName = p.name;
-    const pClean = pName.replace(' Platoon', '').toLowerCase().trim();
-    const pShort = (p.shortCode || '').toLowerCase().trim();
+    const pNorm = normalizePlatoon(pName);
     const scanned = activeLogs.filter(log => {
       const echelon = getScannedUnitEchelon(log);
-      const co = (echelon.company || '').toLowerCase().trim();
-      const pl = (echelon.platoon || '').toLowerCase().trim();
-      const sn = (log.sessionName || '').toLowerCase().trim();
-      const matchCo = selectedCompany ? (co.includes(selectedCompany.toLowerCase().trim()) || (activeCoObj && co.includes(activeCoObj.name.toLowerCase()))) : true;
-      const matchPl = pl.includes(pClean) || sn.includes(pClean) || (pShort && (pl.includes(pShort) || sn.includes(pShort)));
+      const coNorm = normalizeCompany(echelon.company || log.company);
+      const plNorm = normalizePlatoon(echelon.platoon || log.platoon);
+      const matchCo = selectedCompany
+        ? (coNorm === normalizeCompany(selectedCompany))
+        : true;
+      const matchPl = pNorm && plNorm ? (pNorm === plNorm) : false;
       return matchCo && matchPl;
     }).length;
     const target = Number(p.targetQuota) || 37;
@@ -448,13 +467,29 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     setSelectedBattalion(null);
     setSelectedCompany(null);
     setSelectedPlatoon(null);
+    setSearchQuery('');
   };
 
-  const isAnyFilterActive = mainCategory !== null || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
+  const isAnyFilterActive =
+    mainCategory !== null ||
+    selectedBattalion !== null ||
+    selectedCompany !== null ||
+    selectedPlatoon !== null ||
+    searchQuery.trim().length > 0;
 
   // 7. Interactive Filtered Table Records
   const tableFilteredLogs = attendanceLogs.filter(log => {
     const echelon = getScannedUnitEchelon(log);
+
+    // Search query filter (Cadet ID or Name, case-insensitive)
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const id = String(log.cadetId || '').toLowerCase();
+      const name = String(log.name || '').toLowerCase();
+      if (!id.includes(q) && !name.includes(q)) {
+        return false;
+      }
+    }
 
     // Top-Level Main Category Filter
     if (mainCategory === 'BASIC_CADETS') {
@@ -465,8 +500,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
     let matchesBn = true;
     if (selectedBattalion && selectedBattalion !== 'CADET OFFICERS') {
-      const bnClean = selectedBattalion.replace(' Battalion', '').toLowerCase().trim();
-      matchesBn = (echelon.battalion || '').toLowerCase().trim().includes(bnClean);
+      const selectedBnNorm = normalizeBattalion(selectedBattalion);
+      const logBnNorm = normalizeBattalion(log.battalion || echelon.battalion);
+      matchesBn = selectedBnNorm && logBnNorm ? (selectedBnNorm === logBnNorm) : (echelon.battalion || '').toLowerCase().includes(selectedBattalion.toLowerCase());
     }
 
     let matchesCo = true;
@@ -474,17 +510,17 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       if (isOfficerSelected) {
         matchesCo = matchesOfficerClass(log, selectedCompany);
       } else {
-        const coClean = selectedCompany.toLowerCase().trim();
-        matchesCo = (echelon.company || '').toLowerCase().trim().includes(coClean);
+        const selectedCoNorm = normalizeCompany(selectedCompany);
+        const logCoNorm = normalizeCompany(log.company || echelon.company);
+        matchesCo = selectedCoNorm && logCoNorm ? (selectedCoNorm === logCoNorm) : (echelon.company || '').toLowerCase().includes(selectedCompany.toLowerCase());
       }
     }
 
     let matchesPl = true;
     if (!isOfficerSelected && selectedPlatoon) {
-      const plClean = selectedPlatoon.replace(' Platoon', '').toLowerCase().trim();
-      const logPl = (echelon.platoon || '').toLowerCase().trim();
-      const logSn = (log.sessionName || '').toLowerCase().trim();
-      matchesPl = logPl.includes(plClean) || logSn.includes(plClean);
+      const selectedPlNorm = normalizePlatoon(selectedPlatoon);
+      const logPlNorm = normalizePlatoon(log.platoon || echelon.platoon);
+      matchesPl = selectedPlNorm && logPlNorm ? (selectedPlNorm === logPlNorm) : false;
     }
 
     return matchesBn && matchesCo && matchesPl;
@@ -516,81 +552,96 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
         </div>
       </div>
 
-      {/* Top Static Summary Metric Cards (Read-Only) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+      {/* Top Static Summary Metric Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
 
         {/* Card 1: Total Unit Strength */}
         <div className="card" style={{ borderLeft: '5px solid var(--rotc-green-dark)', cursor: 'default' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(6, 78, 46, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-green-dark)' }}>
-              <Users size={22} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(6, 78, 46, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-green-dark)' }}>
+              <Users size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {uniqueCadetsCount || totalAttendanceScans} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalUnitStrengthQuota}</span>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
+                {attendanceSummary.totalStrength || uniqueCadetsCount || totalAttendanceScans} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalUnitStrengthQuota}</span>
               </div>
             </div>
-          </div>
-          <div style={{ width: '100%', height: '6px', background: '#e2e8f0', borderRadius: '3px', overflow: 'hidden', marginBottom: '4px' }}>
-            <div style={{ width: `${Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}%`, height: '100%', background: 'var(--rotc-green-dark)', transition: 'width 0.4s ease' }}></div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            {Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}% of Total Brigade Quota ({totalUnitStrengthQuota.toLocaleString()})
+            {Math.min(100, Math.round(((attendanceSummary.totalStrength || uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}% of Brigade Quota
           </div>
         </div>
 
-        {/* Card 2: Master Attendance Logs */}
-        <div className="card" style={{ borderLeft: '5px solid var(--rotc-yellow-gold)', cursor: 'default' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(229, 169, 0, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-yellow-gold)' }}>
-              <UserCheck size={22} />
+        {/* Card 2: PRESENT */}
+        <div className="card" style={{ borderLeft: '5px solid #059669', cursor: 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(5, 150, 105, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669' }}>
+              <CheckCircle2 size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Attendance Scans</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {totalAttendanceScans} <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600 }}>Live Scanned</span>
-              </div>
-            </div>
-          </div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Live synced from mobile field scanner
-          </div>
-        </div>
-
-        {/* Card 3: Total Basic Cadets (Read-Only) */}
-        <div className="card" style={{ borderLeft: '5px solid #334155', cursor: 'default' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(51, 65, 85, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#334155' }}>
-              <Shield size={22} />
-            </div>
-            <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Basic Cadets</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {basicCadetsCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalBasicQuota}</span>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Present</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#065f46' }}>
+                {attendanceSummary.presentCompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {unitStructure.length} Battalions • {totalPlatoonsCount} Platoons
+            Scanned Time-In $\le$ {formationCutoff} + Time-Out
           </div>
         </div>
 
-        {/* Card 4: Total Cadet Officers (Read-Only) */}
-        <div className="card" style={{ borderLeft: '5px solid #4f46e5', cursor: 'default' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '10px', background: 'rgba(79, 70, 229, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4f46e5' }}>
-              <Medal size={22} />
+        {/* Card 3: LATE */}
+        <div className="card" style={{ borderLeft: '5px solid #d97706', cursor: 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
+              <Clock size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Cadet Officers</div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {cadetOfficersCount} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ 60</span>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Late</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
+                {attendanceSummary.lateCompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            1st, 2nd, 3rd, 4th Class & Aspirants
+            Scanned Time-In &gt; {formationCutoff} + Time-Out
+          </div>
+        </div>
+
+        {/* Card 4: NO TIME-OUT */}
+        <div className="card" style={{ borderLeft: '5px solid #ea580c', cursor: 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(234, 88, 12, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
+              <Activity size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>No Time-Out</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
+                {attendanceSummary.incompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            Morning Time-In without Time-Out
+          </div>
+        </div>
+
+        {/* Card 5: ABSENT */}
+        <div className="card" style={{ borderLeft: '5px solid #64748b', cursor: 'default' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(100, 116, 139, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+              <Shield size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Absent</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#334155' }}>
+                {attendanceSummary.absentCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            No Time-In or Time-Out recorded
           </div>
         </div>
       </div>
@@ -799,7 +850,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-          
+
           {/* Option 1: BASIC CADETS (Theme: Dark Slate / Charcoal) */}
           <div
             onClick={() => handleSelectMainCategory('BASIC_CADETS')}
@@ -1285,7 +1336,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       {/* Attendance Ingestions Table (Dynamically Filtered by Active Echelons)      */}
       {/* ========================================================================= */}
       <div className="card">
-        <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+        <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.85rem' }}>
           <div>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Activity size={20} color="var(--rotc-green-dark)" />
@@ -1294,7 +1345,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             {isAnyFilterActive ? (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '3px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <Filter size={13} color="var(--rotc-green-dark)" />
-                <span style={{ color: 'var(--text-muted)' }}>Filtered drill-down:</span>
+                <span style={{ color: 'var(--text-muted)' }}>Active filters:</span>
                 {mainCategory && (
                   <strong style={{
                     background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
@@ -1309,24 +1360,90 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                 {isBasicCadetsSelected && selectedBattalion && <strong style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px' }}>{selectedBattalion}</strong>}
                 {selectedCompany && <strong style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: '4px' }}>{getSelectedCompanyDisplay()}</strong>}
                 {isBasicCadetsSelected && selectedPlatoon && <strong style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px' }}>{selectedPlatoon}</strong>}
+                {searchQuery.trim() && (
+                  <strong style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '4px' }}>
+                    Search: "{searchQuery.trim()}"
+                  </strong>
+                )}
               </div>
             ) : (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '3px' }}>
-                Showing all attendance records across the Brigade. Select an echelon category above to filter.
+                Showing all attendance records across the Brigade. Select an echelon category above or search by Cadet ID/Name.
               </div>
             )}
           </div>
 
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {/* Search Input Bar & Action Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', minWidth: '260px', maxWidth: '340px' }}>
+              <Search
+                size={16}
+                style={{
+                  position: 'absolute',
+                  left: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  pointerEvents: 'none'
+                }}
+              />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search Cadet ID or Name..."
+                style={{
+                  width: '100%',
+                  padding: '0.45rem 2rem 0.45rem 2rem',
+                  fontSize: '0.82rem',
+                  borderRadius: '8px',
+                  border: '1.5px solid var(--border-light)',
+                  background: '#f8fafc',
+                  color: 'var(--text-dark)',
+                  outline: 'none',
+                  transition: 'all 0.15s ease'
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderColor = 'var(--rotc-green-dark)';
+                  e.target.style.background = '#ffffff';
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderColor = 'var(--border-light)';
+                  if (!searchQuery) e.target.style.background = '#f8fafc';
+                }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    right: '8px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    padding: '2px',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                  title="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+
             {isAnyFilterActive && (
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={handleClearAllFilters}
-                style={{ fontSize: '0.78rem', padding: '0.4rem 0.75rem', color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                title="Reset all echelon filters"
+                style={{ fontSize: '0.78rem', padding: '0.45rem 0.75rem', color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                title="Reset all echelon filters and search query"
               >
-                <XCircle size={14} /> Clear Filters
+                <XCircle size={14} /> Clear All
               </button>
             )}
           </div>
@@ -1334,7 +1451,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
         {tableFilteredLogs.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No attendance records matching active filters ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
+            No attendance records matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
         ) : (
           <div className="table-responsive">
@@ -1344,24 +1461,51 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                   <th>#</th>
                   <th>Cadet ID</th>
                   <th>Cadet Name</th>
-                  <th>Battalion / Unit</th>
-                  <th>Company / Class</th>
+                  <th>Battalion</th>
+                  <th>Company</th>
                   <th>Platoon</th>
-                  <th>Rank</th>
-                  <th>Session Details</th>
-                  <th>Duty Officer</th>
-                  <th>Timestamp</th>
+                  <th>Time-In</th>
+                  <th>Time-Out</th>
                   <th>Status</th>
+                  <th>Duty Officer</th>
                 </tr>
               </thead>
               <tbody>
                 {tableFilteredLogs.map((log, idx) => {
-                  const status = getAttendanceStatus(log, formationCutoff);
-                  const isTimeOut = status === 'TIME-OUT';
-                  const isLate = status === 'LATE';
+                  const cadetDaily = reconciledRoster.find(
+                    (r) => String(r.cadetId || '').toUpperCase() === String(log.cadetId || '').toUpperCase()
+                  );
 
                   const isOfficer = isOfficerLog(log);
                   const echelon = getScannedUnitEchelon(log);
+
+                  const timeInScanObj = log.timeInScan || cadetDaily?.timeInScan;
+                  const timeOutScanObj = log.timeOutScan || cadetDaily?.timeOutScan;
+
+                  const timeInTimestamp = log.timeIn || cadetDaily?.timeInTime || timeInScanObj?.timestamp || (log.scanMode !== 'Time-Out' ? log.timestamp : null);
+                  const timeOutTimestamp = log.timeOut || cadetDaily?.timeOutTime || timeOutScanObj?.timestamp || (log.scanMode === 'Time-Out' ? log.timestamp : null);
+
+                  const hasValidTimeIn = Boolean(timeInTimestamp && String(timeInTimestamp).trim());
+                  const hasValidTimeOut = Boolean(timeOutTimestamp && String(timeOutTimestamp).trim());
+
+                  const timeInStatus = hasValidTimeIn
+                    ? evaluateSingleScan(timeInScanObj || { timestamp: timeInTimestamp, scanMode: 'Time-In' }, formationCutoff)
+                    : null;
+                  const timeOutStatus = hasValidTimeOut
+                    ? 'PRESENT'
+                    : (hasValidTimeIn ? 'NO TIME-OUT' : 'ABSENT');
+
+                  // Final Status determination strictly checks if timeIn actually contains a valid timestamp string
+                  let finalStatus = 'ABSENT';
+                  if (hasValidTimeIn && hasValidTimeOut) {
+                    finalStatus = timeInStatus === 'LATE' ? 'LATE' : 'PRESENT';
+                  } else if (hasValidTimeIn && !hasValidTimeOut) {
+                    finalStatus = timeInStatus === 'LATE' ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
+                  } else if (!hasValidTimeIn && hasValidTimeOut) {
+                    finalStatus = 'NO TIME-IN';
+                  } else {
+                    finalStatus = 'ABSENT';
+                  }
 
                   return (
                     <tr key={idx}>
@@ -1371,25 +1515,82 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                       <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{echelon.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
                       <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{echelon.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
                       <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{echelon.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
-                      <td style={{ fontWeight: 600 }}>{log.rank || 'Cadet'}</td>
-                      <td>{log.sessionName || 'Drill Session'}</td>
-                      <td>{log.dutyOfficer || 'Duty Officer'}</td>
-                      <td style={{ fontSize: '0.8rem' }}>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</td>
+
+                      {/* Time-In Column */}
                       <td>
-                        {isTimeOut ? (
-                          <span className="badge" style={{ background: '#e0e7ff', color: '#3730a3', gap: '3px' }}>
-                            <CheckCircle2 size={11} /> TIME-OUT
-                          </span>
-                        ) : isLate ? (
-                          <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
-                            <Clock size={11} /> LATE
-                          </span>
+                        {timeInTimestamp ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                              {new Date(timeInTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            {timeInStatus === 'LATE' ? (
+                              <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontWeight: 800, padding: '2px 6px', fontSize: '0.7rem' }}>
+                                <Clock size={10} /> LATE
+                              </span>
+                            ) : (
+                              <span className="badge badge-present" style={{ padding: '2px 6px', fontSize: '0.7rem' }}>
+                                <CheckCircle2 size={10} /> PRESENT
+                              </span>
+                            )}
+                          </div>
                         ) : (
-                          <span className="badge badge-present" style={{ gap: '3px' }}>
-                            <CheckCircle2 size={11} /> PRESENT
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>No Scan</span>
+                        )}
+                      </td>
+
+                      {/* Time-Out Column */}
+                      <td>
+                        {timeOutTimestamp ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
+                              {new Date(timeOutTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className="badge badge-present" style={{ padding: '2px 6px', fontSize: '0.7rem' }}>
+                              <CheckCircle2 size={10} /> PRESENT
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', fontSize: '0.68rem', padding: '2px 6px' }}>
+                            NO TIME-OUT
                           </span>
                         )}
                       </td>
+
+                      {/* Final Daily Status Badge */}
+                      <td>
+                        {(finalStatus === 'PRESENT' || finalStatus === 'PRESENT (Complete)') && (
+                          <span className="badge badge-present" style={{ fontWeight: 800, gap: '3px' }}>
+                            <CheckCircle2 size={11} /> PRESENT
+                          </span>
+                        )}
+                        {(finalStatus === 'LATE' || finalStatus === 'LATE (Complete)') && (
+                          <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
+                            <Clock size={11} /> LATE
+                          </span>
+                        )}
+                        {(finalStatus === 'NO TIME-OUT' || finalStatus === 'INCOMPLETE (No Time-Out)') && (
+                          <span className="badge" style={{ background: '#ffedd5', color: '#9a3412', border: '1px solid #fed7aa', fontWeight: 800, gap: '3px' }}>
+                            <Activity size={11} /> NO TIME-OUT
+                          </span>
+                        )}
+                        {(finalStatus === 'LATE / NO TIME-OUT' || finalStatus === 'INCOMPLETE (Late / No Time-Out)') && (
+                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
+                            <Activity size={11} /> LATE / NO TIME-OUT
+                          </span>
+                        )}
+                        {finalStatus === 'ABSENT' && (
+                          <span className="badge" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: 700 }}>
+                            ABSENT
+                          </span>
+                        )}
+                        {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT'].includes(finalStatus) && (
+                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
+                            {finalStatus}
+                          </span>
+                        )}
+                      </td>
+
+                      <td>{log.dutyOfficer || 'Duty Officer'}</td>
                     </tr>
                   );
                 })}

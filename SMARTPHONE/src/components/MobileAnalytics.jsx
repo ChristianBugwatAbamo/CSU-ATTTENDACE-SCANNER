@@ -294,15 +294,15 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 {/* Right Side: Scan Mode Badge */}
                 <div style={{ textAlign: 'right' }}>
                   <span style={{
-                    fontSize: '0.65rem',
-                    fontWeight: 800,
+                    fontSize: '0.68rem',
+                    fontWeight: 850,
                     padding: '3px 9px',
                     borderRadius: '9999px',
                     background: scan.scanMode === 'Time-Out' ? '#fef3c7' : '#d1fae5',
                     color: scan.scanMode === 'Time-Out' ? '#92400e' : '#065f46',
                     border: `1px solid ${scan.scanMode === 'Time-Out' ? '#fde68a' : '#6ee7b7'}`
                   }}>
-                    {scan.scanMode ? scan.scanMode.toUpperCase() : 'PRESENT'}
+                    {scan.scanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN'}
                   </span>
                 </div>
               </div>

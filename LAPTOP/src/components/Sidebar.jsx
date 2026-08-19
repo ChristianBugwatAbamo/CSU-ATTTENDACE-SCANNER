@@ -1,7 +1,9 @@
 import React from 'react';
 import { LayoutDashboard, Users, QrCode, FileSpreadsheet, Camera, Settings } from 'lucide-react';
+import { useAttendanceData } from '../hooks/useAttendanceData';
 
 export default function Sidebar({ activeTab, setActiveTab, serverOnline }) {
+  const { settings } = useAttendanceData();
   const navItems = [
     { id: 'dashboard', label: 'Dashboard & Analytics', icon: LayoutDashboard },
     { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
@@ -10,13 +12,24 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline }) {
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
 
+  const logoSrc = settings?.rotcSealUrl || '/rotc-seal-transparent.png';
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <img src="/rotc-seal-transparent.png" alt="CSU ROTC Logo" className="rotc-logo-img" style={{ width: '48px', height: '48px', objectFit: 'contain', background: 'transparent' }} />
+        <img
+          src={logoSrc}
+          alt="CSU ROTC Logo"
+          className="rotc-logo-img"
+          style={{ width: '48px', height: '48px', objectFit: 'contain', background: 'transparent' }}
+          onError={(e) => {
+            e.target.onerror = null;
+            e.target.src = '/rotc-seal-transparent.png';
+          }}
+        />
         <div className="sidebar-title">
-          <h1 style={{ fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 800, fontSize: '1.15rem' }}>CSU ROTC Unit</h1>
-          <p style={{ color: '#9ca3af', textTransform: 'none', fontWeight: 500 }}>Inventory System</p>
+          <h1 style={{ fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 800, fontSize: '1.15rem' }}>CSU MAIN ROTCU</h1>
+          <p style={{ color: '#9ca3af', textTransform: 'none', fontWeight: 500 }}>Attendance System</p>
         </div>
       </div>
 

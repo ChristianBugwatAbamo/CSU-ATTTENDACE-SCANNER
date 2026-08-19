@@ -1590,4 +1590,71 @@ body {
   }
 }
 
+/* =========================================================================
+   PRINT STYLES: Hide Floating Navigation Bar, Sidebar, and UI Controls
+   ========================================================================= */
+@media print {
+  /* Completely hide all navigation bars, sidebars, FABs, and action buttons */
+  .sidebar,
+  .mobile-bottom-nav,
+  .mobile-nav-container,
+  .mobile-scanner-fab,
+  .mobile-fab-container,
+  .mobile-fab-label,
+  .no-print,
+  nav,
+  header.mobile-header,
+  .top-header,
+  .btn,
+  button,
+  .modal-backdrop,
+  .toast,
+  .form-control,
+  select,
+  input {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+  }
+
+  body, html {
+    background: transparent !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  .app-container {
+    display: block !important;
+    min-height: auto !important;
+    width: 100% !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Force background colors and crisp rendering on printed output */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+}
+
 

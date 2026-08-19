@@ -35,6 +35,8 @@ import {
   X
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
+import LetterheadSettingsModal from './LetterheadSettingsModal';
+import { recalculateAttendanceLogs } from '../utils/attendanceStatus';
 
 // Standard CSU ROTC 1,184 Unit Structure Template
 const DEFAULT_UNIT_STRUCTURE = [
@@ -200,7 +202,7 @@ const DEFAULT_SETTINGS = {
   rotcSealUrl: "/rotc-seal-transparent.png",
   universityLogoUrl: "/csu-logo.png",
 
-  // Tab 4: Data & Storage
+  // Tab 4: Data Management & Exports
   exportDirectory: "./desktop_excel_reports/",
   autoExcelExport: true,
   autoBackupEnabled: true,
@@ -226,6 +228,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const [savedSettings, setSavedSettings] = useState(DEFAULT_SETTINGS);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccessToast, setSaveSuccessToast] = useState(null);
+  const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
 
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(savedSettings);
 
@@ -334,8 +337,21 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     if (e) e.preventDefault();
     setIsSaving(true);
     const toSave = customSettings || settings;
+    const newCutoff = toSave.morningCutoffTime || toSave.formationCutoffTime || (toSave.musterAndUnit && toSave.musterAndUnit.timeInCutoff) || '07:30';
 
     try {
+      // 1. Re-evaluate and update all master attendance records against the new cutoff setting
+      try {
+        const savedLogsJson = localStorage.getItem('csu_rotc_master_attendance');
+        if (savedLogsJson) {
+          const parsedLogs = JSON.parse(savedLogsJson);
+          const recalculatedLogs = recalculateAttendanceLogs(parsedLogs, newCutoff);
+          localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(recalculatedLogs));
+        }
+      } catch (errRecalc) {
+        console.warn('Error recalculating master attendance on settings update:', errRecalc);
+      }
+
       localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(toSave));
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('local-attendance-update'));
@@ -464,6 +480,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     try {
       const res = await fetch('/api/attendance', { method: 'DELETE' });
       localStorage.removeItem('csu_rotc_master_attendance');
+      localStorage.removeItem('csu_rotc_recent_approved_signatures');
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('local-attendance-update'));
 
@@ -478,6 +495,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       }
     } catch (err) {
       localStorage.removeItem('csu_rotc_master_attendance');
+      localStorage.removeItem('csu_rotc_recent_approved_signatures');
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('local-attendance-update'));
       setPurgeErrorMsg('Error contacting server (cleared locally).');
@@ -845,7 +863,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const tabs = [
     { id: 'structure', label: 'Muster & Unit Configuration', icon: Layers, desc: 'Formation schedules & battalion structure' },
     { id: 'branding', label: 'Unit Branding', icon: Award, desc: 'Command profile & official seals' },
-    { id: 'storage', label: 'Data & Storage', icon: Database, desc: 'Excel paths & JSON backups' },
+    { id: 'storage', label: 'Data Management & Exports', icon: Database, desc: 'Excel paths, backups & letterhead settings' },
     { id: 'idprinting', label: 'ID Printing Setup', icon: Printer, desc: 'Signatories & CR80 specs' }
   ];
 
@@ -1631,7 +1649,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       )}
 
       {/* =========================================================================
-          TAB 4: DATA & STORAGE
+          TAB 4: DATA MANAGEMENT & EXPORTS
           ========================================================================= */}
       {activeTab === 'storage' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
@@ -1694,70 +1712,36 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             </div>
           </div>
 
-          {/* Danger Zone: Reset & Purge */}
-          <div className="card" style={{ border: '1px solid #fca5a5', background: '#fffafb' }}>
+          {/* Official Excel Report Letterhead & Signatories Card */}
+          <div className="card" style={{ border: '1px solid var(--border-light)' }}>
             <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: '#dc2626' }}>
-                <AlertTriangle size={20} />
-                <span>Administrative Danger Zone</span>
+              <div className="card-title">
+                <FileSpreadsheet size={20} style={{ color: 'var(--rotc-green-dark)' }} />
+                <span>Official Excel Report Letterhead & Signatories</span>
               </div>
-              <span className="badge" style={{ background: '#fee2e2', color: '#dc2626', fontWeight: 800 }}>DANGER</span>
+              <span className="badge badge-present">EXCEL LETTERHEAD</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ padding: '0.9rem', background: '#ffffff', borderRadius: '10px', border: '1px solid #fecaca' }}>
-                <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '0.88rem', marginBottom: '2px' }}>
-                  Reset Master Cadet Directory
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                  Restore full CSU ROTC 1,184-cadet database to default roster.
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsResetRosterModalOpen(true)}
-                  style={{
-                    background: '#fee2e2',
-                    color: '#dc2626',
-                    border: '1px solid #fca5a5',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '8px',
-                    fontWeight: 700,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Reset Cadet Roster (1,184)
-                </button>
-              </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
+                Configure the official military letterhead text (Motto, Headquarters, Parent Command, Unit Name, Location, and Commandant / Signatory titles) automatically printed on every <code>[Company] - [Platoon]</code> sheet when saving attendance to Excel.
+              </p>
 
-              <div style={{ padding: '0.9rem', background: '#ffffff', borderRadius: '10px', border: '1px solid #fecaca' }}>
-                <div style={{ fontWeight: 800, color: '#991b1b', fontSize: '0.88rem', marginBottom: '2px' }}>
-                  Purge Master Attendance Logs
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                  Permanently delete all recorded scan logs from database. Requires security PIN.
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSecurePurgeModalOpen(true);
-                    setPurgeErrorMsg('');
-                    setPurgePasswordInput('');
-                  }}
-                  style={{
-                    background: '#dc2626',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '0.5rem 1rem',
-                    borderRadius: '8px',
-                    fontWeight: 800,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <Trash2 size={13} style={{ display: 'inline', marginRight: '4px' }} /> Purge Attendance Logs
-                </button>
-              </div>
+              <button
+                type="button"
+                className="btn btn-gold"
+                onClick={() => setIsLetterheadModalOpen(true)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  fontWeight: 800,
+                  padding: '0.65rem 1rem'
+                }}
+              >
+                <Settings size={16} /> Open Letterhead & Signatories Editor
+              </button>
             </div>
           </div>
         </div>
@@ -2456,6 +2440,16 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           </div>
         </div>
       )}
+
+      {/* Official Excel Report Letterhead & Signatories Modal */}
+      <LetterheadSettingsModal
+        isOpen={isLetterheadModalOpen}
+        onClose={() => setIsLetterheadModalOpen(false)}
+        onSaved={() => {
+          setSaveSuccessToast("Excel letterhead configuration updated successfully.");
+          setTimeout(() => setSaveSuccessToast(null), 3500);
+        }}
+      />
     </div>
   );
 }

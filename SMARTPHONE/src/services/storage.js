@@ -58,8 +58,13 @@ export async function clearOfflineQueue() {
   try {
     await del(QUEUE_KEY);
   } catch (err) {
-    localStorage.removeItem(QUEUE_KEY);
+    console.warn("IDB clear failed:", err);
   }
+  try {
+    localStorage.removeItem(QUEUE_KEY);
+    localStorage.removeItem('csu_mobile_local_scans');
+    localStorage.removeItem('csu_rotc_offline_queue');
+  } catch (_) {}
 }
 
 // Admin Laptop IP Settings

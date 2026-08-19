@@ -173,183 +173,229 @@ function saveAttendanceLogs(logs) {
   fs.writeFileSync(ATTENDANCE_FILE, JSON.stringify(logs, null, 2));
 }
 
-// Write/Append to Excel Report
+// Write/Append to Multi-Sheet Excel Report organized by [Battalion] - [Company] - [Platoon]
 async function exportToExcel(records, sessionName = "Drill Session") {
   const dateStr = new Date().toISOString().split('T')[0];
   const filename = `ROTC_Attendance_${dateStr}.xlsx`;
   const filePath = path.join(EXCEL_DIR, filename);
 
   let workbook = new ExcelJS.Workbook();
-  let worksheet;
-
-  if (fs.existsSync(filePath)) {
-    await workbook.xlsx.readFile(filePath);
-    worksheet = workbook.getWorksheet('Attendance Log') || workbook.addWorksheet('Attendance Log');
-  } else {
-    worksheet = workbook.addWorksheet('Attendance Log');
-    
-    // Set Header Info
-    worksheet.mergeCells('A1:L1');
-    const titleCell = worksheet.getCell('A1');
-    titleCell.value = 'CSU ROTC UNIT (1501st CDC) - ATTENDANCE MASTER REPORT';
-    titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
-    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF064E2E' } };
-    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(1).height = 30;
-
-    worksheet.mergeCells('A2:L2');
-    const subTitle = worksheet.getCell('A2');
-    subTitle.value = `Unit Target Strength: 1,184 Cadets (37/Pltn) | Generated: ${new Date().toLocaleString()} | Session: ${sessionName}`;
-    subTitle.font = { name: 'Arial', size: 10, italic: true };
-    subTitle.alignment = { horizontal: 'center', vertical: 'middle' };
-
-    // Column Headers
-    const headers = ['#', 'Cadet ID', 'Cadet Name', 'Battalion', 'Company', 'Platoon', 'Rank', 'Designation', 'Scan Timestamp', 'Session Name', 'Duty Officer', 'Status'];
-    const headerRow = worksheet.addRow(headers);
-    headerRow.height = 24;
-    
-    headerRow.eachCell((cell) => {
-      cell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF005A36' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-      cell.border = {
-        top: { style: 'thin' },
-        left: { style: 'thin' },
-        bottom: { style: 'thin' },
-        right: { style: 'thin' }
-      };
-    });
-  }
-
-  // Map existing Cadet IDs in worksheet for in-place updates
-  const existingCadetRowMap = new Map();
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber > 3) {
-      const rowCadetId = row.getCell(2).value;
-      const rowStatus = row.getCell(12).value;
-      if (rowCadetId) {
-        const cid = String(rowCadetId).trim().toUpperCase();
-        const mode = String(rowStatus || '').includes('TIME-OUT') ? 'Time-Out' : 'Time-In';
-        existingCadetRowMap.set(`${cid}__${mode}`, rowNumber);
-      }
-    }
-  });
-
   const activeSettings = getSettings();
   const cutoffStr = activeSettings.morningCutoffTime || activeSettings.formationCutoffTime || "07:30";
-  
-  let ch = 7;
-  let cm = 30;
-  const match = String(cutoffStr).match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
-  if (match) {
-    ch = parseInt(match[1], 10);
-    cm = parseInt(match[2], 10);
-    const meridiem = match[3] ? match[3].toUpperCase() : null;
-    if (meridiem === 'PM' && ch < 12) ch += 12;
-    if (meridiem === 'AM' && ch === 12) ch = 0;
+
+  function parseTimeToMinutes(input) {
+    if (!input && input !== 0) return NaN;
+    if (input instanceof Date) {
+      if (isNaN(input.getTime())) return NaN;
+      return input.getHours() * 60 + input.getMinutes();
+    }
+    if (typeof input === 'number') {
+      const d = new Date(input > 1e11 ? input : input * 1000);
+      if (!isNaN(d.getTime())) return d.getHours() * 60 + d.getMinutes();
+    }
+    const str = String(input).trim();
+    if (!str) return NaN;
+    const ampmMatch = str.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)/i);
+    if (ampmMatch) {
+      let h = parseInt(ampmMatch[1], 10);
+      const m = parseInt(ampmMatch[2], 10);
+      const meridiem = ampmMatch[4].toUpperCase();
+      if (meridiem === 'PM' && h < 12) h += 12;
+      if (meridiem === 'AM' && h === 12) h = 0;
+      return h * 60 + m;
+    }
+    const timeOnlyMatch = str.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (timeOnlyMatch) {
+      const h = parseInt(timeOnlyMatch[1], 10);
+      const m = parseInt(timeOnlyMatch[2], 10);
+      return h * 60 + m;
+    }
+    const d = new Date(str);
+    if (!isNaN(d.getTime())) {
+      return d.getHours() * 60 + d.getMinutes();
+    }
+    const fallbackMatch = str.match(/(\d{1,2}):(\d{2})/);
+    if (fallbackMatch) {
+      const h = parseInt(fallbackMatch[1], 10);
+      const m = parseInt(fallbackMatch[2], 10);
+      return h * 60 + m;
+    }
+    return NaN;
   }
-  const cutoffMins = ch * 60 + cm;
 
-  records.forEach((rec, idx) => {
+  const parsedCutoff = parseTimeToMinutes(cutoffStr);
+  const cutoffMins = isNaN(parsedCutoff) ? 450 : parsedCutoff;
+
+  // Enrich records with normalized echelons and evaluated status
+  const enrichedRows = records.map((rec) => {
     const cid = String(rec.cadetId || rec.id || '').trim().toUpperCase();
-    if (!cid) return;
-    const mode = rec.scanMode || 'Time-In';
-    const key = `${cid}__${mode}`;
+    const isOfficer = rec.battalion === 'CADET OFFICERS' ||
+      rec.type === 'Cadet Officer' ||
+      (rec.rank && (rec.rank.includes('1CL') || rec.rank.includes('2CL') || rec.rank.includes('3CL') || rec.rank.includes('4CL') || rec.rank.includes('ASPIRANT')));
 
-    const directName = (rec.name && rec.name !== 'UNREGISTERED CADET' && rec.name.trim().length > 0)
-      ? rec.name.trim()
-      : (rec.cadetId ? `CADET ${rec.cadetId}` : 'CADET');
     let directBn = rec.battalion && rec.battalion !== 'N/A' ? rec.battalion : '1st Battalion';
-    if (directBn === 'Brigade HQ' || rec.type === 'Cadet Officer' || (rec.rank && (rec.rank.includes('1CL') || rec.rank.includes('2CL') || rec.rank.includes('3CL') || rec.rank.includes('4CL') || rec.rank.includes('ASPIRANT')) && !directBn.includes('Battalion'))) {
+    if (isOfficer && !directBn.includes('Battalion')) {
       directBn = 'CADET OFFICERS';
     }
     const directCo = rec.company && rec.company !== 'N/A' ? rec.company : 'Alpha Company';
     const directPl = rec.platoon && rec.platoon !== 'N/A' ? rec.platoon : '1st Platoon';
 
-    // Calculate Late vs Present based on active formation cutoff setting
     let calcStatus = 'PRESENT';
     if (rec.scanMode === 'Time-Out' || (rec.status && String(rec.status).toUpperCase().includes('TIME-OUT'))) {
       calcStatus = 'TIME-OUT';
     } else if (rec.timestamp) {
-      const d = new Date(rec.timestamp);
-      if (!isNaN(d.getTime())) {
-        const mins = d.getHours() * 60 + d.getMinutes();
+      const mins = parseTimeToMinutes(rec.timestamp);
+      if (!isNaN(mins)) {
         calcStatus = mins > cutoffMins ? 'LATE' : 'PRESENT';
       }
     }
 
-    if (existingCadetRowMap.has(key)) {
-      // IN-PLACE UPDATE for existing row: Update timestamp, session, Duty Officer, and status
-      const targetRowNumber = existingCadetRowMap.get(key);
-      const row = worksheet.getRow(targetRowNumber);
-      row.getCell(9).value = rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString();
-      row.getCell(10).value = rec.sessionName || sessionName;
-      row.getCell(11).value = rec.dutyOfficer || rec.d || 'Duty Officer';
-      row.getCell(12).value = calcStatus;
+    const timeInRaw = rec.timeIn || (rec.scanMode !== 'Time-Out' ? rec.timestamp : null);
+    const timeOutRaw = rec.timeOut || (rec.scanMode === 'Time-Out' ? rec.timestamp : null);
 
-      // Update styling
-      if (calcStatus === 'LATE') {
-        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-        row.getCell(12).font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFB45309' } };
-      } else if (calcStatus === 'PRESENT') {
-        row.getCell(12).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
-        row.getCell(12).font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF065F46' } };
-      }
-    } else {
-      // INSERT NEW ROW
-      const startRow = worksheet.lastRow ? worksheet.lastRow.number + 1 : 4;
-      const rowValues = [
-        startRow - 3,
-        cid,
-        directName,
-        directBn,
-        directCo,
-        directPl,
-        rec.rank || 'Cadet',
-        rec.designation || 'None',
-        rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString(),
-        rec.sessionName || sessionName,
-        rec.dutyOfficer || rec.d || 'Duty Officer',
-        calcStatus
-      ];
-      
-      const row = worksheet.addRow(rowValues);
-      row.height = 20;
-      row.eachCell((cell, colNumber) => {
-        cell.font = { name: 'Arial', size: 10 };
-        cell.alignment = { vertical: 'middle', horizontal: colNumber === 1 || colNumber === 2 || colNumber === 4 || colNumber === 5 || colNumber === 6 || colNumber === 7 || colNumber === 12 ? 'center' : 'left' };
+    return {
+      cadetId: cid || 'N/A',
+      name: (rec.name && rec.name !== 'UNREGISTERED CADET' && rec.name.trim().length > 0) ? rec.name.trim() : (cid ? `CADET ${cid}` : 'CADET'),
+      rank: rec.rank || 'Cadet',
+      designation: rec.designation || 'None',
+      battalion: directBn,
+      company: directCo,
+      platoon: directPl,
+      isOfficer,
+      scanMode: rec.scanMode || 'Time-In',
+      timeIn: timeInRaw ? new Date(timeInRaw).toLocaleString() : '—',
+      timeOut: timeOutRaw ? new Date(timeOutRaw).toLocaleString() : '—',
+      timestamp: rec.timestamp ? new Date(rec.timestamp).toLocaleString() : new Date().toLocaleString(),
+      sessionName: rec.sessionName || sessionName,
+      dutyOfficer: rec.dutyOfficer || rec.d || 'Duty Officer',
+      status: rec.finalDailyStatus || rec.finalStatus || calcStatus
+    };
+  });
+
+  const setupSheet = (worksheet, title) => {
+    worksheet.mergeCells('A1:J1');
+    const titleCell = worksheet.getCell('A1');
+    titleCell.value = 'CSU ROTC UNIT (1501st CDC) - ATTENDANCE MASTER REPORT';
+    titleCell.font = { name: 'Arial', size: 14, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF064E2E' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 28;
+
+    worksheet.mergeCells('A2:J2');
+    const subTitle = worksheet.getCell('A2');
+    subTitle.value = `${title} | Cutoff: ${cutoffStr} | Generated: ${new Date().toLocaleString()}`;
+    subTitle.font = { name: 'Arial', size: 9.5, italic: true, color: { argb: 'FF334155' } };
+    subTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+    subTitle.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(2).height = 20;
+
+    const headers = ['#', 'Cadet ID', 'Cadet Name', 'Rank', 'Battalion', 'Company', 'Platoon', 'Time-In', 'Time-Out', 'Status'];
+    const headerRow = worksheet.addRow(headers);
+    headerRow.height = 24;
+
+    headerRow.eachCell((cell) => {
+      cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF005A36' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.border = {
+        top: { style: 'thin' },
+        left: { style: 'thin' },
+        bottom: { style: 'medium' },
+        right: { style: 'thin' }
+      };
+    });
+  };
+
+  const populateRows = (worksheet, rows) => {
+    rows.forEach((rec, i) => {
+      const dataRow = worksheet.addRow([
+        i + 1,
+        rec.cadetId,
+        rec.name,
+        rec.rank,
+        rec.battalion,
+        rec.company,
+        rec.platoon,
+        rec.timeIn,
+        rec.timeOut,
+        rec.status
+      ]);
+      dataRow.height = 20;
+
+      dataRow.eachCell((cell, colNumber) => {
+        cell.font = { name: 'Arial', size: 9.5 };
+        cell.alignment = {
+          vertical: 'middle',
+          horizontal: colNumber === 1 || colNumber === 2 || colNumber === 4 || colNumber === 5 || colNumber === 6 || colNumber === 7 || colNumber === 8 || colNumber === 9 || colNumber === 10 ? 'center' : 'left'
+        };
         cell.border = {
-          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
-          right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+          top: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          left: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          bottom: { style: 'thin', color: { argb: 'FFE2E8F0' } },
+          right: { style: 'thin', color: { argb: 'FFE2E8F0' } }
         };
 
-        if (colNumber === 12) {
-          if (calcStatus === 'LATE') {
-            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
-            cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFB45309' } };
-          } else if (calcStatus === 'PRESENT') {
+        if (colNumber === 10) {
+          const st = String(rec.status || '').toUpperCase();
+          if (st.includes('PRESENT')) {
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
-            cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF065F46' } };
+            cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF065F46' } };
+          } else if (st.includes('LATE') && !st.includes('NO TIME-OUT')) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
+            cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FFB45309' } };
+          } else if (st.includes('NO TIME-OUT') || st.includes('INCOMPLETE')) {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFEDD5' } };
+            cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF9A3412' } };
+          } else {
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+            cell.font = { name: 'Arial', size: 9.5, color: { argb: 'FF475569' } };
           }
         }
       });
-      existingCadetRowMap.set(key, row.number);
+    });
+
+    worksheet.columns = [
+      { width: 6 },
+      { width: 14 },
+      { width: 26 },
+      { width: 14 },
+      { width: 16 },
+      { width: 16 },
+      { width: 16 },
+      { width: 14 },
+      { width: 14 },
+      { width: 22 }
+    ];
+  };
+
+  // 1. Master Summary Sheet
+  const masterSheet = workbook.addWorksheet('Master Summary');
+  setupSheet(masterSheet, 'All Units Master Summary');
+  populateRows(masterSheet, enrichedRows);
+
+  // 2. Separate Sheets individually organized by [Company] - [Platoon]
+  const echelonGroups = new Map();
+  enrichedRows.forEach(r => {
+    let sheetName = 'Cadet Officers';
+    if (!r.isOfficer && r.battalion !== 'CADET OFFICERS') {
+      const coCode = r.company.replace(' Company', '').trim();
+      const plCode = r.platoon.includes('1') ? '1st Platoon' : r.platoon.includes('2') ? '2nd Platoon' : r.platoon.includes('3') ? '3rd Platoon' : r.platoon.includes('4') ? '4th Platoon' : r.platoon;
+      sheetName = `${coCode} Co - ${plCode}`.slice(0, 31);
     }
+    if (!echelonGroups.has(sheetName)) {
+      echelonGroups.set(sheetName, []);
+    }
+    echelonGroups.get(sheetName).push(r);
   });
 
-  // Adjust column widths automatically
-  worksheet.columns.forEach((col, idx) => {
-    let maxLen = 12;
-    col.eachRow({ includeEmpty: false }, (r) => {
-      const val = r.getCell(idx + 1).value;
-      if (val) maxLen = Math.max(maxLen, val.toString().length);
-    });
-    col.width = Math.min(maxLen + 4, 35);
+  echelonGroups.forEach((rows, name) => {
+    const ws = workbook.addWorksheet(name);
+    setupSheet(ws, `Unit: ${name}`);
+    populateRows(ws, rows);
   });
 
   await workbook.xlsx.writeFile(filePath);
+  console.log(`✅ Multi-Sheet Excel Report saved: ${filePath}`);
   return filename;
 }
 
@@ -530,12 +576,51 @@ app.get('/api/attendance', (req, res) => {
 
 app.delete('/api/attendance', (req, res) => {
   try {
+    const { type, cadetId, battalion, company, platoon } = req.query || req.body || {};
+    let logs = getAttendanceLogs();
+
+    if (type === 'CADET' && cadetId) {
+      const cIdNorm = String(cadetId).trim().toUpperCase();
+      logs = logs.filter(l => String(l.cadetId || l.id || '').trim().toUpperCase() !== cIdNorm);
+      saveAttendanceLogs(logs);
+      console.log(`[RESET] Cleared cadet ${cadetId} from Master Attendance Logs.`);
+      return res.json({ success: true, message: `Cadet ${cadetId} attendance removed.` });
+    }
+
+    if (type === 'PLATOON' && (platoon || company || battalion)) {
+      logs = logs.filter(l => {
+        const matchBn = battalion ? String(l.battalion || '').toLowerCase().includes(String(battalion).toLowerCase()) : true;
+        const matchCo = company ? String(l.company || '').toLowerCase().includes(String(company).toLowerCase()) : true;
+        const matchPl = platoon ? String(l.platoon || '').toLowerCase().includes(String(platoon).toLowerCase()) : true;
+        return !(matchBn && matchCo && matchPl);
+      });
+      saveAttendanceLogs(logs);
+      console.log(`[RESET] Cleared platoon ${platoon || company || battalion} from Master Attendance Logs.`);
+      return res.json({ success: true, message: `Platoon attendance removed.` });
+    }
+
+    // Default: Clear All
     saveAttendanceLogs([]);
     console.log('[RESET] Master Attendance Logs cleared by admin.');
     res.json({ success: true, message: 'Master Attendance Logs cleared successfully.' });
   } catch (err) {
     console.error('Error clearing attendance logs:', err);
     res.status(500).json({ error: 'Failed to clear attendance logs.' });
+  }
+});
+
+app.post('/api/reports/save-direct', async (req, res) => {
+  try {
+    const { records, sessionName } = req.body;
+    if (Array.isArray(records) && records.length > 0) {
+      const filename = await exportToExcel(records, sessionName || 'Field Formation Session');
+      res.json({ success: true, filename });
+    } else {
+      res.status(400).json({ error: 'No records provided for export.' });
+    }
+  } catch (err) {
+    console.error('Error saving direct report:', err);
+    res.status(500).json({ error: 'Failed to save report to server.' });
   }
 });
 

@@ -18,6 +18,7 @@ export default function SyncControl({
   hideBottomBar = false
 }) {
   const [internalQrModalOpen, setInternalQrModalOpen] = useState(false);
+  const [activeBatchPayload, setActiveBatchPayload] = useState([]);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState(null);
   const [currentChunk, setCurrentChunk] = useState(0);
@@ -30,8 +31,10 @@ export default function SyncControl({
     setInternalQrModalOpen(val);
   };
 
-  const handleOpenQrModal = () => {
-    if (offlineQueue.length === 0) {
+  // Mobile App: Clear local scans upon successful QR generation / Export
+  const handleOpenQrModal = async () => {
+    const queueToSync = offlineQueue.length > 0 ? [...offlineQueue] : (activeBatchPayload.length > 0 ? activeBatchPayload : []);
+    if (queueToSync.length === 0) {
       setSyncStatusMsg({
         type: 'info',
         text: "No pending offline scans in queue to sync."
@@ -39,16 +42,34 @@ export default function SyncControl({
       setTimeout(() => setSyncStatusMsg(null), 3000);
       return;
     }
+    setActiveBatchPayload(queueToSync);
     setCurrentChunk(0);
     setQrModalOpen(true);
+
+    // Clear local queue for the next scanning session
+    if (onSyncSuccess) {
+      await onSyncSuccess();
+    }
   };
 
-  const handleClearAndFinish = () => {
-    setIsSyncConfirmOpen(true);
+  const handleClearAndFinish = async () => {
+    if (onSyncSuccess) {
+      await onSyncSuccess();
+    }
+    setActiveBatchPayload([]);
+    setQrModalOpen(false);
+    setSyncStatusMsg({
+      type: 'success',
+      text: `Queue cleared! Ready for next session.`
+    });
+    setTimeout(() => setSyncStatusMsg(null), 4000);
   };
 
   const handleConfirmSyncFinish = async () => {
-    await onSyncSuccess();
+    if (onSyncSuccess) {
+      await onSyncSuccess();
+    }
+    setActiveBatchPayload([]);
     setIsSyncConfirmOpen(false);
     setQrModalOpen(false);
     setSyncStatusMsg({
@@ -58,14 +79,17 @@ export default function SyncControl({
     setTimeout(() => setSyncStatusMsg(null), 4000);
   };
 
+  // Effective batch records currently being rendered in QR
+  const effectiveQueue = activeBatchPayload.length > 0 ? activeBatchPayload : offlineQueue;
+
   // Build minified chunks for ultra-fast low-density QR scanning
   // Keys: T=type, d=dutyOfficer, s=sessionName, bn=battalion, co=company, pl=platoon, p=page, n=totalPages
   // Cadet records r: [{i: id, n: name, m: mode, t: timestamp}]
-  const totalChunks = Math.max(1, Math.ceil(offlineQueue.length / CHUNK_SIZE));
+  const totalChunks = Math.max(1, Math.ceil(effectiveQueue.length / CHUNK_SIZE));
 
   const buildChunkPayload = (chunkIndex) => {
     const start = chunkIndex * CHUNK_SIZE;
-    const slice = offlineQueue.slice(start, start + CHUNK_SIZE);
+    const slice = effectiveQueue.slice(start, start + CHUNK_SIZE);
 
     // Echelon info stored ONCE in the header object instead of repeating per cadet
     const bn = sessionSetup?.battalion || slice[0]?.battalion || '1st Battalion';
@@ -92,7 +116,7 @@ export default function SyncControl({
     });
   };
 
-  const currentPayloadString = offlineQueue.length > 0 ? buildChunkPayload(currentChunk) : '{}';
+  const currentPayloadString = effectiveQueue.length > 0 ? buildChunkPayload(currentChunk) : '{}';
 
   return (
     <>
@@ -238,7 +262,7 @@ export default function SyncControl({
                       PAGE {currentChunk + 1} OF {totalChunks}
                     </div>
                     <div style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
-                      Cadets {currentChunk * CHUNK_SIZE + 1}–{Math.min(offlineQueue.length, (currentChunk + 1) * CHUNK_SIZE)} of {offlineQueue.length}
+                      Cadets {currentChunk * CHUNK_SIZE + 1}–{Math.min(effectiveQueue.length, (currentChunk + 1) * CHUNK_SIZE)} of {effectiveQueue.length}
                     </div>
                   </div>
 
@@ -296,7 +320,7 @@ export default function SyncControl({
               <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '4px', marginTop: '2px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Total Cadets:</span>
                 <span style={{ background: 'var(--rotc-yellow-gold)', color: 'var(--text-dark)', padding: '2px 8px', borderRadius: '9999px', fontWeight: 800 }}>
-                  {offlineQueue.length} Cadets ({totalChunks} QR Page{totalChunks > 1 ? 's' : ''})
+                  {effectiveQueue.length} Cadets ({totalChunks} QR Page{totalChunks > 1 ? 's' : ''})
                 </span>
               </div>
             </div>

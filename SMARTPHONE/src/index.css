@@ -1486,4 +1486,50 @@ body {
   color: rgba(255, 255, 255, 0.4);
 }
 
+/* =========================================================================
+   PRINT STYLES: Hide Floating Navigation Bar, Header, and Controls
+   ========================================================================= */
+@media print {
+  .mobile-bottom-nav,
+  .mobile-nav-container,
+  .mobile-scanner-fab,
+  .mobile-fab-container,
+  .mobile-fab-label,
+  .no-print,
+  nav,
+  .mobile-header,
+  .btn,
+  button,
+  .modal-backdrop,
+  .toast {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    pointer-events: none !important;
+  }
+
+  body, html, .mobile-container {
+    background: transparent !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+}
+
 

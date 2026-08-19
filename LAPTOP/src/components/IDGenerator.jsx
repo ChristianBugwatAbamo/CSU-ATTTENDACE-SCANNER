@@ -7,7 +7,16 @@ export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
 
 export default function IDGenerator({ cadets = [] }) {
   // Category state: 'basic' | 'officer'
-  const [category, setCategory] = useState('basic');
+  const [category, setCategory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.category) return parsed.category;
+      }
+    } catch (_) {}
+    return 'basic';
+  });
 
   // Dynamic Ranks and Designations loaded from settings
   const [officerRanks, setOfficerRanks] = useState(() => {
@@ -72,29 +81,128 @@ export default function IDGenerator({ cadets = [] }) {
     };
   }, []);
 
-  // Split Name Fields State
-  const [lastName, setLastName] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [middleInitial, setMiddleInitial] = useState('');
+  // Split Name Fields State with LocalStorage Persistence
+  const [lastName, setLastName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).lastName || '';
+    } catch (_) {}
+    return '';
+  });
 
-  // Cadet ID, Rank, Echelon State
-  const [cadetId, setCadetId] = useState('');
-  const [rank, setRank] = useState('Cadet');
-  const [battalion, setBattalion] = useState('1st Battalion');
-  const [company, setCompany] = useState('Alpha');
-  const [platoon, setPlatoon] = useState('1st Platoon');
-  const [designation, setDesignation] = useState('None');
+  const [firstName, setFirstName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).firstName || '';
+    } catch (_) {}
+    return '';
+  });
+
+  const [middleInitial, setMiddleInitial] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).middleInitial || '';
+    } catch (_) {}
+    return '';
+  });
+
+  // Cadet ID, Rank, Echelon State with LocalStorage Persistence
+  const [cadetId, setCadetId] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).cadetId || '';
+    } catch (_) {}
+    return '';
+  });
+
+  const [rank, setRank] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).rank || 'Cadet';
+    } catch (_) {}
+    return 'Cadet';
+  });
+
+  const [battalion, setBattalion] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).battalion || '1st Battalion';
+    } catch (_) {}
+    return '1st Battalion';
+  });
+
+  const [company, setCompany] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).company || 'Alpha';
+    } catch (_) {}
+    return 'Alpha';
+  });
+
+  const [platoon, setPlatoon] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).platoon || '1st Platoon';
+    } catch (_) {}
+    return '1st Platoon';
+  });
+
+  const [designation, setDesignation] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).designation || 'None';
+    } catch (_) {}
+    return 'None';
+  });
 
   // Print Mode state: 'single' | 'batch'
-  const [printMode, setPrintMode] = useState('single');
+  const [printMode, setPrintMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).printMode || 'single';
+    } catch (_) {}
+    return 'single';
+  });
 
-  // Batch Cards Queue
-  const [batchQueue, setBatchQueue] = useState([
-    { id: '221-11101', name: 'SANTOS, MARIA L', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-    { id: '221-11102', name: 'DELA CRUZ, JUAN A', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-    { id: '221-00101', name: 'BAUTISTA, MARK G', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
-    { id: '221-00104', name: 'CASTILLO, ELENA J', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
-  ]);
+  // Batch Cards Queue with LocalStorage Persistence
+  const [batchQueue, setBatchQueue] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_batch_queue');
+      if (saved) return JSON.parse(saved);
+    } catch (_) {}
+    return [
+      { id: '221-11101', name: 'SANTOS, MARIA L', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
+      { id: '221-11102', name: 'DELA CRUZ, JUAN A', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
+      { id: '221-00101', name: 'BAUTISTA, MARK G', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
+      { id: '221-00104', name: 'CASTILLO, ELENA J', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
+    ];
+  });
+
+  // Synchronize Form State to LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('csu_rotc_id_gen_form', JSON.stringify({
+        category,
+        lastName,
+        firstName,
+        middleInitial,
+        cadetId,
+        rank,
+        battalion,
+        company,
+        platoon,
+        designation,
+        printMode
+      }));
+    } catch (_) {}
+  }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation, printMode]);
+
+  // Synchronize Batch Print Queue to LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('csu_rotc_id_gen_batch_queue', JSON.stringify(batchQueue));
+    } catch (_) {}
+  }, [batchQueue]);
 
   // Helper: Format combined Full Name: LAST NAME, FIRST NAME MIDDLE INITIAL
   const getFormattedFullName = () => {
@@ -408,14 +516,41 @@ export default function IDGenerator({ cadets = [] }) {
               </div>
             )}
 
-            <button
-              type="button"
-              className="btn btn-secondary"
-              style={{ marginTop: '0.5rem', width: '100%', justifyContent: 'center' }}
-              onClick={handleAddToBatch}
-            >
-              <Plus size={16} /> Add Form Cadet to Batch Queue
-            </button>
+            {/* Add to Batch Queue Button (Batch Mode Only) */}
+            {printMode === 'batch' && (
+              <button
+                type="button"
+                onClick={handleAddToBatch}
+                style={{
+                  marginTop: '0.65rem',
+                  width: '100%',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  background: '#E5A900',
+                  color: '#0A192F',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  padding: '0.65rem 1.25rem',
+                  borderRadius: '10px',
+                  border: 'none',
+                  boxShadow: '0px 4px 6px rgba(0, 0, 0, 0.1)',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease-in-out'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#C68C00';
+                  e.currentTarget.style.boxShadow = '0px 6px 10px rgba(0, 0, 0, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#E5A900';
+                  e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
+                }}
+              >
+                <Plus size={18} style={{ strokeWidth: 2.5 }} /> Add Form Cadet to Batch Queue
+              </button>
+            )}
 
 
 
