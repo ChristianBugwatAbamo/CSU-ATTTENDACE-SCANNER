@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   FileSpreadsheet,
   Download,
@@ -16,7 +16,10 @@ import {
   X,
   RotateCcw,
   Settings,
-  MoreVertical
+  MoreVertical,
+  Activity,
+  Archive,
+  Calendar
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
@@ -34,6 +37,12 @@ import { useAttendanceData } from '../hooks/useAttendanceData';
 export default function SyncLogs({ attendanceLogs: propsLogs, onRefresh, onClearLogs, onOpenScanner }) {
   const { records: hookLogs, activeCutoff } = useAttendanceData();
   const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : (propsLogs || []);
+
+  const [dateScope, setDateScope] = useState('TODAY'); // 'TODAY' | 'ALL'
+  const todayStr = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
 
   const [excelReports, setExcelReports] = useState([]);
   const [loadingReports, setLoadingReports] = useState(false);
@@ -130,8 +139,14 @@ export default function SyncLogs({ attendanceLogs: propsLogs, onRefresh, onClear
     }
   };
 
-  // Filter records based on cascading dropdowns and search query
+  // Filter records based on date scope, cascading dropdowns and search query
   const filteredLogs = attendanceLogs.filter(log => {
+    // 1. Date Scope filter (Today vs All)
+    if (dateScope === 'TODAY') {
+      const logDate = log.date || (log.timestamp ? log.timestamp.slice(0, 10) : '');
+      if (logDate !== todayStr) return false;
+    }
+
     const echelon = getScannedUnitEchelon(log);
     const matchesSearch = (log.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (log.cadetId || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -297,11 +312,58 @@ export default function SyncLogs({ attendanceLogs: propsLogs, onRefresh, onClear
           paddingBottom: '0.75rem',
           borderBottom: '1px solid var(--border-light)'
         }}>
-          {/* Title & Real-time Status Badges */}
+          {/* Header Row: Title, Scope Switcher & Live Badges */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--rotc-green-dark)', margin: 0 }}>
               Master Records ({filteredLogs.length} Cadets Displayed)
             </h3>
+
+            {/* Date Scope Toggle Pill */}
+            <div style={{ display: 'inline-flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+              <button
+                type="button"
+                onClick={() => setDateScope('TODAY')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  background: dateScope === 'TODAY' ? 'var(--rotc-green-dark)' : 'transparent',
+                  color: dateScope === 'TODAY' ? '#ffffff' : 'var(--text-dark)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Activity size={12} />
+                <span>Today's Live ({todayStr})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateScope('ALL')}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '4px 10px',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  border: 'none',
+                  background: dateScope === 'ALL' ? 'var(--rotc-green-dark)' : 'transparent',
+                  color: dateScope === 'ALL' ? '#ffffff' : 'var(--text-dark)',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Archive size={12} />
+                <span>All Logs ({attendanceLogs.length})</span>
+              </button>
+            </div>
+
             {filteredLogs.length > 0 && (
               <div style={{ display: 'flex', gap: '0.4rem', fontSize: '0.75rem', fontWeight: 700 }}>
                 <span className="badge" style={{ background: '#d1fae5', color: '#065f46' }}>

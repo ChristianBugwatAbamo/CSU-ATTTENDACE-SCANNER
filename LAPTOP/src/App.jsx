@@ -2,10 +2,13 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
+import AttendanceHistory from './components/AttendanceHistory';
 import IDGenerator from './components/IDGenerator';
 import ScannerPage from './components/ScannerPage';
 import SyncLogs from './components/SyncLogs';
 import AdminSettings from './components/AdminSettings';
+import LoginPage from './components/LoginPage';
+import PublicLandingPage from './components/PublicLandingPage';
 import {
   evaluateSingleScan,
   reconcileCadetDailyStatus,
@@ -16,11 +19,51 @@ import {
   normalizePlatoon,
   getScannedUnitEchelon
 } from './utils/attendanceStatus';
+import {
+  fetchCadetsFromSupabase,
+  fetchAttendanceFromSupabase,
+  bulkUpsertAttendanceToSupabase,
+  getSupabaseClient
+} from './utils/supabaseClient';
+import { LogOut, ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'idcards', 'scanner', 'synclogs', 'settings'];
+  const VALID_TABS = ['dashboard', 'history', 'idcards', 'scanner', 'synclogs', 'settings'];
 
-  // Hydrate activeTab from URL hash or localStorage
+  // Authentication Session State
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_auth_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.user) {
+          // Verify expiration if set
+          if (parsed.expiresAt && new Date(parsed.expiresAt) <= new Date()) {
+            localStorage.removeItem('csu_rotc_auth_session');
+            return null;
+          }
+          return parsed.user;
+        }
+      }
+    } catch (_) {}
+    return null;
+  });
+
+  // Top-Level Route Navigation: 'home' (Public Landing /) | 'login' (/login) | 'portal' (/dashboard/*)
+  const [currentRoute, setCurrentRoute] = useState(() => {
+    try {
+      const hash = window.location.hash.replace('#', '').trim().toLowerCase();
+      if (hash === 'login') return 'login';
+      if (VALID_TABS.includes(hash)) {
+        const savedSession = localStorage.getItem('csu_rotc_auth_session');
+        return savedSession ? 'portal' : 'login';
+      }
+      if (hash === 'home' || hash === '' || hash === '/') return 'home';
+    } catch (_) {}
+    return 'home';
+  });
+
+  // Hydrate activeTab inside the Admin Portal
   const [activeTab, setActiveTab] = useState(() => {
     try {
       const hash = window.location.hash.replace('#', '').trim();
@@ -35,27 +78,46 @@ export default function App() {
     return 'dashboard';
   });
 
-  // Sync activeTab to localStorage and URL hash
+  // Sync route and activeTab to window URL hash
   useEffect(() => {
     try {
-      localStorage.setItem('csu_rotc_active_tab', activeTab);
-      if (window.location.hash.replace('#', '').trim() !== activeTab) {
-        window.location.hash = activeTab;
+      if (currentRoute === 'home') {
+        if (window.location.hash !== '#home' && window.location.hash !== '') {
+          window.location.hash = 'home';
+        }
+      } else if (currentRoute === 'login') {
+        if (window.location.hash !== '#login') {
+          window.location.hash = 'login';
+        }
+      } else if (currentRoute === 'portal') {
+        localStorage.setItem('csu_rotc_active_tab', activeTab);
+        if (window.location.hash.replace('#', '').trim() !== activeTab) {
+          window.location.hash = activeTab;
+        }
       }
     } catch (_) {}
-  }, [activeTab]);
+  }, [currentRoute, activeTab]);
 
   // Support browser back/forward buttons with hashchange
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace('#', '').trim();
-      if (hash && VALID_TABS.includes(hash)) {
-        setActiveTab(hash);
+      const hash = window.location.hash.replace('#', '').trim().toLowerCase();
+      if (hash === 'home' || hash === '' || hash === '/') {
+        setCurrentRoute('home');
+      } else if (hash === 'login') {
+        setCurrentRoute('login');
+      } else if (VALID_TABS.includes(hash)) {
+        if (currentUser) {
+          setCurrentRoute('portal');
+          setActiveTab(hash);
+        } else {
+          setCurrentRoute('login');
+        }
       }
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [currentUser]);
 
   // Hydrate Cadets & Master Attendance from localStorage on initial render
   const [cadets, setCadets] = useState(() => {
@@ -76,56 +138,43 @@ export default function App() {
     }
   });
 
+  const handleLogout = async () => {
+    try {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        await supabase.auth.signOut().catch(() => {});
+      }
+    } catch (_) {}
+    localStorage.removeItem('csu_rotc_auth_session');
+    setCurrentUser(null);
+  };
+
   const [serverOnline, setServerOnline] = useState(true);
 
-  // Fetch Cadets & Attendance Logs from server or fallback to persistent storage
+  // Fetch Cadets & Attendance Logs directly from Supabase Cloud
   const fetchData = async () => {
     try {
-      const [cadetsRes, logsRes, healthRes] = await Promise.allSettled([
-        fetch('/api/cadets'),
-        fetch('/api/attendance'),
-        fetch('/api/health')
+      const [sbCadets, sbLogs] = await Promise.allSettled([
+        fetchCadetsFromSupabase(),
+        fetchAttendanceFromSupabase()
       ]);
 
-      if (cadetsRes.status === 'fulfilled' && cadetsRes.value && cadetsRes.value.ok) {
+      if (sbCadets.status === 'fulfilled' && Array.isArray(sbCadets.value) && sbCadets.value.length > 0) {
+        setCadets(sbCadets.value);
+        try { localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(sbCadets.value)); } catch (_) {}
+      }
+
+      if (sbLogs.status === 'fulfilled' && Array.isArray(sbLogs.value)) {
+        setAttendanceLogs(sbLogs.value);
         try {
-          const cadetsData = await cadetsRes.value.json();
-          if (Array.isArray(cadetsData)) {
-            setCadets(cadetsData);
-            localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(cadetsData));
-          }
+          localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(sbLogs.value));
+          window.dispatchEvent(new Event('local-attendance-update'));
         } catch (_) {}
       }
 
-      if (logsRes.status === 'fulfilled' && logsRes.value && logsRes.value.ok) {
-        try {
-          const logsData = await logsRes.value.json();
-          if (Array.isArray(logsData)) {
-            setAttendanceLogs(logsData);
-            localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(logsData));
-            window.dispatchEvent(new Event('local-attendance-update'));
-          }
-        } catch (_) {}
-      } else {
-        // Offline / server error fallback: hydrate from localStorage
-        try {
-          const savedLogs = localStorage.getItem('csu_rotc_master_attendance');
-          if (savedLogs) {
-            setAttendanceLogs(JSON.parse(savedLogs));
-          }
-        } catch (_) {}
-      }
-
-      setServerOnline(healthRes.status === 'fulfilled' && healthRes.value && healthRes.value.ok);
+      setServerOnline(true);
     } catch (err) {
-      console.warn('Backend offline, running in offline React mode:', err);
-      setServerOnline(false);
-      try {
-        const savedLogs = localStorage.getItem('csu_rotc_master_attendance');
-        if (savedLogs) {
-          setAttendanceLogs(JSON.parse(savedLogs));
-        }
-      } catch (_) {}
+      console.warn('Supabase fetch error:', err);
     }
   };
 
@@ -352,9 +401,62 @@ export default function App() {
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('local-attendance-update'));
       } catch (_) {}
+
+      // Push incoming batch to Supabase Cloud in background
+      bulkUpsertAttendanceToSupabase(incomingBatch).catch((err) => {
+        console.warn('Background Supabase cloud sync failed:', err);
+      });
+
       return updated;
     });
   };
+
+  // 1. Public Landing Page Route (/)
+  if (currentRoute === 'home') {
+    return (
+      <PublicLandingPage
+        onNavigateToLogin={() => setCurrentRoute('login')}
+        onNavigateToDashboard={() => {
+          if (currentUser) {
+            setCurrentRoute('portal');
+          } else {
+            setCurrentRoute('login');
+          }
+        }}
+        isAuthenticated={Boolean(currentUser)}
+        currentUser={currentUser}
+      />
+    );
+  }
+
+  // 2. Admin Authentication Route (/login)
+  if (currentRoute === 'login') {
+    return (
+      <LoginPage
+        onLoginSuccess={(userData) => {
+          setCurrentUser(userData);
+          setCurrentRoute('portal');
+          setActiveTab('dashboard');
+        }}
+        onBackToPublic={() => setCurrentRoute('home')}
+      />
+    );
+  }
+
+  // 3. Protected Admin Command Center Portal (/dashboard/*)
+  // If session expired or unauthenticated, redirect to Login
+  if (!currentUser) {
+    return (
+      <LoginPage
+        onLoginSuccess={(userData) => {
+          setCurrentUser(userData);
+          setCurrentRoute('portal');
+          setActiveTab('dashboard');
+        }}
+        onBackToPublic={() => setCurrentRoute('home')}
+      />
+    );
+  }
 
   return (
     <div className="app-container">
@@ -362,18 +464,39 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         serverOnline={serverOnline}
+        currentUser={currentUser}
+        onLogout={handleLogout}
       />
 
       <main className="main-wrapper">
         <header className="top-header no-print">
           <div className="page-title-group">
             <h2>CSU ROTC ATTENDANCE & ROSTER SYSTEM</h2>
-            <p>Admin HQ Desktop Node</p>
+            <p>Admin HQ Desktop Node • 1501st CDC</p>
           </div>
 
-          <div style={{ textAlign: 'right', fontSize: '0.8rem' }}>
-            <div style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>Command Center</div>
-            <div style={{ color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            {/* Authorized Admin HQ Badge */}
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: 'rgba(6, 78, 46, 0.08)',
+                border: '1px solid rgba(6, 78, 46, 0.2)',
+                padding: '0.35rem 0.75rem',
+                borderRadius: '9999px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: 'var(--rotc-green-dark, #064e2e)'
+              }}
+            >
+              <ShieldCheck size={14} color="#059669" />
+              <span>Authorized Admin HQ</span>
+            </div>
+
+            {/* Live Date */}
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
               {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
             </div>
           </div>
@@ -385,6 +508,16 @@ export default function App() {
               cadets={cadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
+              onNavigateToHistory={() => setActiveTab('history')}
+            />
+          )}
+
+          {activeTab === 'history' && (
+            <AttendanceHistory
+              cadets={cadets}
+              attendanceLogs={attendanceLogs}
+              onRefresh={fetchData}
+              onNavigateToSyncLogs={() => setActiveTab('synclogs')}
             />
           )}
 

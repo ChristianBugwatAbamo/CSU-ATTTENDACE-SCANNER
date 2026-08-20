@@ -422,6 +422,218 @@ app.post('/api/cadets/generate-hierarchy-roster', (req, res) => {
   });
 });
 
+// Seed Historical Dates (Aug 16, 17, 18, 19, 2026) and Clear August 20
+app.post('/api/seed/historical-dates', (req, res) => {
+  try {
+    const cadets = getCadets();
+    const existingLogs = getAttendanceLogs();
+
+    const targetSeedDates = new Set(['2026-08-16', '2026-08-17', '2026-08-18', '2026-08-20']);
+    const filteredLogs = existingLogs.filter(log => {
+      const rawDate = log.timestamp || log.date || log.receivedAt;
+      if (!rawDate) return false;
+      const d = new Date(rawDate);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return !targetSeedDates.has(dateStr);
+    });
+
+    const datesConfig = [
+      { dateStr: '2026-08-16', sessionName: 'Sunday Field Formation & Military Drill (Aug 16, 2026)', dutyOfficer: 'C/CPT CULIRA, JOSHUA D.', seedOffset: 16 },
+      { dateStr: '2026-08-17', sessionName: 'Monday Brigade Muster & Inspection (Aug 17, 2026)', dutyOfficer: 'C/MAJ CASTILLO, ELENA J.', seedOffset: 17 },
+      { dateStr: '2026-08-18', sessionName: 'Tuesday Tactical Training & Lecture (Aug 18, 2026)', dutyOfficer: 'C/MAJ GONZALES, ARTH K.', seedOffset: 18 }
+    ];
+
+    const newRecords = [];
+
+    datesConfig.forEach(cfg => {
+      const { dateStr, sessionName, dutyOfficer, seedOffset } = cfg;
+
+      cadets.forEach((cadet, index) => {
+        const cid = cadet.id || cadet.cadetId;
+        if (!cid) return;
+
+        const hash = (index * 41 + seedOffset * 19 + (parseInt(cid.replace(/\D/g, ''), 10) || index)) % 100;
+
+        let timeInTimestamp = null;
+        let timeOutTimestamp = null;
+        let scanMode = 'Time-In';
+        let finalDailyStatus = 'ABSENT';
+
+        if (hash < 83) {
+          const inMin = 32 + (hash % 55);
+          const inHour = inMin >= 60 ? 7 : 6;
+          const inMinute = inMin >= 60 ? inMin - 60 : inMin;
+          const inSecond = (hash * 17) % 60;
+          const outHour = 11;
+          const outMinute = 30 + (hash % 35);
+          const outSecond = (hash * 23) % 60;
+
+          timeInTimestamp = `${dateStr}T${String(inHour).padStart(2, '0')}:${String(inMinute).padStart(2, '0')}:${String(inSecond).padStart(2, '0')}.000Z`;
+          timeOutTimestamp = `${dateStr}T${String(outHour).padStart(2, '0')}:${String(outMinute).padStart(2, '0')}:${String(outSecond).padStart(2, '0')}.000Z`;
+          finalDailyStatus = 'PRESENT';
+          scanMode = 'Time-Out';
+        } else if (hash < 91) {
+          const lateMin = 31 + (hash % 26);
+          const inSecond = (hash * 13) % 60;
+          timeInTimestamp = `${dateStr}T07:${String(lateMin).padStart(2, '0')}:${String(inSecond).padStart(2, '0')}.000Z`;
+          timeOutTimestamp = `${dateStr}T11:50:${String((hash * 29) % 60).padStart(2, '0')}.000Z`;
+          finalDailyStatus = 'LATE';
+          scanMode = 'Time-Out';
+        } else if (hash < 95) {
+          const inMin = (hash * 11) % 30 + 30;
+          timeInTimestamp = `${dateStr}T06:${String(inMin).padStart(2, '0')}:00.000Z`;
+          timeOutTimestamp = null;
+          finalDailyStatus = 'NO TIME-OUT';
+          scanMode = 'Time-In';
+        } else {
+          timeInTimestamp = null;
+          timeOutTimestamp = null;
+          finalDailyStatus = 'ABSENT';
+          scanMode = 'Time-In';
+        }
+
+        if (timeInTimestamp || timeOutTimestamp) {
+          newRecords.push({
+            cadetId: cid,
+            name: cadet.name,
+            rank: cadet.rank || 'Cadet',
+            battalion: cadet.battalion || '1st Battalion',
+            company: cadet.company || 'Alpha Company',
+            platoon: cadet.platoon || '1st Platoon',
+            designation: cadet.designation || 'N/A',
+            scanMode: scanMode,
+            timeIn: timeInTimestamp,
+            timeOut: timeOutTimestamp,
+            timestamp: timeInTimestamp || timeOutTimestamp,
+            timeInScan: timeInTimestamp ? { cadetId: cid, name: cadet.name, timestamp: timeInTimestamp, scanMode: 'Time-In' } : null,
+            timeOutScan: timeOutTimestamp ? { cadetId: cid, name: cadet.name, timestamp: timeOutTimestamp, scanMode: 'Time-Out' } : null,
+            status: finalDailyStatus,
+            finalDailyStatus: finalDailyStatus,
+            dutyOfficer: dutyOfficer,
+            sessionName: sessionName,
+            date: dateStr,
+            receivedAt: `${dateStr}T12:30:00.000Z`
+          });
+        }
+      });
+    });
+
+    const mergedLogs = [...newRecords, ...filteredLogs];
+    saveAttendanceLogs(mergedLogs);
+
+    res.json({
+      success: true,
+      message: `Cleared August 20 records and seeded ${newRecords.length} historical attendance logs for Aug 16, 17, 18, 2026.`,
+      seededCount: newRecords.length,
+      totalLogs: mergedLogs.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to seed historical data: " + err.message });
+  }
+});
+
+// Seed August 19, 2026 Historical Attendance Records
+app.post('/api/seed/august-19', (req, res) => {
+  try {
+    const cadets = getCadets();
+    const existingLogs = getAttendanceLogs();
+
+    const filteredExisting = existingLogs.filter(log => {
+      const rawDate = log.timestamp || log.date || log.receivedAt;
+      if (!rawDate) return true;
+      const d = new Date(rawDate);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return dateStr !== '2026-08-19';
+    });
+
+    const august19Records = [];
+    const targetDateStr = '2026-08-19';
+    const dutyOfficer = 'C/CPT ABAMO, CHRISTIAN B.';
+    const sessionName = 'Mid-Week Field Formation (Aug 19, 2026)';
+
+    cadets.forEach((cadet, index) => {
+      const cid = cadet.id || cadet.cadetId;
+      if (!cid) return;
+
+      const hash = (index * 37 + (parseInt(cid.replace(/\D/g, ''), 10) || index)) % 100;
+
+      let timeInTimestamp = null;
+      let timeOutTimestamp = null;
+      let scanMode = 'Time-In';
+      let finalDailyStatus = 'ABSENT';
+
+      if (hash < 82) {
+        const inMin = 35 + (hash % 54);
+        const inHour = inMin >= 60 ? 7 : 6;
+        const inMinute = inMin >= 60 ? inMin - 60 : inMin;
+        const inSecond = (hash * 13) % 60;
+        const outHour = 11;
+        const outMinute = 35 + (hash % 25);
+        const outSecond = (hash * 17) % 60;
+
+        timeInTimestamp = `2026-08-19T${String(inHour).padStart(2, '0')}:${String(inMinute).padStart(2, '0')}:${String(inSecond).padStart(2, '0')}.000Z`;
+        timeOutTimestamp = `2026-08-19T${String(outHour).padStart(2, '0')}:${String(outMinute).padStart(2, '0')}:${String(outSecond).padStart(2, '0')}.000Z`;
+        finalDailyStatus = 'PRESENT';
+        scanMode = 'Time-Out';
+      } else if (hash < 90) {
+        const lateMin = 32 + (hash % 27);
+        const inSecond = (hash * 11) % 60;
+        timeInTimestamp = `2026-08-19T07:${String(lateMin).padStart(2, '0')}:${String(inSecond).padStart(2, '0')}.000Z`;
+        timeOutTimestamp = `2026-08-19T11:45:${String((hash * 19) % 60).padStart(2, '0')}.000Z`;
+        finalDailyStatus = 'LATE';
+        scanMode = 'Time-Out';
+      } else if (hash < 94) {
+        const inMin = (hash * 7) % 30 + 30;
+        timeInTimestamp = `2026-08-19T06:${String(inMin).padStart(2, '0')}:00.000Z`;
+        timeOutTimestamp = null;
+        finalDailyStatus = 'NO TIME-OUT';
+        scanMode = 'Time-In';
+      } else {
+        timeInTimestamp = null;
+        timeOutTimestamp = null;
+        finalDailyStatus = 'ABSENT';
+        scanMode = 'Time-In';
+      }
+
+      if (timeInTimestamp || timeOutTimestamp) {
+        august19Records.push({
+          cadetId: cid,
+          name: cadet.name,
+          rank: cadet.rank || 'Cadet',
+          battalion: cadet.battalion || '1st Battalion',
+          company: cadet.company || 'Alpha Company',
+          platoon: cadet.platoon || '1st Platoon',
+          designation: cadet.designation || 'N/A',
+          scanMode: scanMode,
+          timeIn: timeInTimestamp,
+          timeOut: timeOutTimestamp,
+          timestamp: timeInTimestamp || timeOutTimestamp,
+          timeInScan: timeInTimestamp ? { cadetId: cid, name: cadet.name, timestamp: timeInTimestamp, scanMode: 'Time-In' } : null,
+          timeOutScan: timeOutTimestamp ? { cadetId: cid, name: cadet.name, timestamp: timeOutTimestamp, scanMode: 'Time-Out' } : null,
+          status: finalDailyStatus,
+          finalDailyStatus: finalDailyStatus,
+          dutyOfficer: dutyOfficer,
+          sessionName: sessionName,
+          date: targetDateStr,
+          receivedAt: `2026-08-19T12:30:00.000Z`
+        });
+      }
+    });
+
+    const mergedLogs = [...august19Records, ...filteredExisting];
+    saveAttendanceLogs(mergedLogs);
+
+    res.json({
+      success: true,
+      message: `Seeded ${august19Records.length} historical attendance logs for Wednesday, August 19, 2026 across ${cadets.length} cadets.`,
+      seededCount: august19Records.length,
+      totalLogs: mergedLogs.length
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to seed historical data: " + err.message });
+  }
+});
+
 app.post('/api/cadets', (req, res) => {
   const cadets = getCadets();
   const newCadet = req.body;

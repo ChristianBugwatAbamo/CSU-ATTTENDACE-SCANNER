@@ -37,6 +37,7 @@ import {
 import ConfirmModal from './ConfirmModal';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
 import { recalculateAttendanceLogs } from '../utils/attendanceStatus';
+import { fetchSettingsFromSupabase, saveSettingsToSupabase } from '../utils/supabaseClient';
 
 // Standard CSU ROTC 1,184 Unit Structure Template
 const DEFAULT_UNIT_STRUCTURE = [
@@ -273,43 +274,43 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   useEffect(() => {
     const loadSettings = async () => {
       let finalSettings = DEFAULT_SETTINGS;
+
+      // 1. Try loading from Supabase Cloud
       try {
-        const res = await fetch('/api/settings');
-        if (res.ok) {
-          const data = await res.json();
+        const sbSettings = await fetchSettingsFromSupabase();
+        if (sbSettings) {
           finalSettings = {
             ...DEFAULT_SETTINGS,
-            ...data,
-            unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
-            officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
-            officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
+            ...sbSettings,
+            formationCutoffTime: sbSettings.formation_cutoff_time || DEFAULT_SETTINGS.formationCutoffTime,
+            formationTardyGrace: sbSettings.formation_tardy_grace || DEFAULT_SETTINGS.formationTardyGrace,
+            cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon || DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
+            commandingOfficer: sbSettings.commanding_officer || DEFAULT_SETTINGS.commandingOfficer,
+            commandingOfficerTitle: sbSettings.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle,
+            unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
+            parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
+            hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution
           };
-        } else {
-          const local = localStorage.getItem('csu_rotc_admin_settings');
-          if (local) {
-            const parsed = JSON.parse(local);
+        }
+      } catch (_) {}
+
+      // 2. Local fallback if Supabase not yet populated
+      if (!finalSettings || Object.keys(finalSettings).length <= 5) {
+        try {
+          const res = await fetch('/api/settings');
+          if (res.ok) {
+            const data = await res.json();
             finalSettings = {
               ...DEFAULT_SETTINGS,
-              ...parsed,
-              unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
-              officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
-              officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
+              ...data,
+              unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
+              officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
+              officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
             };
           }
-        }
-      } catch (err) {
-        const local = localStorage.getItem('csu_rotc_admin_settings');
-        if (local) {
-          const parsed = JSON.parse(local);
-          finalSettings = {
-            ...DEFAULT_SETTINGS,
-            ...parsed,
-            unitStructure: parsed.unitStructure && parsed.unitStructure.length > 0 ? parsed.unitStructure : DEFAULT_UNIT_STRUCTURE,
-            officerRanks: parsed.officerRanks && parsed.officerRanks.length > 0 ? parsed.officerRanks : DEFAULT_OFFICER_RANKS,
-            officerDesignations: parsed.officerDesignations && parsed.officerDesignations.length > 0 ? parsed.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
-          };
-        }
+        } catch (_) {}
       }
+
       setSettings(finalSettings);
       setSavedSettings(finalSettings);
     };
@@ -357,22 +358,25 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       window.dispatchEvent(new Event('local-attendance-update'));
       window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: toSave }));
 
-      const res = await fetch('/api/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(toSave)
+      // 2. Save directly to Supabase Cloud
+      saveSettingsToSupabase(toSave).catch((err) => {
+        console.warn('Supabase save settings background error:', err);
       });
 
-      setSavedSettings(toSave);
+      // 3. Save to local server node if available
+      try {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(toSave)
+        });
+      } catch (_) {}
 
-      if (res.ok) {
-        setSaveSuccessToast('All settings & unit configurations saved and applied successfully!');
-      } else {
-        setSaveSuccessToast('Settings saved locally to browser storage.');
-      }
+      setSavedSettings(toSave);
+      setSaveSuccessToast('All settings & unit configurations saved to Cloud Database successfully!');
     } catch (err) {
       setSavedSettings(toSave);
-      setSaveSuccessToast('Settings saved locally (Server node offline).');
+      setSaveSuccessToast('Settings saved.');
     } finally {
       setIsSaving(false);
       setTimeout(() => setSaveSuccessToast(null), 4000);

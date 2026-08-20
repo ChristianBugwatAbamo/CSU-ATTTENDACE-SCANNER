@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X, Archive, Calendar, History, UserX } from 'lucide-react';
+import AttendanceHistory from './AttendanceHistory';
 import {
   getAttendanceStatus,
   getScannedUnitEchelon,
@@ -129,7 +130,7 @@ const DEFAULT_UNIT_STRUCTURE = [
   }
 ];
 
-export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanceLogs: propsLogs = [], onRefresh }) {
+export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanceLogs: propsLogs = [], onRefresh, onNavigateToHistory }) {
   const { records: hookLogs, settings: hookSettings, activeCutoff } = useAttendanceData();
   const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
   const formationCutoff = activeCutoff || getActiveFormationCutoff();
@@ -145,6 +146,13 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
   // Search input state for filtering by Cadet ID or Name
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Status filter applied by clicking stat summary cards ('PRESENT' | 'LATE' | 'NO TIME-OUT' | 'ABSENT' | null)
+  const [statusFilter, setStatusFilter] = useState(null);
+
+  const handleStatusCardClick = (status) => {
+    setStatusFilter(prev => prev === status ? null : status);
+  };
 
   // Dynamic Calculated Quotas
   const totalBasicQuota = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || 1184;
@@ -468,6 +476,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     setSelectedCompany(null);
     setSelectedPlatoon(null);
     setSearchQuery('');
+    setStatusFilter(null);
   };
 
   const isAnyFilterActive =
@@ -475,17 +484,16 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     selectedBattalion !== null ||
     selectedCompany !== null ||
     selectedPlatoon !== null ||
-    searchQuery.trim().length > 0;
+    searchQuery.trim().length > 0 ||
+    statusFilter !== null;
 
-  // 7. Interactive Filtered Table Records
-  const tableFilteredLogs = attendanceLogs.filter(log => {
-    const echelon = getScannedUnitEchelon(log);
-
+  // 7. Interactive Filtered Master Roster Records (All 1,194 Cadets including Absentees)
+  const tableFilteredCadets = reconciledRoster.filter(cadet => {
     // Search query filter (Cadet ID or Name, case-insensitive)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      const id = String(log.cadetId || '').toLowerCase();
-      const name = String(log.name || '').toLowerCase();
+      const id = String(cadet.cadetId || '').toLowerCase();
+      const name = String(cadet.name || '').toLowerCase();
       if (!id.includes(q) && !name.includes(q)) {
         return false;
       }
@@ -493,34 +501,41 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
     // Top-Level Main Category Filter
     if (mainCategory === 'BASIC_CADETS') {
-      if (isOfficerLog(log)) return false;
+      if (isOfficerLog(cadet)) return false;
     } else if (mainCategory === 'CADET_OFFICERS') {
-      if (!isOfficerLog(log)) return false;
+      if (!isOfficerLog(cadet)) return false;
     }
 
     let matchesBn = true;
     if (selectedBattalion && selectedBattalion !== 'CADET OFFICERS') {
       const selectedBnNorm = normalizeBattalion(selectedBattalion);
-      const logBnNorm = normalizeBattalion(log.battalion || echelon.battalion);
-      matchesBn = selectedBnNorm && logBnNorm ? (selectedBnNorm === logBnNorm) : (echelon.battalion || '').toLowerCase().includes(selectedBattalion.toLowerCase());
+      const cadetBnNorm = normalizeBattalion(cadet.battalion);
+      matchesBn = selectedBnNorm && cadetBnNorm ? (selectedBnNorm === cadetBnNorm) : (cadet.battalion || '').toLowerCase().includes(selectedBattalion.toLowerCase());
     }
 
     let matchesCo = true;
     if (selectedCompany) {
       if (isOfficerSelected) {
-        matchesCo = matchesOfficerClass(log, selectedCompany);
+        matchesCo = matchesOfficerClass(cadet, selectedCompany);
       } else {
         const selectedCoNorm = normalizeCompany(selectedCompany);
-        const logCoNorm = normalizeCompany(log.company || echelon.company);
-        matchesCo = selectedCoNorm && logCoNorm ? (selectedCoNorm === logCoNorm) : (echelon.company || '').toLowerCase().includes(selectedCompany.toLowerCase());
+        const cadetCoNorm = normalizeCompany(cadet.company);
+        matchesCo = selectedCoNorm && cadetCoNorm ? (selectedCoNorm === cadetCoNorm) : (cadet.company || '').toLowerCase().includes(selectedCompany.toLowerCase());
       }
     }
 
     let matchesPl = true;
     if (!isOfficerSelected && selectedPlatoon) {
       const selectedPlNorm = normalizePlatoon(selectedPlatoon);
-      const logPlNorm = normalizePlatoon(log.platoon || echelon.platoon);
-      matchesPl = selectedPlNorm && logPlNorm ? (selectedPlNorm === logPlNorm) : false;
+      const cadetPlNorm = normalizePlatoon(cadet.platoon);
+      matchesPl = selectedPlNorm && cadetPlNorm ? (selectedPlNorm === cadetPlNorm) : false;
+    }
+
+    // Status filter from stat card click
+    if (statusFilter) {
+      const finalStatus = (cadet.finalDailyStatus || 'ABSENT').toUpperCase();
+      const filterNorm = statusFilter.toUpperCase();
+      if (finalStatus !== filterNorm) return false;
     }
 
     return matchesBn && matchesCo && matchesPl;
@@ -545,11 +560,8 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             COMMAND DASHBOARD
           </h2>
         </div>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary btn-sm" onClick={onRefresh} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-            <RefreshCw size={15} /> Refresh
-          </button>
-        </div>
+
+
       </div>
 
       {/* Top Static Summary Metric Cards */}
@@ -574,7 +586,17 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
         </div>
 
         {/* Card 2: PRESENT */}
-        <div className="card" style={{ borderLeft: '5px solid #059669', cursor: 'default' }}>
+        <div
+          className="card"
+          style={{
+            borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : '#d1fae5'}`,
+            cursor: 'pointer',
+            outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
+            background: statusFilter === 'PRESENT' ? '#f0fdf4' : undefined
+          }}
+          onClick={() => handleStatusCardClick('PRESENT')}
+          title="Click to filter table: PRESENT cadets only"
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(5, 150, 105, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669' }}>
               <CheckCircle2 size={20} />
@@ -587,12 +609,22 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            Scanned Time-In $\le$ {formationCutoff} + Time-Out
+            {statusFilter === 'PRESENT' ? '✓ Filtering table by Present' : 'Click to filter → Present'}
           </div>
         </div>
 
         {/* Card 3: LATE */}
-        <div className="card" style={{ borderLeft: '5px solid #d97706', cursor: 'default' }}>
+        <div
+          className="card"
+          style={{
+            borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : '#fde68a'}`,
+            cursor: 'pointer',
+            outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
+            background: statusFilter === 'LATE' ? '#fffbeb' : undefined
+          }}
+          onClick={() => handleStatusCardClick('LATE')}
+          title="Click to filter table: LATE cadets only"
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
               <Clock size={20} />
@@ -605,12 +637,22 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            Scanned Time-In &gt; {formationCutoff} + Time-Out
+            {statusFilter === 'LATE' ? '✓ Filtering table by Late' : 'Click to filter → Late'}
           </div>
         </div>
 
         {/* Card 4: NO TIME-OUT */}
-        <div className="card" style={{ borderLeft: '5px solid #ea580c', cursor: 'default' }}>
+        <div
+          className="card"
+          style={{
+            borderLeft: `5px solid ${statusFilter === 'NO TIME-OUT' ? '#ea580c' : '#fed7aa'}`,
+            cursor: 'pointer',
+            outline: statusFilter === 'NO TIME-OUT' ? '2px solid #ea580c' : 'none',
+            background: statusFilter === 'NO TIME-OUT' ? '#fff7ed' : undefined
+          }}
+          onClick={() => handleStatusCardClick('NO TIME-OUT')}
+          title="Click to filter table: No Time-Out cadets only"
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(234, 88, 12, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
               <Activity size={20} />
@@ -623,12 +665,22 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            Morning Time-In without Time-Out
+            {statusFilter === 'NO TIME-OUT' ? '✓ Filtering table by No Time-Out' : 'Click to filter → No Time-Out'}
           </div>
         </div>
 
         {/* Card 5: ABSENT */}
-        <div className="card" style={{ borderLeft: '5px solid #64748b', cursor: 'default' }}>
+        <div
+          className="card"
+          style={{
+            borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#64748b' : '#e2e8f0'}`,
+            cursor: 'pointer',
+            outline: statusFilter === 'ABSENT' ? '2px solid #64748b' : 'none',
+            background: statusFilter === 'ABSENT' ? '#f1f5f9' : undefined
+          }}
+          onClick={() => handleStatusCardClick('ABSENT')}
+          title="Click to filter table: Absent cadets only"
+        >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(100, 116, 139, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
               <Shield size={20} />
@@ -641,186 +693,12 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            No Time-In or Time-Out recorded
+            {statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent'}
           </div>
         </div>
       </div>
 
-      {/* Breadcrumb Navigation & Step Status Bar */}
-      <div style={{
-        background: '#ffffff',
-        borderRadius: '12px',
-        padding: '0.85rem 1.25rem',
-        border: '1px solid var(--border-light)',
-        boxShadow: 'var(--shadow-sm)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '0.75rem'
-      }}>
-        {/* Breadcrumb Trail */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.88rem' }}>
-          <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', marginRight: '2px', letterSpacing: '0.5px' }}>
-            PATH:
-          </span>
 
-          {/* Root Level: All Units */}
-          <button
-            type="button"
-            onClick={handleResetToAllUnits}
-            style={{
-              background: !mainCategory ? '#1e40af' : '#f1f5f9',
-              color: !mainCategory ? '#ffffff' : 'var(--text-dark)',
-              border: !mainCategory ? '1px solid #1e3a8a' : '1px solid #e2e8f0',
-              padding: '4px 10px',
-              borderRadius: '6px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              fontSize: '0.82rem',
-              transition: 'all 0.15s ease'
-            }}
-            title="View All Unit Categories"
-          >
-            <Layers size={14} />
-            <span>All Units</span>
-          </button>
-
-          {/* Level 0 Crumb: Main Category (Basic Cadets vs Cadet Officers) */}
-          {mainCategory && (
-            <>
-              <ChevronRight size={15} color="#94a3b8" />
-              <button
-                type="button"
-                onClick={handleResetToMainCategory}
-                style={{
-                  background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
-                  color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
-                  border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '0.82rem',
-                  transition: 'all 0.15s ease'
-                }}
-                title={isBasicCadetsSelected ? 'View Battalions' : 'View Officer Classes'}
-              >
-                {isBasicCadetsSelected ? <Shield size={14} color="#1e293b" /> : <Medal size={14} color="#4f46e5" />}
-                <span>{isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers'}</span>
-              </button>
-            </>
-          )}
-
-          {/* Level 1 Crumb: Battalion Level (BLUE Theme) */}
-          {isBasicCadetsSelected && selectedBattalion && (
-            <>
-              <ChevronRight size={15} color="#94a3b8" />
-              <button
-                type="button"
-                onClick={handleBackToCompanies}
-                style={{
-                  background: '#dbeafe',
-                  color: '#1e40af',
-                  border: '1px solid #93c5fd',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '0.82rem',
-                  transition: 'all 0.15s ease'
-                }}
-                title={`View companies of ${selectedBattalion}`}
-              >
-                <Shield size={14} color="#1e40af" />
-                <span>{selectedBattalion}</span>
-              </button>
-            </>
-          )}
-
-          {/* Level 2 Crumb: Company / Officer Class Level (EMERALD / GREEN Theme) */}
-          {selectedCompany && (
-            <>
-              <ChevronRight size={15} color="#94a3b8" />
-              <button
-                type="button"
-                onClick={() => setSelectedPlatoon(null)}
-                style={{
-                  background: '#d1fae5',
-                  color: '#065f46',
-                  border: '1px solid #6ee7b7',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '0.82rem',
-                  transition: 'all 0.15s ease'
-                }}
-                title={`Selected: ${getSelectedCompanyDisplay()}`}
-              >
-                {isOfficerSelected ? <Star size={14} color="#065f46" /> : <Building size={14} color="#065f46" />}
-                <span>{getSelectedCompanyDisplay()}</span>
-              </button>
-            </>
-          )}
-
-          {/* Level 3 Crumb: Platoon Active Indicator (AMBER / ORANGE Theme) */}
-          {isBasicCadetsSelected && selectedBattalion && selectedCompany && selectedPlatoon && (
-            <>
-              <ChevronRight size={15} color="#94a3b8" />
-              <span
-                style={{
-                  background: '#fef3c7',
-                  color: '#92400e',
-                  border: '1px solid #fcd34d',
-                  padding: '4px 10px',
-                  borderRadius: '6px',
-                  fontWeight: 700,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '0.82rem'
-                }}
-              >
-                <Users size={14} color="#92400e" />
-                <span>{selectedPlatoon}</span>
-              </span>
-            </>
-          )}
-        </div>
-
-        {/* Current Drill-down Step Badge */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <div style={{
-            fontSize: '0.75rem',
-            fontWeight: 800,
-            padding: '4px 10px',
-            borderRadius: '9999px',
-            background: !mainCategory ? '#f1f5f9' : (isBasicCadetsSelected ? (!selectedBattalion ? '#eff6ff' : (!selectedCompany ? '#d1fae5' : '#fef3c7')) : (!selectedCompany ? '#eef2ff' : '#d1fae5')),
-            color: !mainCategory ? '#334155' : (isBasicCadetsSelected ? (!selectedBattalion ? '#1e40af' : (!selectedCompany ? '#065f46' : '#92400e')) : (!selectedCompany ? '#3730a3' : '#065f46')),
-            border: `1px solid ${!mainCategory ? '#cbd5e1' : (isBasicCadetsSelected ? (!selectedBattalion ? '#bfdbfe' : (!selectedCompany ? '#6ee7b7' : '#fcd34d')) : (!selectedCompany ? '#a5b4fc' : '#6ee7b7'))}`
-          }}>
-            {!mainCategory && 'SELECT A UNIT CATEGORY'}
-            {isBasicCadetsSelected && !selectedBattalion && 'STEP 1 OF 3: SELECT BATTALION'}
-            {isBasicCadetsSelected && selectedBattalion && !selectedCompany && `STEP 2 OF 3: SELECT COMPANY (${selectedBattalion.toUpperCase()})`}
-            {isBasicCadetsSelected && selectedBattalion && selectedCompany && `STEP 3 OF 3: SELECT PLATOON (${selectedCompany.toUpperCase()} COY)`}
-            {isOfficerSelected && !selectedCompany && 'OFFICER CORPS: SELECT OFFICER CLASS'}
-            {isOfficerSelected && selectedCompany && `FILTER ACTIVE: ${getSelectedCompanyDisplay().toUpperCase()}`}
-          </div>
-        </div>
-      </div>
 
       {/* ========================================================================= */}
       {/* LEVEL 0: Select Unit Category (Basic Cadets vs Cadet Officers)            */}
@@ -1340,35 +1218,77 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           <div>
             <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Activity size={20} color="var(--rotc-green-dark)" />
-              <span>Master Attendance Records ({tableFilteredLogs.length} Scans)</span>
+              <span>Master Attendance Records ({tableFilteredCadets.length} Cadets)</span>
             </div>
             {isAnyFilterActive ? (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '3px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <Filter size={13} color="var(--rotc-green-dark)" />
                 <span style={{ color: 'var(--text-muted)' }}>Active filters:</span>
                 {mainCategory && (
-                  <strong style={{
-                    background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
-                    color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
-                    border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
-                    padding: '2px 8px',
-                    borderRadius: '4px'
-                  }}>
-                    {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'}
+                  <strong
+                    onClick={() => { setMainCategory(null); setSelectedBattalion(null); setSelectedCompany(null); setSelectedPlatoon(null); }}
+                    style={{
+                      background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
+                      color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
+                      border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                    title="Click to clear category filter"
+                  >
+                    {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'} ×
                   </strong>
                 )}
-                {isBasicCadetsSelected && selectedBattalion && <strong style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px' }}>{selectedBattalion}</strong>}
-                {selectedCompany && <strong style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: '4px' }}>{getSelectedCompanyDisplay()}</strong>}
-                {isBasicCadetsSelected && selectedPlatoon && <strong style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px' }}>{selectedPlatoon}</strong>}
+                {isBasicCadetsSelected && selectedBattalion && (
+                  <strong
+                    onClick={() => { setSelectedBattalion(null); setSelectedCompany(null); setSelectedPlatoon(null); }}
+                    style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Click to clear battalion filter"
+                  >
+                    {selectedBattalion} ×
+                  </strong>
+                )}
+                {selectedCompany && (
+                  <strong
+                    onClick={() => { setSelectedCompany(null); setSelectedPlatoon(null); }}
+                    style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Click to clear company filter"
+                  >
+                    {getSelectedCompanyDisplay()} ×
+                  </strong>
+                )}
+                {isBasicCadetsSelected && selectedPlatoon && (
+                  <strong
+                    onClick={() => setSelectedPlatoon(null)}
+                    style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Click to clear platoon filter"
+                  >
+                    {selectedPlatoon} ×
+                  </strong>
+                )}
+                {statusFilter && (
+                  <strong
+                    onClick={() => setStatusFilter(null)}
+                    style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Click to clear status filter"
+                  >
+                    Status: {statusFilter} ×
+                  </strong>
+                )}
                 {searchQuery.trim() && (
-                  <strong style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '4px' }}>
-                    Search: "{searchQuery.trim()}"
+                  <strong
+                    onClick={() => setSearchQuery('')}
+                    style={{ background: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
+                    title="Click to clear search filter"
+                  >
+                    Search: "{searchQuery.trim()}" ×
                   </strong>
                 )}
               </div>
             ) : (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '3px' }}>
-                Showing all attendance records across the Brigade. Select an echelon category above or search by Cadet ID/Name.
+                Showing full Brigade Master Roster (1,194 Cadets). Scanned cadets update to Present/Late in real-time.
               </div>
             )}
           </div>
@@ -1449,9 +1369,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           </div>
         </div>
 
-        {tableFilteredLogs.length === 0 ? (
+        {tableFilteredCadets.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No attendance records matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
+            No cadets matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
         ) : (
           <div className="table-responsive">
@@ -1471,59 +1391,31 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                 </tr>
               </thead>
               <tbody>
-                {tableFilteredLogs.map((log, idx) => {
-                  const cadetDaily = reconciledRoster.find(
-                    (r) => String(r.cadetId || '').toUpperCase() === String(log.cadetId || '').toUpperCase()
-                  );
-
-                  const isOfficer = isOfficerLog(log);
-                  const echelon = getScannedUnitEchelon(log);
-
-                  const timeInScanObj = log.timeInScan || cadetDaily?.timeInScan;
-                  const timeOutScanObj = log.timeOutScan || cadetDaily?.timeOutScan;
-
-                  const timeInTimestamp = log.timeIn || cadetDaily?.timeInTime || timeInScanObj?.timestamp || (log.scanMode !== 'Time-Out' ? log.timestamp : null);
-                  const timeOutTimestamp = log.timeOut || cadetDaily?.timeOutTime || timeOutScanObj?.timestamp || (log.scanMode === 'Time-Out' ? log.timestamp : null);
-
-                  const hasValidTimeIn = Boolean(timeInTimestamp && String(timeInTimestamp).trim());
-                  const hasValidTimeOut = Boolean(timeOutTimestamp && String(timeOutTimestamp).trim());
-
-                  const timeInStatus = hasValidTimeIn
-                    ? evaluateSingleScan(timeInScanObj || { timestamp: timeInTimestamp, scanMode: 'Time-In' }, formationCutoff)
+                {tableFilteredCadets.map((cadet, idx) => {
+                  const isOfficer = isOfficerLog(cadet);
+                  const timeInDisplay = cadet.timeIn
+                    ? new Date(cadet.timeIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : null;
-                  const timeOutStatus = hasValidTimeOut
-                    ? 'PRESENT'
-                    : (hasValidTimeIn ? 'NO TIME-OUT' : 'ABSENT');
-
-                  // Final Status determination strictly checks if timeIn actually contains a valid timestamp string
-                  let finalStatus = 'ABSENT';
-                  if (hasValidTimeIn && hasValidTimeOut) {
-                    finalStatus = timeInStatus === 'LATE' ? 'LATE' : 'PRESENT';
-                  } else if (hasValidTimeIn && !hasValidTimeOut) {
-                    finalStatus = timeInStatus === 'LATE' ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
-                  } else if (!hasValidTimeIn && hasValidTimeOut) {
-                    finalStatus = 'NO TIME-IN';
-                  } else {
-                    finalStatus = 'ABSENT';
-                  }
+                  const timeOutDisplay = cadet.timeOut
+                    ? new Date(cadet.timeOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : null;
+                  const finalStatus = cadet.finalDailyStatus || 'ABSENT';
 
                   return (
-                    <tr key={idx}>
+                    <tr key={cadet.cadetId || idx}>
                       <td>{idx + 1}</td>
-                      <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{log.cadetId}</td>
-                      <td style={{ fontWeight: 600 }}>{log.name}</td>
-                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{echelon.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
-                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{echelon.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
-                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{echelon.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
+                      <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{cadet.cadetId}</td>
+                      <td style={{ fontWeight: 600 }}>{cadet.name}</td>
+                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{cadet.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
+                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{cadet.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
+                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{cadet.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
 
                       {/* Time-In Column */}
                       <td>
-                        {timeInTimestamp ? (
+                        {timeInDisplay ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-                              {new Date(timeInTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            {timeInStatus === 'LATE' ? (
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{timeInDisplay}</span>
+                            {cadet.isLate ? (
                               <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontWeight: 800, padding: '2px 6px', fontSize: '0.7rem' }}>
                                 <Clock size={10} /> LATE
                               </span>
@@ -1540,18 +1432,20 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
                       {/* Time-Out Column */}
                       <td>
-                        {timeOutTimestamp ? (
+                        {timeOutDisplay ? (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>
-                              {new Date(timeOutTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{timeOutDisplay}</span>
                             <span className="badge badge-present" style={{ padding: '2px 6px', fontSize: '0.7rem' }}>
                               <CheckCircle2 size={10} /> PRESENT
                             </span>
                           </div>
                         ) : (
-                          <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', fontSize: '0.68rem', padding: '2px 6px' }}>
-                            NO TIME-OUT
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                            {cadet.hasTimeIn ? (
+                              <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', fontSize: '0.68rem', padding: '2px 6px' }}>
+                                NO TIME-OUT
+                              </span>
+                            ) : '—'}
                           </span>
                         )}
                       </td>
@@ -1579,8 +1473,8 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                           </span>
                         )}
                         {finalStatus === 'ABSENT' && (
-                          <span className="badge" style={{ background: '#f1f5f9', color: '#475569', border: '1px solid #cbd5e1', fontWeight: 700 }}>
-                            ABSENT
+                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', fontWeight: 800, gap: '3px' }}>
+                            <UserX size={11} /> ABSENT
                           </span>
                         )}
                         {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT'].includes(finalStatus) && (
@@ -1590,7 +1484,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                         )}
                       </td>
 
-                      <td>{log.dutyOfficer || 'Duty Officer'}</td>
+                      <td>{cadet.dutyOfficer || 'Duty Officer'}</td>
                     </tr>
                   );
                 })}
@@ -1598,6 +1492,69 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </table>
           </div>
         )}
+      </div>
+
+      {/* Quick History Log Banner at bottom of Live Dashboard */}
+      <div
+        className="card"
+        style={{
+          background: 'linear-gradient(135deg, #064e2e 0%, #005a36 100%)',
+          color: '#ffffff',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          boxShadow: 'var(--shadow-md)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '10px',
+              background: 'rgba(255, 255, 255, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#e5a900'
+            }}
+          >
+            <Archive size={24} />
+          </div>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '1.05rem', color: '#ffffff' }}>
+              Looking for Past Formation Logs or Absences?
+            </div>
+            <div style={{ fontSize: '0.8rem', color: '#d1fae5' }}>
+              Access the complete archive of previous training dates, absence matrices, and turnout rate trends.
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onNavigateToHistory}
+          className="btn"
+          style={{
+            background: '#e5a900',
+            color: '#064e2e',
+            fontWeight: 800,
+            fontSize: '0.85rem',
+            padding: '0.5rem 1.1rem',
+            border: 'none',
+            borderRadius: '8px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+          }}
+        >
+          <Archive size={16} /> Open Attendance History & Archives
+        </button>
       </div>
     </div>
   );
