@@ -17,7 +17,6 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard & Analytics', icon: LayoutDashboard },
-    { id: 'synclogs', label: 'Excel Export', icon: FileSpreadsheet },
     { id: 'history', label: 'Attendance History', icon: History },
     { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
     { id: 'scanner', label: 'Webcam Batch Scanner', icon: Camera },

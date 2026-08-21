@@ -70,7 +70,8 @@ export async function fetchCadetsFromSupabase() {
     const { data, error } = await client
       .from('cadets')
       .select('*')
-      .order('id', { ascending: true });
+      .order('id', { ascending: true })
+      .limit(10000);
 
     if (error) throw error;
     return data || [];
@@ -167,7 +168,8 @@ export async function fetchAttendanceFromSupabase() {
     const { data, error } = await client
       .from('attendance_logs')
       .select('*')
-      .order('date', { ascending: false });
+      .order('date', { ascending: false })
+      .limit(10000);
 
     if (error) throw error;
     return (data || []).map(l => ({
@@ -198,6 +200,19 @@ export async function fetchAttendanceFromSupabase() {
   }
 }
 
+function toDateKey(dateInput) {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+    return dateInput.slice(0, 10);
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * Bulk upserts attendance records to Supabase
  */
@@ -207,7 +222,8 @@ export async function bulkUpsertAttendanceToSupabase(logs) {
 
   const rows = logs.map(log => {
     const cid = log.cadetId || log.id;
-    const dateStr = log.date || (log.timestamp ? new Date(log.timestamp).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    const dateStr = toDateKey(log.date || log.timestamp) || new Date().toISOString().split('T')[0];
+    const finalStat = log.finalDailyStatus || log.status || (log.timeIn ? (log.isLate ? 'LATE' : 'PRESENT') : 'PRESENT');
     return {
       cadet_id: cid,
       name: log.name || 'Cadet',
@@ -221,10 +237,10 @@ export async function bulkUpsertAttendanceToSupabase(logs) {
       time_out: log.timeOut || (log.scanMode === 'Time-Out' ? log.timestamp : null),
       timestamp: log.timestamp || new Date().toISOString(),
       scan_mode: log.scanMode || 'Time-In',
-      time_in_status: log.timeInStatus || 'PRESENT',
+      time_in_status: log.timeInStatus || (finalStat.includes('LATE') ? 'LATE' : 'PRESENT'),
       time_out_status: log.timeOutStatus || (log.timeOut ? 'PRESENT' : 'NO TIME-OUT'),
-      status: log.finalDailyStatus || log.status || 'PRESENT',
-      final_daily_status: log.finalDailyStatus || log.status || 'PRESENT',
+      status: finalStat,
+      final_daily_status: finalStat,
       duty_officer: log.dutyOfficer || 'Duty Officer',
       session_name: log.sessionName || 'Training Session',
       received_at: new Date().toISOString()
@@ -232,15 +248,35 @@ export async function bulkUpsertAttendanceToSupabase(logs) {
   });
 
   try {
-    const { data, error } = await client
-      .from('attendance_logs')
-      .upsert(rows, { onConflict: 'cadet_id,date' });
-
-    if (error) throw error;
-    return data;
+    const CHUNK_SIZE = 400;
+    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + CHUNK_SIZE);
+      const { error } = await client
+        .from('attendance_logs')
+        .upsert(chunk, { onConflict: 'cadet_id,date' });
+      if (error) throw error;
+    }
+    return rows;
   } catch (err) {
     console.error('Supabase bulk upsert error:', err);
     return null;
+  }
+}
+
+/**
+ * Deletes all cadet records from Supabase
+ */
+export async function clearCadetsFromSupabase() {
+  const client = getSupabaseClient();
+  if (!client) return false;
+
+  try {
+    const { error } = await client.from('cadets').delete().neq('id', '');
+    if (error) throw error;
+    return true;
+  } catch (err) {
+    console.error('Supabase clear cadets error:', err);
+    return false;
   }
 }
 
@@ -258,6 +294,32 @@ export async function clearAttendanceFromSupabase() {
   } catch (err) {
     console.error('Supabase clear attendance error:', err);
     return false;
+  }
+}
+
+/**
+ * Subscribes to Supabase Realtime changes on the attendance_logs table
+ */
+export function subscribeToAttendanceRealtime(onPayload) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const channel = client
+      .channel('attendance_logs_live_stream')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_logs' },
+        (payload) => {
+          if (onPayload) onPayload(payload);
+        }
+      )
+      .subscribe();
+
+    return channel;
+  } catch (err) {
+    console.warn('Realtime subscription error:', err);
+    return null;
   }
 }
 

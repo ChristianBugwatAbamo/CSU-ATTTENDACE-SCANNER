@@ -13,6 +13,20 @@ import {
   normalizePlatoon
 } from '../utils/attendanceStatus';
 import { useAttendanceData } from '../hooks/useAttendanceData';
+import { subscribeToAttendanceRealtime } from '../utils/supabaseClient';
+
+function toDateKey(dateInput) {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+    return dateInput.slice(0, 10);
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 // Default 1,184 Standard CSU ROTC Structure Template
 const DEFAULT_UNIT_STRUCTURE = [
@@ -131,8 +145,63 @@ const DEFAULT_UNIT_STRUCTURE = [
 ];
 
 export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanceLogs: propsLogs = [], onRefresh, onNavigateToHistory }) {
-  const { records: hookLogs, settings: hookSettings, activeCutoff } = useAttendanceData();
-  const attendanceLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
+  const { records: hookLogs = [], settings: hookSettings, activeCutoff, refreshFromStorage } = useAttendanceData();
+  const rawMasterLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
+
+  const todayKey = useMemo(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }, []);
+
+  const formatHumanDate = (dateKey) => {
+    if (!dateKey) return 'Today';
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    if (isNaN(dateObj.getTime())) return dateKey;
+    return dateObj.toLocaleDateString(undefined, {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  // Realtime subscription for instant dashboard re-trigger
+  useEffect(() => {
+    const channel = subscribeToAttendanceRealtime(() => {
+      if (refreshFromStorage) refreshFromStorage();
+      if (onRefresh) onRefresh();
+    });
+
+    const handleLocalUpdate = () => {
+      if (refreshFromStorage) refreshFromStorage();
+    };
+
+    window.addEventListener('local-attendance-update', handleLocalUpdate);
+    window.addEventListener('storage', handleLocalUpdate);
+
+    return () => {
+      if (channel) channel.unsubscribe();
+      window.removeEventListener('local-attendance-update', handleLocalUpdate);
+      window.removeEventListener('storage', handleLocalUpdate);
+    };
+  }, [refreshFromStorage, onRefresh]);
+
+  // Strict Date Filter: Command dashboard strictly observes today's session_date (universal parser)
+  const attendanceLogs = useMemo(() => {
+    if (!Array.isArray(rawMasterLogs)) return [];
+    return rawMasterLogs.filter(log => {
+      const rawDate = log.date || log.timestamp || log.receivedAt;
+      if (!rawDate) return false;
+      const key = toDateKey(rawDate);
+      return key === todayKey;
+    });
+  }, [rawMasterLogs, todayKey]);
+
+  const hasTodayScans = attendanceLogs.length > 0;
   const formationCutoff = activeCutoff || getActiveFormationCutoff();
   const unitStructure = hookSettings?.unitStructure?.length > 0 ? hookSettings.unitStructure : DEFAULT_UNIT_STRUCTURE;
 
@@ -154,12 +223,160 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     setStatusFilter(prev => prev === status ? null : status);
   };
 
-  // Dynamic Calculated Quotas
-  const totalBasicQuota = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || 1184;
-  const totalOfficerQuota = 60;
-  const totalUnitStrengthQuota = totalBasicQuota + totalOfficerQuota;
+  // Helper: Match whether a log is a Cadet Officer
+  const isOfficerLog = (log) => {
+    const r = (log.rank || '').toLowerCase();
+    const b = (log.battalion || '').toLowerCase();
+    const c = (log.company || '').toLowerCase();
+    const p = (log.platoon || '').toLowerCase();
+    const d = (log.designation || '').toLowerCase();
+    const t = (log.type || log.category || '').toLowerCase();
 
-  const totalPlatoonsCount = unitStructure.reduce((acc, bn) => {
+    return t === 'officer' || t.includes('officer') ||
+      b.includes('officer') || b.includes('brigade') ||
+      c.includes('officer') || c.includes('headquarters') ||
+      r.includes('1cl') || r.includes('2cl') || r.includes('3cl') || r.includes('4cl') || r.includes('aspirant') ||
+      r.includes('col') || r.includes('maj') || r.includes('cpt') || r.includes('lt') ||
+      d.includes('commander') || d.includes('staff') || d.includes('adjutant') || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7');
+  };
+
+  // Helper: Match a log to a specific Officer Class (1CL, 2CL, 3CL, 4CL, ASPIRANT)
+  const matchesOfficerClass = (log, classKey) => {
+    const r = (log.rank || '').toLowerCase();
+    const c = (log.company || '').toLowerCase();
+    const p = (log.platoon || '').toLowerCase();
+    const d = (log.designation || '').toLowerCase();
+    const k = (classKey || '').toLowerCase();
+
+    if (k === '1cl' || k.includes('1st')) {
+      return r.includes('1cl') || d.includes('corps commander') || d.includes('deputy commander') || r.includes('col');
+    }
+    if (k === '2cl' || k.includes('2nd')) {
+      return r.includes('2cl') || (r.includes('maj') && !r.includes('1cl')) || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7') || d.includes('bn commander');
+    }
+    if (k === '3cl' || k.includes('3rd')) {
+      return r.includes('3cl') || (r.includes('cpt') && !r.includes('2cl')) || d.includes('coy commander');
+    }
+    if (k === '4cl' || k.includes('4th')) {
+      return r.includes('4cl') || (r.includes('2lt') || (r.includes('1lt') && !r.includes('3cl'))) || d.includes('platoon leader');
+    }
+    if (k === 'aspirant' || k.includes('aspirant')) {
+      return r.includes('aspirant') || r.includes('candidate') || r.includes('cocc') || c.includes('aspirant') || p.includes('aspirant');
+    }
+    return false;
+  };
+
+  // 1. Dynamic Hierarchical Structure & Auto-Expanding Total Strength
+  // Total Strength = Sum(Battalions) -> Sum(Companies) -> Sum(Platoons)
+  const dynamicHierarchy = useMemo(() => {
+    // Aggregate unique cadets from baseline roster + live/historical scans
+    const allCadetsMap = new Map();
+    (propsCadets || []).forEach(c => {
+      const cid = String(c.id || c.cadetId || '').trim().toUpperCase();
+      if (cid) allCadetsMap.set(cid, c);
+    });
+    (rawMasterLogs || []).forEach(l => {
+      const cid = String(l.cadetId || l.id || '').trim().toUpperCase();
+      if (cid && !allCadetsMap.has(cid)) {
+        allCadetsMap.set(cid, {
+          id: cid,
+          cadetId: cid,
+          name: l.name || `Cadet ${cid}`,
+          rank: l.rank || 'Cadet',
+          battalion: l.battalion || '1st Battalion',
+          company: l.company || 'Alpha Company',
+          platoon: l.platoon || '1st Platoon'
+        });
+      }
+    });
+
+    const allCadetsList = Array.from(allCadetsMap.values());
+    const basicCadets = allCadetsList.filter(c => !isOfficerLog(c));
+    const officerCadets = allCadetsList.filter(isOfficerLog);
+
+    // Build dynamic Battalions -> Companies -> Platoons
+    const battalions = unitStructure.map((bn, bnIdx) => {
+      const bnNorm = normalizeBattalion(bn.name);
+      const bnCadets = basicCadets.filter(c => {
+        const cBnNorm = normalizeBattalion(c.battalion);
+        return bnNorm && cBnNorm ? (bnNorm === cBnNorm) : false;
+      });
+
+      const companies = (bn.companies || []).map((co) => {
+        const coNorm = normalizeCompany(co.name);
+        const coCadets = bnCadets.filter(c => {
+          const cCoNorm = normalizeCompany(c.company);
+          return coNorm && cCoNorm ? (coNorm === cCoNorm) : false;
+        });
+
+        const platoons = (co.platoons || []).map((pl) => {
+          const plNorm = normalizePlatoon(pl.name);
+          const plCadets = coCadets.filter(c => {
+            const cPlNorm = normalizePlatoon(c.platoon);
+            return plNorm && cPlNorm ? (plNorm === cPlNorm) : false;
+          });
+
+          // Platoon Strength is dynamically calculated from actual registered/scanned cadets in this platoon
+          // If no cadets exist anywhere in the app, it defaults strictly to 0
+          const dynamicPlatoonStrength = plCadets.length;
+
+          return {
+            ...pl,
+            registeredCount: plCadets.length,
+            targetQuota: dynamicPlatoonStrength
+          };
+        });
+
+        // Company Strength = Sum of its Platoons
+        const dynamicCompanyStrength = platoons.reduce((acc, p) => acc + p.targetQuota, 0);
+
+        return {
+          ...co,
+          platoons,
+          registeredCount: coCadets.length,
+          targetQuota: dynamicCompanyStrength
+        };
+      });
+
+      // Battalion Strength = Sum of its Companies
+      const dynamicBattalionStrength = companies.reduce((acc, c) => acc + c.targetQuota, 0);
+
+      return {
+        ...bn,
+        companies,
+        registeredCount: bnCadets.length,
+        targetQuota: dynamicBattalionStrength
+      };
+    });
+
+    // Basic Cadets Quota = Sum of Battalions
+    const totalBasicStrength = battalions.reduce((acc, b) => acc + b.targetQuota, 0);
+    // Officer Quota = Exact count of registered/scanned officers
+    const totalOfficerStrength = officerCadets.length;
+    // Total Unit Strength = Basic Cadets + Officer Corps = allCadetsList.length
+    const totalUnitStrength = allCadetsList.length;
+
+    return {
+      allCadetsList,
+      basicCadets,
+      officerCadets,
+      battalions,
+      totalBasicStrength,
+      totalOfficerStrength,
+      totalUnitStrength
+    };
+  }, [propsCadets, rawMasterLogs, unitStructure]);
+
+  const totalBasicQuota = dynamicHierarchy.totalBasicStrength;
+  const totalOfficerQuota = dynamicHierarchy.totalOfficerStrength;
+  const totalUnitStrengthQuota = dynamicHierarchy.totalUnitStrength;
+
+  // Expected Target Capacity from Unit Configuration Settings
+  const totalConfiguredBasicCapacity = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
+  const totalConfiguredOfficerCapacity = 60;
+  const totalConfiguredCapacity = totalConfiguredBasicCapacity + totalConfiguredOfficerCapacity;
+
+  const totalPlatoonsCount = dynamicHierarchy.battalions.reduce((acc, bn) => {
     return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
   }, 0);
 
@@ -207,57 +424,48 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     }
   ];
 
-  // Helper: Match whether a log is a Cadet Officer
-  const isOfficerLog = (log) => {
-    const r = (log.rank || '').toLowerCase();
-    const b = (log.battalion || '').toLowerCase();
-    const c = (log.company || '').toLowerCase();
-    const p = (log.platoon || '').toLowerCase();
-    const d = (log.designation || '').toLowerCase();
-    const t = (log.type || log.category || '').toLowerCase();
+  // 2. Dynamic Counts calculated directly from today's attendanceLogs
+  const { reconciledRoster: rawReconciledRoster, summary: rawSummary } = useMemo(() => {
+    return reconcileRosterAttendance(
+      dynamicHierarchy.allCadetsList,
+      attendanceLogs,
+      null,
+      formationCutoff
+    );
+  }, [dynamicHierarchy.allCadetsList, attendanceLogs, formationCutoff]);
 
-    return t === 'officer' || t.includes('officer') ||
-      b.includes('officer') || b.includes('brigade') ||
-      c.includes('officer') || c.includes('headquarters') ||
-      r.includes('1cl') || r.includes('2cl') || r.includes('3cl') || r.includes('4cl') || r.includes('aspirant') ||
-      r.includes('col') || r.includes('maj') || r.includes('cpt') || r.includes('lt') ||
-      d.includes('commander') || d.includes('staff') || d.includes('adjutant') || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7');
-  };
+  const attendanceSummary = useMemo(() => {
+    if (!hasTodayScans) {
+      return {
+        totalStrength: dynamicHierarchy.totalUnitStrength,
+        presentCompleteCount: 0,
+        lateCompleteCount: 0,
+        incompleteCount: 0,
+        absentCount: 0,
+        totalScanned: 0,
+        presentOrLateCount: 0
+      };
+    }
+    return rawSummary;
+  }, [hasTodayScans, rawSummary, dynamicHierarchy.totalUnitStrength]);
 
-  // Helper: Match a log to a specific Officer Class (1CL, 2CL, 3CL, 4CL, ASPIRANT)
-  const matchesOfficerClass = (log, classKey) => {
-    const r = (log.rank || '').toLowerCase();
-    const c = (log.company || '').toLowerCase();
-    const p = (log.platoon || '').toLowerCase();
-    const d = (log.designation || '').toLowerCase();
-    const k = (classKey || '').toLowerCase();
-
-    if (k === '1cl' || k.includes('1st')) {
-      return r.includes('1cl') || d.includes('corps commander') || d.includes('deputy commander') || r.includes('col');
+  const reconciledRoster = useMemo(() => {
+    if (!hasTodayScans) {
+      return dynamicHierarchy.allCadetsList.map(cadet => ({
+        ...cadet,
+        cadetId: cadet.id || cadet.cadetId,
+        hasTimeIn: false,
+        hasTimeOut: false,
+        timeInDisplay: null,
+        timeOutDisplay: null,
+        timeInStatus: null,
+        timeOutStatus: null,
+        status: 'NO SCAN TODAY',
+        finalDailyStatus: 'NO SCAN TODAY'
+      }));
     }
-    if (k === '2cl' || k.includes('2nd')) {
-      return r.includes('2cl') || (r.includes('maj') && !r.includes('1cl')) || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7') || d.includes('bn commander');
-    }
-    if (k === '3cl' || k.includes('3rd')) {
-      return r.includes('3cl') || (r.includes('cpt') && !r.includes('2cl')) || d.includes('coy commander');
-    }
-    if (k === '4cl' || k.includes('4th')) {
-      return r.includes('4cl') || (r.includes('2lt') || (r.includes('1lt') && !r.includes('3cl'))) || d.includes('platoon leader');
-    }
-    if (k === 'aspirant' || k.includes('aspirant')) {
-      return r.includes('aspirant') || r.includes('candidate') || r.includes('cocc') || c.includes('aspirant') || p.includes('aspirant');
-    }
-    return false;
-  };
-
-  // 1. Dynamic Counts calculated directly from attendanceLogs
-  // Full Roster Reconciliation against Attendance Logs
-  const { reconciledRoster, summary: attendanceSummary } = reconcileRosterAttendance(
-    propsCadets,
-    attendanceLogs,
-    null,
-    formationCutoff
-  );
+    return rawReconciledRoster;
+  }, [hasTodayScans, rawReconciledRoster, dynamicHierarchy.allCadetsList]);
 
   const totalAttendanceScans = attendanceLogs.length;
   const uniqueCadetIds = new Set(attendanceLogs.map(l => (l.cadetId || '').trim()).filter(Boolean));
@@ -269,7 +477,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   const isOfficerSelected = mainCategory === 'CADET_OFFICERS';
   const isBasicCadetsSelected = mainCategory === 'BASIC_CADETS';
 
-  // 2. Filtered logs according to active Battalion selector for contextual counts
+  // 3. Filtered logs according to active Battalion selector for contextual counts
   const bnSelectorClean = selectedBattalion ? selectedBattalion.replace(' Battalion', '').toLowerCase().trim() : '';
   const activeLogs = selectedBattalion
     ? attendanceLogs.filter(log => {
@@ -281,8 +489,8 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     })
     : (isOfficerSelected ? attendanceLogs.filter(isOfficerLog) : attendanceLogs);
 
-  // 3. Dynamic Basic Cadet Battalions from unitStructure
-  const basicBattalions = unitStructure.map((bn, idx) => {
+  // 4. Dynamic Basic Cadet Battalions from dynamicHierarchy
+  const basicBattalions = dynamicHierarchy.battalions.map((bn, idx) => {
     const bnName = bn.name;
     const bnNorm = normalizeBattalion(bnName);
     const scanned = attendanceLogs.filter(l => {
@@ -291,7 +499,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       const lBnNorm = normalizeBattalion(echelon.battalion || l.battalion);
       return bnNorm && lBnNorm ? (bnNorm === lBnNorm) : false;
     }).length;
-    const target = Number(bn.targetQuota) || 592;
+    const target = bn.targetQuota;
     const coys = bn.companies || [];
     const coysDesc = coys.length > 0
       ? `${coys.map(c => c.shortCode || c.name.replace(' Company', '')).join(', ')} • ${coys.reduce((acc, c) => acc + (c.platoons?.length || 0), 0)} Platoons`
@@ -309,13 +517,13 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     };
   });
 
-  // 4. Dynamic Active Battalion & Company Objects for Step 2 and Step 3
-  const activeBnObj = unitStructure.find(b => {
+  // 5. Dynamic Active Battalion & Company Objects for Step 2 and Step 3
+  const activeBnObj = dynamicHierarchy.battalions.find(b => {
     if (!selectedBattalion) return false;
     const selNorm = normalizeBattalion(selectedBattalion);
     const bNorm = normalizeBattalion(b.name);
     return selNorm && bNorm ? (selNorm === bNorm) : b.name.toLowerCase().includes(selectedBattalion.toLowerCase());
-  }) || unitStructure[0] || null;
+  }) || dynamicHierarchy.battalions[0] || null;
 
   const activeCoysList = activeBnObj && activeBnObj.companies && activeBnObj.companies.length > 0
     ? activeBnObj.companies
@@ -327,7 +535,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     ];
 
   const companyCounts = activeCoysList.map(c => {
-    const target = Number(c.targetQuota) || 148;
+    const target = c.targetQuota;
     const cNorm = normalizeCompany(c.name);
     const scanned = activeLogs.filter(log => {
       const echelon = getScannedUnitEchelon(log);
@@ -347,7 +555,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     };
   });
 
-  // 5. Dynamic Active Company & Platoon Objects for Step 3
+  // 6. Dynamic Active Company & Platoon Objects for Step 3
   const activeCoObj = activeBnObj?.companies?.find(c => {
     if (!selectedCompany) return false;
     const selNorm = normalizeCompany(selectedCompany);
@@ -377,7 +585,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       const matchPl = pNorm && plNorm ? (pNorm === plNorm) : false;
       return matchCo && matchPl;
     }).length;
-    const target = Number(p.targetQuota) || 37;
+    const target = p.targetQuota;
     const percent = Math.min(100, Math.round((scanned / target) * 100));
 
     return {
@@ -576,12 +784,16 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             <div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {attendanceSummary.totalStrength || uniqueCadetsCount || totalAttendanceScans} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalUnitStrengthQuota}</span>
+                {dynamicHierarchy.totalUnitStrength} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>{totalConfiguredCapacity > 0 ? `/ ${totalConfiguredCapacity} Target Capacity` : '/ 0'}</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            {Math.min(100, Math.round(((attendanceSummary.totalStrength || uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))}% of Brigade Quota
+            {dynamicHierarchy.totalUnitStrength > 0
+              ? (totalConfiguredCapacity > 0
+                ? `${Math.min(100, Math.round((dynamicHierarchy.totalUnitStrength / totalConfiguredCapacity) * 100))}% of Target Capacity (${dynamicHierarchy.totalUnitStrength} Cadets)`
+                : `${dynamicHierarchy.totalUnitStrength} Cadets Registered`)
+              : '0 Cadets Registered in Master Roster'}
           </div>
         </div>
 
@@ -674,26 +886,28 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           className="card"
           style={{
             borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#64748b' : '#e2e8f0'}`,
-            cursor: 'pointer',
+            cursor: hasTodayScans ? 'pointer' : 'default',
             outline: statusFilter === 'ABSENT' ? '2px solid #64748b' : 'none',
             background: statusFilter === 'ABSENT' ? '#f1f5f9' : undefined
           }}
-          onClick={() => handleStatusCardClick('ABSENT')}
-          title="Click to filter table: Absent cadets only"
+          onClick={() => hasTodayScans && handleStatusCardClick('ABSENT')}
+          title={hasTodayScans ? "Click to filter table: Absent cadets only" : "No formation recorded for today"}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(100, 116, 139, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
               <Shield size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Absent</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+                {hasTodayScans ? 'Absent' : 'No Scan Today'}
+              </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#334155' }}>
-                {attendanceSummary.absentCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+                {hasTodayScans ? attendanceSummary.absentCount : 0} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent'}
+            {hasTodayScans ? (statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent') : 'No active formation today'}
           </div>
         </div>
       </div>
@@ -837,17 +1051,17 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                 color: isOfficerSelected ? '#ffffff' : '#3730a3',
                 fontWeight: 800
               }}>
-                {cadetOfficersCount} / 60
+                {cadetOfficersCount} / {totalOfficerQuota}
               </span>
             </div>
 
             <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, Math.round((cadetOfficersCount / 60) * 100))}%`, height: '100%', background: 'linear-gradient(90deg, #4338ca, #6366f1)', transition: 'width 0.4s ease' }}></div>
+              <div style={{ width: `${totalOfficerQuota > 0 ? Math.min(100, Math.round((cadetOfficersCount / totalOfficerQuota) * 100)) : 0}%`, height: '100%', background: 'linear-gradient(90deg, #4338ca, #6366f1)', transition: 'width 0.4s ease' }}></div>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isOfficerSelected ? '#3730a3' : 'var(--text-muted)', fontWeight: 700 }}>
               <span>{isOfficerSelected ? '▼ Officer Classes Revealed Below' : '▶ Click to View Officer Classes'}</span>
-              <span>60 Officers Quota</span>
+              <span>{totalOfficerQuota.toLocaleString()} Officers Registered</span>
             </div>
           </div>
 
@@ -1369,7 +1583,64 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           </div>
         </div>
 
-        {tableFilteredCadets.length === 0 ? (
+        {!hasTodayScans ? (
+          <div
+            style={{
+              padding: '3.5rem 1.5rem',
+              textAlign: 'center',
+              background: '#ffffff',
+              borderRadius: '12px',
+              border: '2px dashed #cbd5e1',
+              boxShadow: 'var(--shadow-sm)',
+              margin: '0.5rem 0'
+            }}
+          >
+            <div
+              style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: '#f1f5f9',
+                color: '#64748b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 1.25rem'
+              }}
+            >
+              <Activity size={32} />
+            </div>
+
+            <h3 style={{ margin: '0 0 0.5rem', color: '#1e293b', fontSize: '1.25rem', fontWeight: 800 }}>
+              No Active Formation or Scans Recorded for Today
+            </h3>
+
+            <p style={{ margin: '0 auto 1.5rem', maxWidth: '520px', color: '#64748b', fontSize: '0.88rem', lineHeight: '1.5' }}>
+              No attendance scans have been logged for <strong>{formatHumanDate(todayKey)}</strong>. Master roster rows are hidden on non-formation days to keep the dashboard clean.
+            </p>
+
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+              {onNavigateToHistory && (
+                <button
+                  type="button"
+                  onClick={onNavigateToHistory}
+                  className="btn btn-primary"
+                  style={{
+                    padding: '0.55rem 1.25rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    borderRadius: '8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Archive size={15} /> View Attendance History & Past Formations
+                </button>
+              )}
+            </div>
+          </div>
+        ) : tableFilteredCadets.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
             No cadets matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
@@ -1452,39 +1723,47 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
                       {/* Final Daily Status Badge */}
                       <td>
-                        {(finalStatus === 'PRESENT' || finalStatus === 'PRESENT (Complete)') && (
-                          <span className="badge badge-present" style={{ fontWeight: 800, gap: '3px' }}>
-                            <CheckCircle2 size={11} /> PRESENT
+                        {(!hasTodayScans || finalStatus === 'NO SCAN TODAY') ? (
+                          <span className="badge" style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', fontWeight: 700, gap: '3px' }}>
+                            <Activity size={11} /> NO SCAN TODAY
                           </span>
-                        )}
-                        {(finalStatus === 'LATE' || finalStatus === 'LATE (Complete)') && (
-                          <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
-                            <Clock size={11} /> LATE
-                          </span>
-                        )}
-                        {(finalStatus === 'NO TIME-OUT' || finalStatus === 'INCOMPLETE (No Time-Out)') && (
-                          <span className="badge" style={{ background: '#ffedd5', color: '#9a3412', border: '1px solid #fed7aa', fontWeight: 800, gap: '3px' }}>
-                            <Activity size={11} /> NO TIME-OUT
-                          </span>
-                        )}
-                        {(finalStatus === 'LATE / NO TIME-OUT' || finalStatus === 'INCOMPLETE (Late / No Time-Out)') && (
-                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
-                            <Activity size={11} /> LATE / NO TIME-OUT
-                          </span>
-                        )}
-                        {finalStatus === 'ABSENT' && (
-                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', fontWeight: 800, gap: '3px' }}>
-                            <UserX size={11} /> ABSENT
-                          </span>
-                        )}
-                        {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT'].includes(finalStatus) && (
-                          <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
-                            {finalStatus}
-                          </span>
+                        ) : (
+                          <>
+                            {(finalStatus === 'PRESENT' || finalStatus === 'PRESENT (Complete)') && (
+                              <span className="badge badge-present" style={{ fontWeight: 800, gap: '3px' }}>
+                                <CheckCircle2 size={11} /> PRESENT
+                              </span>
+                            )}
+                            {(finalStatus === 'LATE' || finalStatus === 'LATE (Complete)') && (
+                              <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
+                                <Clock size={11} /> LATE
+                              </span>
+                            )}
+                            {(finalStatus === 'NO TIME-OUT' || finalStatus === 'INCOMPLETE (No Time-Out)') && (
+                              <span className="badge" style={{ background: '#ffedd5', color: '#9a3412', border: '1px solid #fed7aa', fontWeight: 800, gap: '3px' }}>
+                                <Activity size={11} /> NO TIME-OUT
+                              </span>
+                            )}
+                            {(finalStatus === 'LATE / NO TIME-OUT' || finalStatus === 'INCOMPLETE (Late / No Time-Out)') && (
+                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
+                                <Activity size={11} /> LATE / NO TIME-OUT
+                              </span>
+                            )}
+                            {finalStatus === 'ABSENT' && (
+                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', fontWeight: 800, gap: '3px' }}>
+                                <UserX size={11} /> ABSENT
+                              </span>
+                            )}
+                            {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT', 'NO SCAN TODAY'].includes(finalStatus) && (
+                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
+                                {finalStatus}
+                              </span>
+                            )}
+                          </>
                         )}
                       </td>
 
-                      <td>{cadet.dutyOfficer || 'Duty Officer'}</td>
+                      <td>{cadet.dutyOfficer || (hasTodayScans ? 'Duty Officer' : '—')}</td>
                     </tr>
                   );
                 })}

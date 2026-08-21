@@ -37,7 +37,12 @@ import {
 import ConfirmModal from './ConfirmModal';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
 import { recalculateAttendanceLogs } from '../utils/attendanceStatus';
-import { fetchSettingsFromSupabase, saveSettingsToSupabase } from '../utils/supabaseClient';
+import {
+  fetchSettingsFromSupabase,
+  saveSettingsToSupabase,
+  clearCadetsFromSupabase,
+  clearAttendanceFromSupabase
+} from '../utils/supabaseClient';
 
 // Standard CSU ROTC 1,184 Unit Structure Template
 const DEFAULT_UNIT_STRUCTURE = [
@@ -593,6 +598,53 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       }
     };
     reader.readAsText(file);
+  };
+
+  // State for clearing
+  const [isClearingCadets, setIsClearingCadets] = useState(false);
+  const [isClearingAttendance, setIsClearingAttendance] = useState(false);
+
+  // Clear All Cadets from Supabase & Local Cache
+  const handleClearCadetsFromApp = async () => {
+    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL cadets from Supabase and clear the local cadet cache? This action cannot be undone.')) {
+      return;
+    }
+    setIsClearingCadets(true);
+    try {
+      await clearCadetsFromSupabase();
+      localStorage.removeItem('csu_rotc_cadets_roster');
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
+      setSaveSuccessToast('All cadet records successfully cleared from Supabase & local cache.');
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      alert('Error clearing cadets: ' + err.message);
+    } finally {
+      setIsClearingCadets(false);
+      setTimeout(() => setSaveSuccessToast(null), 4000);
+    }
+  };
+
+  // Clear All Attendance Logs from Supabase & Local Cache
+  const handleClearAttendanceFromApp = async () => {
+    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL attendance logs from Supabase and clear local attendance history? This action cannot be undone.')) {
+      return;
+    }
+    setIsClearingAttendance(true);
+    try {
+      await clearAttendanceFromSupabase();
+      localStorage.removeItem('csu_rotc_master_attendance');
+      localStorage.removeItem('csu_rotc_recent_approved_signatures');
+      window.dispatchEvent(new Event('storage'));
+      window.dispatchEvent(new Event('local-attendance-update'));
+      setSaveSuccessToast('All attendance records successfully cleared from Supabase & local cache.');
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      alert('Error clearing attendance: ' + err.message);
+    } finally {
+      setIsClearingAttendance(false);
+      setTimeout(() => setSaveSuccessToast(null), 4000);
+    }
   };
 
   // =========================================================================
@@ -1748,6 +1800,93 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               </button>
             </div>
           </div>
+
+          {/* Card 3: Database & Cloud Roster Management */}
+          <div className="card" style={{ border: '1px solid #fca5a5', background: '#fffafb', gridColumn: '1 / -1' }}>
+            <div className="card-header">
+              <div className="card-title" style={{ color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Trash2 size={20} color="#dc2626" />
+                <span>Database & Cloud Roster Maintenance</span>
+              </div>
+              <span className="badge badge-absent">ADMIN PURGE</span>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <p style={{ fontSize: '0.84rem', color: '#7f1d1d', margin: 0, lineHeight: 1.5 }}>
+                Manage or wipe database records stored in Supabase and local browser cache. Use caution when wiping master cadets or attendance logs.
+              </p>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+                {/* Clear Cadets */}
+                <div style={{ background: '#ffffff', padding: '1rem', borderRadius: '10px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#991b1b', marginBottom: '4px' }}>
+                      Clear Cadets Directory
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                      Deletes all registered cadets from Supabase <code>cadets</code> table and clears local cadet roster cache.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={handleClearCadetsFromApp}
+                    disabled={isClearingCadets}
+                    style={{
+                      background: '#ef4444',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      borderRadius: '7px',
+                      padding: '0.55rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      border: 'none',
+                      cursor: isClearingCadets ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    <span>{isClearingCadets ? 'Clearing Cadets...' : 'Clear All Cadets in Supabase & Local'}</span>
+                  </button>
+                </div>
+
+                {/* Clear Attendance */}
+                <div style={{ background: '#ffffff', padding: '1rem', borderRadius: '10px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#991b1b', marginBottom: '4px' }}>
+                      Clear Attendance Logs
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                      Deletes all scan history from Supabase <code>attendance_logs</code> table and clears local attendance records.
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={handleClearAttendanceFromApp}
+                    disabled={isClearingAttendance}
+                    style={{
+                      background: '#b91c1c',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      borderRadius: '7px',
+                      padding: '0.55rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      border: 'none',
+                      cursor: isClearingAttendance ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    <span>{isClearingAttendance ? 'Clearing Logs...' : 'Clear All Attendance in Supabase & Local'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2193,7 +2332,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
                 <div>
                   <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                    Target Cadet Quota
+                    Target Capacity (Expected)
                   </label>
                   <input
                     type="number"

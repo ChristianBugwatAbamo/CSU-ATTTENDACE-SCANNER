@@ -5,7 +5,6 @@ import AnalyticsDashboard from './components/AnalyticsDashboard';
 import AttendanceHistory from './components/AttendanceHistory';
 import IDGenerator from './components/IDGenerator';
 import ScannerPage from './components/ScannerPage';
-import SyncLogs from './components/SyncLogs';
 import AdminSettings from './components/AdminSettings';
 import LoginPage from './components/LoginPage';
 import PublicLandingPage from './components/PublicLandingPage';
@@ -23,12 +22,13 @@ import {
   fetchCadetsFromSupabase,
   fetchAttendanceFromSupabase,
   bulkUpsertAttendanceToSupabase,
+  subscribeToAttendanceRealtime,
   getSupabaseClient
 } from './utils/supabaseClient';
 import { LogOut, ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'history', 'idcards', 'scanner', 'synclogs', 'settings'];
+  const VALID_TABS = ['dashboard', 'history', 'idcards', 'scanner', 'settings'];
 
   // Authentication Session State
   const [currentUser, setCurrentUser] = useState(() => {
@@ -159,9 +159,11 @@ export default function App() {
         fetchAttendanceFromSupabase()
       ]);
 
-      if (sbCadets.status === 'fulfilled' && Array.isArray(sbCadets.value) && sbCadets.value.length > 0) {
+      if (sbCadets.status === 'fulfilled' && Array.isArray(sbCadets.value)) {
         setCadets(sbCadets.value);
-        try { localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(sbCadets.value)); } catch (_) {}
+        try {
+          localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(sbCadets.value));
+        } catch (_) {}
       }
 
       if (sbLogs.status === 'fulfilled' && Array.isArray(sbLogs.value)) {
@@ -210,11 +212,18 @@ export default function App() {
       });
     };
 
+    // Subscribe to live Supabase Realtime stream
+    const realtimeChannel = subscribeToAttendanceRealtime((payload) => {
+      fetchData();
+      window.dispatchEvent(new Event('local-attendance-update'));
+    });
+
     window.addEventListener('storage', handleStorage);
     window.addEventListener('local-attendance-update', handleStorage);
     window.addEventListener('csu_settings_updated', handleSettingsUpdated);
     return () => {
       clearInterval(interval);
+      if (realtimeChannel) realtimeChannel.unsubscribe();
       window.removeEventListener('storage', handleStorage);
       window.removeEventListener('local-attendance-update', handleStorage);
       window.removeEventListener('csu_settings_updated', handleSettingsUpdated);
@@ -287,6 +296,19 @@ export default function App() {
     window.dispatchEvent(new Event('local-attendance-update'));
   };
 
+function toDateKey(dateInput) {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+    return dateInput.slice(0, 10);
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
   // Ingest approved batch records into Master Attendance with single-row cadet deduplication and merging
   const handleSyncComplete = (enrichedRecords) => {
     const cutoffTime = getActiveFormationCutoff();
@@ -295,7 +317,7 @@ export default function App() {
       let updated = [...prev];
 
       enrichedRecords.forEach((rawRecord) => {
-        const scanDateStr = rawRecord.timestamp ? new Date(rawRecord.timestamp).toDateString() : new Date().toDateString();
+        const scanDateStr = toDateKey(rawRecord.date || rawRecord.timestamp) || toDateKey(new Date());
         const cid = String(rawRecord.cadetId || rawRecord.i || '').trim().toUpperCase();
         if (!cid) return;
 
@@ -306,7 +328,7 @@ export default function App() {
 
         // Look up cadet's existing record for the current date (single-row model)
         const existingIndex = updated.findIndex((l) => {
-          const dStr = l.timestamp ? new Date(l.timestamp).toDateString() : (l.date ? new Date(l.date).toDateString() : '');
+          const dStr = toDateKey(l.date || l.timestamp);
           const lCid = String(l.cadetId || l.i || '').trim().toUpperCase();
           return lCid === cid && dStr === scanDateStr;
         });
@@ -402,10 +424,42 @@ export default function App() {
         window.dispatchEvent(new Event('local-attendance-update'));
       } catch (_) {}
 
-      // Push incoming batch to Supabase Cloud in background
-      bulkUpsertAttendanceToSupabase(incomingBatch).catch((err) => {
-        console.warn('Background Supabase cloud sync failed:', err);
+      // Auto-Expansion: Register new cadets dynamically into master roster
+      setCadets((prevCadets) => {
+        const existingCids = new Set(prevCadets.map(c => String(c.id || c.cadetId || '').trim().toUpperCase()));
+        let newlyAdded = [];
+        enrichedRecords.forEach((rec) => {
+          const cid = String(rec.cadetId || rec.i || '').trim().toUpperCase();
+          if (cid && !existingCids.has(cid)) {
+            existingCids.add(cid);
+            newlyAdded.push({
+              id: cid,
+              cadetId: cid,
+              name: rec.name || `Cadet ${cid}`,
+              rank: rec.rank || 'Cadet',
+              battalion: rec.battalion || '1st Battalion',
+              company: rec.company || 'Alpha Company',
+              platoon: rec.platoon || '1st Platoon'
+            });
+          }
+        });
+
+        if (newlyAdded.length > 0) {
+          const updatedCadets = [...prevCadets, ...newlyAdded];
+          try {
+            localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
+          } catch (_) {}
+          return updatedCadets;
+        }
+        return prevCadets;
       });
+
+      // Push enriched records to Supabase Cloud in background
+      if (Array.isArray(enrichedRecords) && enrichedRecords.length > 0) {
+        bulkUpsertAttendanceToSupabase(enrichedRecords).catch((err) => {
+          console.warn('Background Supabase cloud sync failed:', err);
+        });
+      }
 
       return updated;
     });
@@ -532,14 +586,6 @@ export default function App() {
               cadets={cadets}
               attendanceLogs={attendanceLogs}
               onSyncComplete={handleSyncComplete}
-            />
-          )}
-
-          {activeTab === 'synclogs' && (
-            <SyncLogs
-              attendanceLogs={attendanceLogs}
-              onRefresh={fetchData}
-              onClearLogs={handleClearAttendance}
             />
           )}
 

@@ -1201,11 +1201,82 @@ INSERT INTO public.cadets (id, name, rank, battalion, company, platoon, type, de
   ('221-24437', 'SANCHEZ, KATHLEEN T.', 'Cadet', '2nd Battalion', 'Delta', '4th Platoon', 'Basic Cadet', 'N/A')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, rank = EXCLUDED.rank, battalion = EXCLUDED.battalion, company = EXCLUDED.company, platoon = EXCLUDED.platoon, designation = EXCLUDED.designation;
 
--- 2. SEED ATTENDANCE SESSIONS
+-- 2. SEED ATTENDANCE SESSIONS (Saturdays: Aug 08 & Aug 15, 2026)
 INSERT INTO public.attendance_sessions (session_date, session_name, duty_officer, cutoff_time) VALUES
-  ('2026-08-16', 'Sunday Field Formation & Military Drill (Aug 16, 2026)', 'C/CPT CULIRA, JOSHUA D.', '07:30'),
-  ('2026-08-17', 'Monday Brigade Muster & Inspection (Aug 17, 2026)', 'C/MAJ CASTILLO, ELENA J.', '07:30'),
-  ('2026-08-18', 'Tuesday Tactical Training & Lecture (Aug 18, 2026)', 'C/MAJ GONZALES, ARTH K.', '07:30'),
-  ('2026-08-19', 'Mid-Week Field Formation (Aug 19, 2026)', 'C/CPT ABAMO, CHRISTIAN B.', '07:30')
+  ('2026-08-08', 'Saturday Field Drill & Muster (Aug 08, 2026)', 'C/CPT ABAMO, CHRISTIAN B.', '07:30'),
+  ('2026-08-15', 'Saturday Tactical Training & Ceremonial Parade (Aug 15, 2026)', 'C/MAJ CASTILLO, ELENA J.', '07:30')
 ON CONFLICT (session_date) DO UPDATE SET session_name = EXCLUDED.session_name, duty_officer = EXCLUDED.duty_officer;
+
+-- 3. SEED ATTENDANCE LOGS (75% PRESENT, 15% LATE, 10% ABSENT)
+DO $$
+DECLARE
+    r RECORD;
+    h INTEGER;
+    t_in TIMESTAMPTZ;
+    t_out TIMESTAMPTZ;
+    session_dates DATE[] := ARRAY['2026-08-08'::DATE, '2026-08-15'::DATE];
+    s_date DATE;
+    s_name TEXT;
+    d_officer TEXT;
+    seed_offset INTEGER := 0;
+BEGIN
+    DELETE FROM public.attendance_logs;
+
+    FOREACH s_date IN ARRAY session_dates LOOP
+        seed_offset := seed_offset + 17;
+        
+        IF s_date = '2026-08-08' THEN
+            s_name := 'Saturday Field Drill & Muster (Aug 08, 2026)';
+            d_officer := 'C/CPT ABAMO, CHRISTIAN B.';
+        ELSE
+            s_name := 'Saturday Tactical Training & Ceremonial Parade (Aug 15, 2026)';
+            d_officer := 'C/MAJ CASTILLO, ELENA J.';
+        END IF;
+
+        FOR r IN SELECT id, name, rank, battalion, company, platoon, designation, type FROM public.cadets LOOP
+            -- Hash distribution 0-99
+            h := (abs(hashtext(r.id || s_date::text)) + seed_offset) % 100;
+
+            -- 75% PRESENT (On-time: 06:30 - 07:25 AM)
+            IF h < 75 THEN
+                t_in := s_date + (INTERVAL '6 hours' + (30 + (h % 55)) * INTERVAL '1 minute' + (h * 7 % 60) * INTERVAL '1 second');
+                t_out := s_date + (INTERVAL '11 hours' + (30 + (h % 40)) * INTERVAL '1 minute' + (h * 13 % 60) * INTERVAL '1 second');
+                
+                INSERT INTO public.attendance_logs (
+                    cadet_id, name, rank, battalion, company, platoon, designation,
+                    date, time_in, time_out, timestamp, scan_mode,
+                    time_in_status, time_out_status, status, final_daily_status,
+                    duty_officer, session_name
+                )
+                VALUES (
+                    r.id, r.name, r.rank, r.battalion, r.company, r.platoon, r.designation,
+                    s_date, t_in, t_out, t_in, 'Time-Out',
+                    'PRESENT', 'PRESENT', 'PRESENT', 'PRESENT',
+                    d_officer, s_name
+                );
+
+            -- 15% LATE (Arrival: 07:31 - 07:55 AM)
+            ELSIF h < 90 THEN
+                t_in := s_date + (INTERVAL '7 hours' + (31 + (h % 24)) * INTERVAL '1 minute' + (h * 11 % 60) * INTERVAL '1 second');
+                t_out := s_date + (INTERVAL '11 hours' + (45 + (h % 20)) * INTERVAL '1 minute' + (h * 17 % 60) * INTERVAL '1 second');
+                
+                INSERT INTO public.attendance_logs (
+                    cadet_id, name, rank, battalion, company, platoon, designation,
+                    date, time_in, time_out, timestamp, scan_mode,
+                    time_in_status, time_out_status, status, final_daily_status,
+                    duty_officer, session_name
+                )
+                VALUES (
+                    r.id, r.name, r.rank, r.battalion, r.company, r.platoon, r.designation,
+                    s_date, t_in, t_out, t_in, 'Time-Out',
+                    'LATE', 'PRESENT', 'LATE', 'LATE',
+                    d_officer, s_name
+                );
+
+            -- 10% ABSENT (h >= 90): No row is inserted
+            END IF;
+        END LOOP;
+    END LOOP;
+END $$;
+
 

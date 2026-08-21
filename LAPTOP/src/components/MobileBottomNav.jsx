@@ -1,15 +1,15 @@
 import React from 'react';
-import { LayoutDashboard, QrCode, FileSpreadsheet, Camera, Plus, ScanLine } from 'lucide-react';
+import { LayoutDashboard, QrCode, History, Camera, Plus, ScanLine } from 'lucide-react';
 
 export default function MobileBottomNav({ activeTab, setActiveTab, onOpenScanner }) {
   const leftNavItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'idcards', label: 'ID Cards', icon: QrCode },
+    { id: 'history', label: 'History', icon: History },
   ];
 
   const rightNavItems = [
     { id: 'scanner', label: 'Scanner', icon: Camera },
-    { id: 'synclogs', label: 'Sync & Logs', icon: FileSpreadsheet },
+    { id: 'idcards', label: 'ID Cards', icon: QrCode },
   ];
 
   return (

@@ -170,12 +170,7 @@ export default function IDGenerator({ cadets = [] }) {
       const saved = localStorage.getItem('csu_rotc_id_gen_batch_queue');
       if (saved) return JSON.parse(saved);
     } catch (_) {}
-    return [
-      { id: '221-11101', name: 'SANTOS, MARIA L', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-      { id: '221-11102', name: 'DELA CRUZ, JUAN A', rank: 'Cadet', battalion: '1st Battalion', company: 'Alpha', platoon: '1st Platoon', designation: 'None', type: 'basic' },
-      { id: '221-00101', name: 'BAUTISTA, MARK G', rank: 'Cadet COL (ROTC) 1CL', battalion: 'CADET OFFICERS', company: '1CL', platoon: 'Officer Corps', designation: 'Corps Commander', type: 'officer' },
-      { id: '221-00104', name: 'CASTILLO, ELENA J', rank: 'Cadet MAJ (ROTC) 2CL', battalion: 'CADET OFFICERS', company: '2CL', platoon: 'Officer Corps', designation: 'S4 Brigade', type: 'officer' }
-    ];
+    return [];
   });
 
   // Synchronize Form State to LocalStorage
