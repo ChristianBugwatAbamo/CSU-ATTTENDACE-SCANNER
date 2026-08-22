@@ -137,9 +137,18 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
     playSuccessBeep();
 
+    const batchRecords = (batch.records || []).map((r) => ({
+      ...r,
+      dutyOfficer: r.dutyOfficer || batch.dutyOfficer || 'Duty Officer',
+      sessionName: r.sessionName || batch.sessionName || 'Formation Session',
+      battalion: r.battalion || batch.battalion || '1st Battalion',
+      company: r.company || batch.company || 'Alpha Company',
+      platoon: r.platoon || batch.platoon || '1st Platoon'
+    }));
+
     // Commit to master attendance logs
     if (onSyncComplete) {
-      onSyncComplete(batch.records);
+      onSyncComplete(batchRecords);
     }
     window.dispatchEvent(new Event('local-attendance-update'));
 
@@ -151,7 +160,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
         body: JSON.stringify({
           dutyOfficer: batch.dutyOfficer || 'Duty Officer',
           sessionName: batch.sessionName || 'Field Session',
-          records: batch.records
+          records: batchRecords
         })
       }).catch(() => {});
     } catch (_) {}
@@ -170,7 +179,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
     setToastMessage({
       type: 'success',
-      text: `Approved batch from ${batch.dutyOfficer} (${batch.records.length} Cadets Ingested).`
+      text: `Approved batch from ${batch.dutyOfficer} (${batchRecords.length} Cadets Ingested).`
     });
     setTimeout(() => setToastMessage(null), 3500);
   };
@@ -200,7 +209,16 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
     let allEnrichedRecords = [];
     pendingBatches.forEach((batch) => {
-      allEnrichedRecords = allEnrichedRecords.concat(batch.records);
+      const batchRecords = (batch.records || []).map((r) => ({
+        ...r,
+        dutyOfficer: r.dutyOfficer || batch.dutyOfficer || 'Duty Officer',
+        sessionName: r.sessionName || batch.sessionName || 'Formation Session',
+        battalion: r.battalion || batch.battalion || '1st Battalion',
+        company: r.company || batch.company || 'Alpha Company',
+        platoon: r.platoon || batch.platoon || '1st Platoon'
+      }));
+
+      allEnrichedRecords = allEnrichedRecords.concat(batchRecords);
       if (batch.signature) {
         recentApprovedSignaturesRef.current.add(batch.signature);
       }
@@ -211,7 +229,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           body: JSON.stringify({
             dutyOfficer: batch.dutyOfficer || 'Duty Officer',
             sessionName: batch.sessionName || 'Field Session',
-            records: batch.records
+            records: batchRecords
           })
         }).catch(() => {});
       } catch (_) {}

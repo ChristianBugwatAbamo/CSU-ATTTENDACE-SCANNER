@@ -23,7 +23,8 @@ import {
   fetchAttendanceFromSupabase,
   bulkUpsertAttendanceToSupabase,
   subscribeToAttendanceRealtime,
-  getSupabaseClient
+  getSupabaseClient,
+  inferCadetFromId
 } from './utils/supabaseClient';
 import { LogOut, ShieldCheck } from 'lucide-react';
 
@@ -424,45 +425,44 @@ function toDateKey(dateInput) {
         window.dispatchEvent(new Event('local-attendance-update'));
       } catch (_) {}
 
-      // Auto-Expansion: Register new cadets dynamically into master roster
-      setCadets((prevCadets) => {
-        const existingCids = new Set(prevCadets.map(c => String(c.id || c.cadetId || '').trim().toUpperCase()));
-        let newlyAdded = [];
-        enrichedRecords.forEach((rec) => {
-          const cid = String(rec.cadetId || rec.i || '').trim().toUpperCase();
-          if (cid && !existingCids.has(cid)) {
-            existingCids.add(cid);
-            newlyAdded.push({
-              id: cid,
-              cadetId: cid,
-              name: rec.name || `Cadet ${cid}`,
-              rank: rec.rank || 'Cadet',
-              battalion: rec.battalion || '1st Battalion',
-              company: rec.company || 'Alpha Company',
-              platoon: rec.platoon || '1st Platoon'
-            });
-          }
-        });
-
-        if (newlyAdded.length > 0) {
-          const updatedCadets = [...prevCadets, ...newlyAdded];
-          try {
-            localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
-          } catch (_) {}
-          return updatedCadets;
-        }
-        return prevCadets;
-      });
-
-      // Push enriched records to Supabase Cloud in background
-      if (Array.isArray(enrichedRecords) && enrichedRecords.length > 0) {
-        bulkUpsertAttendanceToSupabase(enrichedRecords).catch((err) => {
-          console.warn('Background Supabase cloud sync failed:', err);
-        });
-      }
-
       return updated;
     });
+
+    // Auto-Expansion: Register new cadets dynamically into master roster
+    setCadets((prevCadets) => {
+      const existingCids = new Set(prevCadets.map(c => String(c.id || c.cadetId || '').trim().toUpperCase()));
+      let newlyAdded = [];
+      enrichedRecords.forEach((rec) => {
+        const cid = String(rec.cadetId || rec.i || '').trim().toUpperCase();
+        if (cid && !existingCids.has(cid)) {
+          existingCids.add(cid);
+          const inferred = inferCadetFromId(cid, rec);
+          newlyAdded.push(inferred);
+        }
+      });
+
+      if (newlyAdded.length > 0) {
+        const updatedCadets = [...prevCadets, ...newlyAdded];
+        try {
+          localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
+          window.dispatchEvent(new Event('storage'));
+        } catch (_) {}
+        return updatedCadets;
+      }
+      return prevCadets;
+    });
+
+    // Push enriched records to Supabase Cloud with auto-provisioning of Cadets and Sessions
+    if (Array.isArray(enrichedRecords) && enrichedRecords.length > 0) {
+      bulkUpsertAttendanceToSupabase(enrichedRecords)
+        .then(async () => {
+          // Re-fetch to ensure all local views and cloud database are in sync
+          await fetchData();
+        })
+        .catch((err) => {
+          console.warn('Background Supabase cloud sync failed:', err);
+        });
+    }
   };
 
   // 1. Public Landing Page Route (/)

@@ -21,7 +21,6 @@ import {
   FileSpreadsheet,
   Activity,
   Award,
-  Sparkles,
   RotateCcw,
   X,
   Info,
@@ -77,7 +76,10 @@ const MONTH_NAMES = [
 ];
 
 import { useAttendanceData } from '../hooks/useAttendanceData';
-import { fetchCadetsFromSupabase, bulkUpsertAttendanceToSupabase } from '../utils/supabaseClient';
+import {
+  fetchAttendanceSessionsFromSupabase,
+  subscribeToHistoryRealtime
+} from '../utils/supabaseClient';
 
 export default function AttendanceHistory({
   cadets = [],
@@ -88,16 +90,27 @@ export default function AttendanceHistory({
   const { records: hookLogs = [], cadets: hookCadets = [] } = useAttendanceData();
   const effectiveLogs = Array.isArray(attendanceLogs) && attendanceLogs.length > 0 ? attendanceLogs : hookLogs;
   const effectiveCadets = Array.isArray(cadets) ? cadets : hookCadets;
-  const [isSeeding, setIsSeeding] = useState(false);
+
+  // Supabase attendance_sessions records — used to populate the calendar with
+  // formation dates even when attendance_logs is empty or partially loaded.
+  const [dbSessions, setDbSessions] = useState([]);
+  // Incrementing this key triggers a re-fetch of sessions (e.g. after Realtime event).
+  const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  // True while the initial sessions fetch is in progress
+  const [isSessionsLoading, setIsSessionsLoading] = useState(true);
 
   const formationCutoff = getActiveFormationCutoff();
   const todayKey = useMemo(() => toDateKey(new Date()), []);
   const calendarPopoverRef = useRef(null);
 
-  // 1. Discover all unique dates present in attendanceLogs with recorded scans
+  // 1. Discover all unique formation dates from TWO sources:
+  //    a) attendance_logs records (actual scan data)
+  //    b) attendance_sessions records from Supabase (the authoritative list of
+  //       scheduled formations — shows dates even when no scans have been recorded yet)
   const historicalDates = useMemo(() => {
     const datesMap = new Map();
 
+    // Source A: build from actual scan log records
     effectiveLogs.forEach((log) => {
       const rawDate = log.timestamp || log.date || log.receivedAt;
       const key = toDateKey(rawDate);
@@ -109,7 +122,8 @@ export default function AttendanceHistory({
           scansCount: 0,
           sessionNames: new Set(),
           dutyOfficers: new Set(),
-          sampleDate: new Date(rawDate)
+          sampleDate: new Date(rawDate),
+          hasSession: false
         });
       }
       const entry = datesMap.get(key);
@@ -118,11 +132,34 @@ export default function AttendanceHistory({
       if (log.dutyOfficer) entry.dutyOfficers.add(log.dutyOfficer);
     });
 
-    // Filter to ONLY dates with recorded scans and sort descending (newest first)
+    // Source B: merge session records — these establish formation dates even
+    // if attendance_logs is empty (e.g. right after a seed script runs, or
+    // when RLS policies block log reads but allow session reads)
+    dbSessions.forEach((session) => {
+      const key = session.dateKey;
+      if (!key) return;
+
+      if (!datesMap.has(key)) {
+        datesMap.set(key, {
+          dateKey: key,
+          scansCount: 0,
+          sessionNames: new Set(),
+          dutyOfficers: new Set(),
+          sampleDate: new Date(key + 'T12:00:00'),
+          hasSession: true
+        });
+      }
+      const entry = datesMap.get(key);
+      entry.hasSession = true;
+      if (session.sessionName) entry.sessionNames.add(session.sessionName);
+      if (session.dutyOfficer) entry.dutyOfficers.add(session.dutyOfficer);
+    });
+
+    // Include any date that has either actual scans OR a session record
     return Array.from(datesMap.values())
-      .filter(d => d.scansCount > 0)
+      .filter(d => d.scansCount > 0 || d.hasSession)
       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  }, [effectiveLogs]);
+  }, [effectiveLogs, dbSessions]);
 
   // Fast map lookup for valid recorded dates
   const historicalDatesMap = useMemo(() => {
@@ -136,7 +173,7 @@ export default function AttendanceHistory({
     return historicalDates.length > 0 ? historicalDates[0].dateKey : '';
   });
 
-  // Automatically sync to the most recent recorded formation date when logs load or change
+  // Automatically sync to the most recent recorded formation date when logs/sessions load.
   useEffect(() => {
     if (historicalDates.length > 0) {
       const exists = historicalDatesMap.has(selectedDate);
@@ -146,10 +183,47 @@ export default function AttendanceHistory({
     }
   }, [historicalDates, historicalDatesMap]);
 
+  // Fetch attendance_sessions from Supabase on mount and whenever sessionsRefreshKey
+  // changes. This populates the calendar independently of attendance_logs so formation
+  // dates appear even when individual scan records haven't been loaded yet.
+  useEffect(() => {
+    setIsSessionsLoading(true);
+    fetchAttendanceSessionsFromSupabase()
+      .then(sessions => {
+        console.log('[AttendanceHistory] Supabase attendance_sessions fetch result:', sessions.length, 'records', sessions);
+        setDbSessions(sessions);
+      })
+      .catch(err => {
+        console.error('[AttendanceHistory] Failed to fetch attendance_sessions from Supabase:', err);
+      })
+      .finally(() => setIsSessionsLoading(false));
+  }, [sessionsRefreshKey]);
+
+  // Subscribe to Supabase Realtime for attendance_logs AND attendance_sessions.
+  // On any change: trigger parent fetchData() for logs AND bump sessionsRefreshKey
+  // so the local sessions list re-fetches too.
+  useEffect(() => {
+    const channel = subscribeToHistoryRealtime(() => {
+      if (onRefresh) onRefresh();
+      setSessionsRefreshKey(k => k + 1);
+    });
+    return () => {
+      if (channel) channel.unsubscribe();
+    };
+  }, [onRefresh]);
+
   // Guard: whether the currently selected date actually has recorded formation data
   const isRecordedDate = useMemo(() => {
     return !!selectedDate && historicalDatesMap.has(selectedDate);
   }, [selectedDate, historicalDatesMap]);
+
+  // True when a session exists in Supabase for this date but attendance_logs has 0 scan records.
+  // In this case the roster table renders (showing all as ABSENT) with an informational banner.
+  const hasSessionButNoLogs = useMemo(() => {
+    if (!isRecordedDate) return false;
+    const meta = historicalDatesMap.get(selectedDate);
+    return meta?.hasSession && meta?.scansCount === 0;
+  }, [isRecordedDate, historicalDatesMap, selectedDate]);
 
   const isTodaySelected = selectedDate === todayKey;
 
@@ -359,163 +433,7 @@ export default function AttendanceHistory({
     }
   };
 
-  // 1-Click Action to load Saturday August 8 & August 15 formations (75% Present, 15% Late, 10% Absent)
-  const handleQuickSeedSaturdays = async () => {
-    setIsSeeding(true);
-    try {
-      let cadetsList = effectiveCadets;
-      if (!cadetsList || cadetsList.length === 0) {
-        cadetsList = await fetchCadetsFromSupabase();
-      }
 
-      // If cadets list is still empty, generate a full default roster
-      if (!cadetsList || cadetsList.length === 0) {
-        cadetsList = [];
-        const battalions = ['1st Battalion', '2nd Battalion'];
-        const companies = ['Alpha', 'Bravo', 'Charlie', 'Delta'];
-        const platoons = ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
-        let cNum = 1001;
-
-        // Staff Officers
-        cadetsList.push(
-          { id: "221-00101", name: "BAUTISTA, MARK G.", rank: "Cadet COL (ROTC) 1CL", battalion: "CADET OFFICERS", company: "1CL", platoon: "Officer Corps", designation: "Corps Commander" },
-          { id: "221-00102", name: "MENDOZA, CLARA H.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "CADET OFFICERS", company: "1CL", platoon: "Officer Corps", designation: "Deputy Commander" },
-          { id: "221-00103", name: "RAMOS, DANIEL I.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", designation: "S1 Brigade" },
-          { id: "221-00104", name: "CASTILLO, ELENA J.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", designation: "S2 Brigade" },
-          { id: "221-00105", name: "GONZALES, ARTH K.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", designation: "S3 Brigade" },
-          { id: "221-00106", name: "VILLANUEVA, ROSA L.", rank: "Cadet MAJ (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", designation: "S4 Brigade" },
-          { id: "221-00107", name: "ABAMO, CHRISTIAN B.", rank: "Cadet CPT (ROTC) 2CL", battalion: "CADET OFFICERS", company: "2CL", platoon: "Officer Corps", designation: "S7 Brigade" },
-          { id: "221-00108", name: "AQUINO, JOSHUA D.", rank: "Cadet CPT (ROTC) 3CL", battalion: "CADET OFFICERS", company: "3CL", platoon: "Officer Corps", designation: "Adjutant" },
-          { id: "221-00109", name: "NAVARRO, MICHAEL E.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "1st Battalion", company: "Headquarters", platoon: "Battalion Staff", designation: "1st Bn Commander" },
-          { id: "221-00110", name: "FERNANDEZ, GABRIEL F.", rank: "Cadet LT COL (ROTC) 1CL", battalion: "2nd Battalion", company: "Headquarters", platoon: "Battalion Staff", designation: "2nd Bn Commander" }
-        );
-
-        // 1,184 Basic Cadets
-        battalions.forEach((bn, bnIdx) => {
-          companies.forEach((co, coIdx) => {
-            platoons.forEach((pl, plIdx) => {
-              for (let i = 1; i <= 37; i++) {
-                const cid = `221-${bnIdx + 1}${coIdx + 1}${plIdx + 1}${String(i).padStart(2, '0')}`;
-                cadetsList.push({
-                  id: cid,
-                  name: `CADET ${cid}`,
-                  rank: 'Cadet',
-                  battalion: bn,
-                  company: co,
-                  platoon: pl,
-                  designation: i === 1 ? 'Platoon Guide' : i === 2 ? 'Squad Leader' : 'N/A',
-                  type: 'Basic Cadet'
-                });
-              }
-            });
-          });
-        });
-
-        localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(cadetsList));
-      }
-
-      const saturdayDates = [
-        { dateStr: '2026-08-08', sessionName: 'Saturday Field Drill & Muster (Aug 08, 2026)', dutyOfficer: 'C/CPT ABAMO, CHRISTIAN B.', offset: 17 },
-        { dateStr: '2026-08-15', sessionName: 'Saturday Tactical Training & Ceremonial Parade (Aug 15, 2026)', dutyOfficer: 'C/MAJ CASTILLO, ELENA J.', offset: 34 }
-      ];
-
-      const newLogs = [];
-      saturdayDates.forEach(cfg => {
-        const { dateStr, sessionName, dutyOfficer, offset } = cfg;
-
-        cadetsList.forEach((cadet, idx) => {
-          const cid = cadet.id || cadet.cadetId;
-          if (!cid) return;
-          const h = (idx * 37 + offset + (parseInt(cid.replace(/\D/g, ''), 10) || idx)) % 100;
-
-          if (h < 75) {
-            // 75% Present (On-Time before 07:30 cutoff)
-            const inMin = 30 + (h % 55);
-            const inHour = inMin >= 60 ? 7 : 6;
-            const inMinute = inMin >= 60 ? inMin - 60 : inMin;
-            const inSec = (h * 7) % 60;
-            const tIn = `${dateStr}T${String(inHour).padStart(2, '0')}:${String(inMinute).padStart(2, '0')}:${String(inSec).padStart(2, '0')}`;
-            const tOut = `${dateStr}T11:45:${String((h * 13) % 60).padStart(2, '0')}`;
-
-            newLogs.push({
-              cadetId: cid,
-              name: cadet.name,
-              rank: cadet.rank || 'Cadet',
-              battalion: cadet.battalion || '1st Battalion',
-              company: cadet.company || 'Alpha Company',
-              platoon: cadet.platoon || '1st Platoon',
-              designation: cadet.designation || 'N/A',
-              date: dateStr,
-              timeIn: tIn,
-              timeOut: tOut,
-              timestamp: tIn,
-              scanMode: 'Time-Out',
-              timeInStatus: 'PRESENT',
-              timeOutStatus: 'PRESENT',
-              status: 'PRESENT',
-              finalDailyStatus: 'PRESENT',
-              dutyOfficer: dutyOfficer,
-              sessionName: sessionName,
-              receivedAt: `${dateStr}T12:00:00`
-            });
-          } else if (h < 90) {
-            // 15% Late (Arrival between 07:31 and 07:54 AM)
-            const lateMin = 31 + (h % 24);
-            const tIn = `${dateStr}T07:${String(lateMin).padStart(2, '0')}:${String((h * 11) % 60).padStart(2, '0')}`;
-            const tOut = `${dateStr}T11:55:${String((h * 17) % 60).padStart(2, '0')}`;
-
-            newLogs.push({
-              cadetId: cid,
-              name: cadet.name,
-              rank: cadet.rank || 'Cadet',
-              battalion: cadet.battalion || '1st Battalion',
-              company: cadet.company || 'Alpha Company',
-              platoon: cadet.platoon || '1st Platoon',
-              designation: cadet.designation || 'N/A',
-              date: dateStr,
-              timeIn: tIn,
-              timeOut: tOut,
-              timestamp: tIn,
-              scanMode: 'Time-Out',
-              timeInStatus: 'LATE',
-              timeOutStatus: 'PRESENT',
-              status: 'LATE',
-              finalDailyStatus: 'LATE',
-              dutyOfficer: dutyOfficer,
-              sessionName: sessionName,
-              receivedAt: `${dateStr}T12:00:00`
-            });
-          }
-          // 10% Absent: no row generated
-        });
-      });
-
-      // Save locally to localStorage
-      localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(newLogs));
-      window.dispatchEvent(new Event('local-attendance-update'));
-
-      // Try bulk upsert to Supabase
-      await bulkUpsertAttendanceToSupabase(newLogs).catch(err => console.warn('Supabase sync note:', err));
-
-      if (onRefresh) onRefresh();
-      setSelectedDate('2026-08-15');
-
-      setExportNotice({
-        type: 'success',
-        text: `Loaded ${newLogs.length} attendance logs for Aug 08 & Aug 15 (75% Present, 15% Late, 10% Absent)!`
-      });
-    } catch (e) {
-      console.error('Error seeding Saturday formations:', e);
-      setExportNotice({
-        type: 'error',
-        text: 'Failed to load Saturday formation data: ' + e.message
-      });
-    } finally {
-      setIsSeeding(false);
-    }
-  };
-
-  // Turnout percentage for the date
   const turnoutRate = summary.totalStrength > 0
     ? Math.round(((summary.presentCompleteCount + summary.lateCompleteCount) / summary.totalStrength) * 100)
     : 0;
@@ -708,8 +626,11 @@ export default function AttendanceHistory({
                 title="Open interactive formation calendar"
               >
                 <CalendarDays size={15} color="var(--rotc-green-dark)" />
-                <span>Calendar Selector</span>
-                <ChevronDown size={13} style={{ transform: isCalendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                <span>{isSessionsLoading ? 'Loading Sessions...' : 'Calendar Selector'}</span>
+                {isSessionsLoading
+                  ? <RefreshCw size={13} style={{ animation: 'spin 1s linear infinite' }} />
+                  : <ChevronDown size={13} style={{ transform: isCalendarOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+                }
               </button>
 
               {/* Custom Restricted Calendar Dropdown (Unrecorded dates disabled & grayed out) */}
@@ -984,7 +905,7 @@ export default function AttendanceHistory({
       )}
 
       {/* ========================================================================= */}
-      {/* EMPTY STATE GUARD: Rendered when user selects an unrecorded date          */}
+      {/* EMPTY STATE: No session and no logs for the selected date                 */}
       {/* ========================================================================= */}
       {!isRecordedDate ? (
         <div
@@ -1015,7 +936,7 @@ export default function AttendanceHistory({
           </div>
 
           <h3 style={{ margin: '0 0 0.5rem', color: '#1e293b', fontSize: '1.3rem', fontWeight: 800 }}>
-            No Formation Recorded for {formatHumanDate(selectedDate)}
+            No Formation Recorded for {formatHumanDate(selectedDate) || 'Selected Date'}
           </h3>
 
           <p style={{ margin: '0 auto 1.5rem', maxWidth: '520px', color: '#64748b', fontSize: '0.9rem', lineHeight: '1.5' }}>
@@ -1039,88 +960,62 @@ export default function AttendanceHistory({
             }}
           >
             <Shield size={16} />
-            <span>Roster Guard Active: 1,194 cadets protected from false absentee marking.</span>
+            <span>Roster Guard Active — absentees are only computed on recorded formation dates.</span>
           </div>
 
-          <div>
-            {/* 1-Click Action to load Saturday August 8 & August 15 formations */}
-            <div style={{ marginTop: '1rem' }}>
+          {latestRecordedDate && (
+            <div style={{ marginTop: '0.5rem' }}>
               <button
                 type="button"
-                onClick={handleQuickSeedSaturdays}
-                disabled={isSeeding}
-                className="btn btn-primary"
+                onClick={() => setSelectedDate(latestRecordedDate)}
+                className="btn btn-secondary"
                 style={{
-                  padding: '0.65rem 1.5rem',
-                  fontSize: '0.9rem',
-                  fontWeight: 800,
+                  padding: '0.5rem 1.2rem',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
                   borderRadius: '8px',
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '8px',
-                  boxShadow: '0 4px 12px rgba(6, 78, 46, 0.25)'
+                  gap: '6px'
                 }}
               >
-                <Sparkles size={18} /> {isSeeding ? 'Loading Formation Data...' : 'Load Saturday Formations (Aug 08 & Aug 15, 2026)'}
+                <CalendarCheck size={15} /> Go to Most Recent Formation ({formatHumanDate(latestRecordedDate)})
               </button>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                Generates 75% Present, 15% Late, and 10% Absent records across 1,194 cadets.
-              </div>
             </div>
-
-            {latestRecordedDate && (
-              <div style={{ marginTop: '1rem' }}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedDate(latestRecordedDate)}
-                  className="btn btn-secondary"
-                  style={{
-                    padding: '0.5rem 1.2rem',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    borderRadius: '8px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <CalendarCheck size={15} /> Go to Most Recent Formation ({formatHumanDate(latestRecordedDate)})
-                </button>
-              </div>
-            )}
-
-            {historicalDates.length > 0 && (
-              <div style={{ marginTop: '1.25rem' }}>
-                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '0.6rem' }}>
-                  Or Choose from Recorded Formation Dates:
-                </div>
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                  {historicalDates.map(d => (
-                    <button
-                      key={d.dateKey}
-                      type="button"
-                      onClick={() => setSelectedDate(d.dateKey)}
-                      className="btn btn-secondary btn-sm"
-                      style={{
-                        padding: '0.4rem 0.75rem',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        borderRadius: '6px',
-                        borderColor: '#a7f3d0',
-                        color: '#065f46',
-                        background: '#f0fdf4'
-                      }}
-                    >
-                      📅 {formatHumanDate(d.dateKey)} ({d.scansCount} scans)
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          )}
         </div>
       ) : (
         <>
+          {/* Banner: session recorded in Supabase but no individual scan logs yet */}
+          {hasSessionButNoLogs && (
+            <div
+              style={{
+                padding: '0.85rem 1.25rem',
+                borderRadius: '10px',
+                fontSize: '0.84rem',
+                fontWeight: 600,
+                background: '#fffbeb',
+                color: '#92400e',
+                border: '1.5px solid #fde68a',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                flexWrap: 'wrap'
+              }}
+            >
+              <AlertCircle size={18} color="#d97706" style={{ flexShrink: 0 }} />
+              <div>
+                <strong>Formation Session Recorded — No Scan Logs Yet</strong>
+                <div style={{ fontSize: '0.78rem', color: '#b45309', marginTop: '2px' }}>
+                  The <em>{Array.from(selectedDateMeta.sessionNames)[0] || 'formation session'}</em> on{' '}
+                  <strong>{formatHumanDate(selectedDate)}</strong> exists in Supabase but
+                  the <code>attendance_logs</code> table has no scan records for this date.
+                  All cadets are shown as <strong>ABSENT</strong> until scan data arrives from the smartphone scanner.
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* ========================================================================= */}
           {/* 5 Simplified Modern Stat Summary Cards (Clickable to Filter Table)         */}
           {/* ========================================================================= */}

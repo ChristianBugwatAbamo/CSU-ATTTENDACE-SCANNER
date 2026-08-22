@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     formation_cutoff_time VARCHAR(10) NOT NULL DEFAULT '07:30',
     formation_tardy_grace INTEGER NOT NULL DEFAULT 15,
     cadet_quota_per_platoon INTEGER NOT NULL DEFAULT 37,
-    commanding_officer VARCHAR(255) NOT NULL DEFAULT 'LTC RYAN L MARCELO INF (GSC) PA',
+    commanding_officer VARCHAR(255) NOT NULL DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     commanding_officer_title VARCHAR(255) NOT NULL DEFAULT 'Commandant, CSU ROTC Unit',
     unit_name VARCHAR(255) NOT NULL DEFAULT '1501st CDC ROTC Unit',
     parent_command VARCHAR(255) NOT NULL DEFAULT '15th RCDG, ARESCOM, Philippine Army',
