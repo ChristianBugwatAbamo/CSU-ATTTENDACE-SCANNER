@@ -22,6 +22,7 @@ import {
   fetchCadetsFromSupabase,
   fetchAttendanceFromSupabase,
   bulkUpsertAttendanceToSupabase,
+  ingestBatchToSupabase,
   subscribeToAttendanceRealtime,
   getSupabaseClient,
   inferCadetFromId

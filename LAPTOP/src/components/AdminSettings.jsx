@@ -40,6 +40,7 @@ import { recalculateAttendanceLogs } from '../utils/attendanceStatus';
 import {
   fetchSettingsFromSupabase,
   saveSettingsToSupabase,
+  syncSessionCutoffTime,
   clearCadetsFromSupabase,
   clearAttendanceFromSupabase
 } from '../utils/supabaseClient';
@@ -188,12 +189,13 @@ export const DEFAULT_OFFICER_DESIGNATIONS = [
 ];
 
 const DEFAULT_SETTINGS = {
-  // Tab 1: Attendance Rules
+  // Tab 1: Attendance Rules & Unit
   morningCutoffTime: "07:30",
   afternoonCutoffTime: "16:00",
   formationTardyGrace: 15,
   lateThresholdGrace: 30,
   cadetQuotaPerPlatoon: 37,
+  totalUnitTarget: 1184,
   requireTimeInAndOut: true,
 
   // Tab 2: Dynamic Unit Structure & Echelons
@@ -201,7 +203,7 @@ const DEFAULT_SETTINGS = {
 
   // Tab 3: Unit Branding
   unitName: "1501st CDC ROTC Unit",
-  commandingOfficer: "LTC RYAN L MARCELO INF (GSC) PA",
+  commandingOfficer: "LTC CHRISTIAN B ABAMO INF (GSC) PA",
   commandingOfficerTitle: "Commandant, CSU ROTC Unit",
   parentCommand: "15th RCDG, ARESCOM, Philippine Army",
   hostInstitution: "Caraga State University (CSU Main Campus, Ampayon, Butuan City)",
@@ -210,11 +212,12 @@ const DEFAULT_SETTINGS = {
 
   // Tab 4: Data Management & Exports
   exportDirectory: "./desktop_excel_reports/",
+  letterheadConfig: null,
   autoExcelExport: true,
   autoBackupEnabled: true,
 
   // Tab 5: ID Printing Setup
-  signatoryName: "LTC RYAN L MARCELO INF (GSC) PA",
+  signatoryName: "LTC CHRISTIAN B ABAMO INF (GSC) PA",
   signatoryDesignation: "Commandant, CSU ROTC Unit",
   signatureImageUrl: "",
   cardOrientation: "vertical", // 'vertical' | 'horizontal'
@@ -261,11 +264,13 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
   // Modals & Security Verification
   const [isResetRosterModalOpen, setIsResetRosterModalOpen] = useState(false);
+
+  // Secure Wipe Modal State
   const [isSecurePurgeModalOpen, setIsSecurePurgeModalOpen] = useState(false);
   const [purgePasswordInput, setPurgePasswordInput] = useState('');
   const [purgeErrorMsg, setPurgeErrorMsg] = useState('');
 
-  // File Inputs Refs
+  // Logo / File Upload Refs
   const rotcSealInputRef = useRef(null);
   const univLogoInputRef = useRef(null);
   const signatureInputRef = useRef(null);
@@ -284,17 +289,32 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       try {
         const sbSettings = await fetchSettingsFromSupabase();
         if (sbSettings) {
+          const loadedCutoff = sbSettings.formation_cutoff_time || DEFAULT_SETTINGS.morningCutoffTime;
           finalSettings = {
             ...DEFAULT_SETTINGS,
             ...sbSettings,
-            formationCutoffTime: sbSettings.formation_cutoff_time || DEFAULT_SETTINGS.formationCutoffTime,
-            formationTardyGrace: sbSettings.formation_tardy_grace || DEFAULT_SETTINGS.formationTardyGrace,
-            cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon || DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
+            morningCutoffTime: loadedCutoff,
+            formationCutoffTime: loadedCutoff,
+            formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
+            cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
+            totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
+            unitStructure: (Array.isArray(sbSettings.unit_structure) && sbSettings.unit_structure.length > 0) ? sbSettings.unit_structure : (sbSettings.unitStructure || DEFAULT_UNIT_STRUCTURE),
+            unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
             commandingOfficer: sbSettings.commanding_officer || DEFAULT_SETTINGS.commandingOfficer,
             commandingOfficerTitle: sbSettings.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle,
-            unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
             parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
-            hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution
+            hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution,
+            rotcSealUrl: sbSettings.rotc_seal_url || DEFAULT_SETTINGS.rotcSealUrl,
+            universityLogoUrl: sbSettings.university_logo_url || DEFAULT_SETTINGS.universityLogoUrl,
+            exportDirectory: sbSettings.excel_export_path || DEFAULT_SETTINGS.exportDirectory,
+            letterheadConfig: sbSettings.letterhead_config || DEFAULT_SETTINGS.letterheadConfig,
+            autoBackupEnabled: sbSettings.auto_backup_enabled !== false,
+            signatoryName: sbSettings.id_signatory_name || sbSettings.commanding_officer || DEFAULT_SETTINGS.signatoryName,
+            signatoryDesignation: sbSettings.id_signatory_title || sbSettings.commanding_officer_title || DEFAULT_SETTINGS.signatoryDesignation,
+            signatureImageUrl: sbSettings.id_signature_url || DEFAULT_SETTINGS.signatureImageUrl,
+            cardOrientation: sbSettings.id_card_orientation || DEFAULT_SETTINGS.cardOrientation,
+            officerRanks: (Array.isArray(sbSettings.officer_ranks_list) && sbSettings.officer_ranks_list.length > 0) ? sbSettings.officer_ranks_list : (sbSettings.officerRanks || DEFAULT_OFFICER_RANKS),
+            officerDesignations: (Array.isArray(sbSettings.officer_roles_list) && sbSettings.officer_roles_list.length > 0) ? sbSettings.officer_roles_list : (sbSettings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS)
           };
         }
       } catch (_) {}
@@ -308,6 +328,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             finalSettings = {
               ...DEFAULT_SETTINGS,
               ...data,
+              morningCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.morningCutoffTime,
+              formationCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.formationCutoffTime,
               unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
               officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
               officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
@@ -342,8 +364,13 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const handleSaveSettings = async (e, customSettings = null) => {
     if (e) e.preventDefault();
     setIsSaving(true);
-    const toSave = customSettings || settings;
-    const newCutoff = toSave.morningCutoffTime || toSave.formationCutoffTime || (toSave.musterAndUnit && toSave.musterAndUnit.timeInCutoff) || '07:30';
+    const rawToSave = customSettings || settings;
+    const newCutoff = rawToSave.morningCutoffTime || rawToSave.formationCutoffTime || (rawToSave.musterAndUnit && rawToSave.musterAndUnit.timeInCutoff) || '07:30';
+    const toSave = {
+      ...rawToSave,
+      morningCutoffTime: newCutoff,
+      formationCutoffTime: newCutoff
+    };
 
     try {
       // 1. Re-evaluate and update all master attendance records against the new cutoff setting
@@ -363,10 +390,13 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       window.dispatchEvent(new Event('local-attendance-update'));
       window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: toSave }));
 
-      // 2. Save directly to Supabase Cloud
-      saveSettingsToSupabase(toSave).catch((err) => {
-        console.warn('Supabase save settings background error:', err);
-      });
+      // 2. Save directly to Supabase Cloud system_settings and propagate to attendance_sessions
+      try {
+        await saveSettingsToSupabase(toSave);
+        await syncSessionCutoffTime(newCutoff);
+      } catch (errCloud) {
+        console.warn('Supabase save settings error:', errCloud);
+      }
 
       // 3. Save to local server node if available
       try {

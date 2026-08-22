@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { getActiveFormationCutoff, parseCutoffMinutes, parseTimeToMinutes } from './attendanceStatus.js';
 
 // Default Supabase project URL and anon public key
 const DEFAULT_SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://rsexdynexmqlitzscoip.supabase.co';
@@ -356,241 +357,326 @@ export function inferCadetFromId(cadetId, partial = {}) {
 }
 
 /**
- * Bulk upserts attendance records to Supabase with automatic Cadet & Session provisioning,
- * seamlessly merging TIME-OUT scans into existing daily attendance records.
+ * Ingests a batch of scans directly to Supabase attendance_logs, executing direct
+ * UPDATE queries specifically for TIME-OUT scans to merge with existing TIME-IN records.
  */
-export async function bulkUpsertAttendanceToSupabase(logs) {
+export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = null) {
   const client = getSupabaseClient();
-  if (!client || !Array.isArray(logs) || logs.length === 0) return null;
+  if (!client || !Array.isArray(batchScans) || batchScans.length === 0) return null;
 
-  // 1. Determine unique dates and cadet IDs involved in this batch
-  const uniqueDatesSet = new Set();
-  const uniqueCidsSet = new Set();
+  const defaultDate = sessionDateInput || toDateKey(new Date());
 
-  logs.forEach(log => {
-    const cid = String(log.cadetId || log.id || '').trim().toUpperCase();
-    const dateStr = toDateKey(log.date || log.timestamp) || new Date().toISOString().split('T')[0];
-    if (cid) {
-      uniqueCidsSet.add(cid);
-      uniqueDatesSet.add(dateStr);
+  // Fetch active system settings for dynamic cutoff propagation
+  let dbCutoff = getActiveFormationCutoff() || '07:30';
+  try {
+    const { data: currentSettings } = await client
+      .from('system_settings')
+      .select('formation_cutoff_time')
+      .order('updated_at', { ascending: false })
+      .limit(1);
+
+    if (currentSettings && currentSettings.length > 0 && currentSettings[0].formation_cutoff_time) {
+      dbCutoff = currentSettings[0].formation_cutoff_time;
+    }
+  } catch (_) {}
+
+  // 1. Auto-provision any un-provisioned cadets & sessions first
+  const uniqueCadetsMap = new Map();
+  const uniqueSessionsMap = new Map();
+
+  batchScans.forEach(scan => {
+    const cid = String(scan.cadet_id || scan.cadetId || scan.id || scan.i || '').trim().toUpperCase();
+    if (!cid) return;
+    const scanDate = toDateKey(scan.date || scan.session_date || scan.sessionDate || scan.timestamp) || defaultDate;
+
+    if (!uniqueCadetsMap.has(cid)) {
+      uniqueCadetsMap.set(cid, inferCadetFromId(cid, scan));
+    }
+
+    if (!uniqueSessionsMap.has(scanDate)) {
+      const dObj = new Date(`${scanDate}T12:00:00`);
+      const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
+      const defaultTitle = dayOfWeek === 6
+        ? `Saturday Formation & Muster (${scanDate})`
+        : `Daily Training & Drill Session (${scanDate})`;
+
+      uniqueSessionsMap.set(scanDate, {
+        session_date: scanDate,
+        session_name: scan.session_name || scan.sessionName || defaultTitle,
+        duty_officer: scan.duty_officer || scan.dutyOfficer || 'Duty Officer',
+        cutoff_time: scan.cutoff_time || scan.cutoffTime || dbCutoff || '07:30'
+      });
     }
   });
 
-  const uniqueDates = Array.from(uniqueDatesSet);
-  const uniqueCids = Array.from(uniqueCidsSet);
-  if (uniqueDates.length === 0 || uniqueCids.length === 0) return null;
+  // Provision cadets
+  const cadetRows = Array.from(uniqueCadetsMap.values());
+  const CADET_CHUNK_SIZE = 400;
+  for (let i = 0; i < cadetRows.length; i += CADET_CHUNK_SIZE) {
+    const chunk = cadetRows.slice(i, i + CADET_CHUNK_SIZE);
+    try {
+      await client.from('cadets').upsert(chunk, { onConflict: 'id' });
+    } catch (_) {}
+  }
 
-  // 2. Fetch existing rows from Supabase for (cadet_id, date) to merge seamlessly
+  // Provision sessions
+  const sessionRows = Array.from(uniqueSessionsMap.values());
+  for (const session of sessionRows) {
+    try {
+      await client.from('attendance_sessions').upsert(session, { onConflict: 'session_date' });
+    } catch (_) {}
+  }
+
+  // 2. Fetch existing logs for these cadets & dates in one batch query
+  const uniqueDates = Array.from(uniqueSessionsMap.keys());
+  const uniqueCids = Array.from(uniqueCadetsMap.keys());
   const existingDbMap = new Map();
+
   try {
-    const { data: existingRows, error: fetchErr } = await client
+    const { data: existingRows } = await client
       .from('attendance_logs')
       .select('*')
       .in('date', uniqueDates)
       .in('cadet_id', uniqueCids);
 
-    if (!fetchErr && Array.isArray(existingRows)) {
-      existingRows.forEach(row => {
-        existingDbMap.set(`${row.cadet_id}__${row.date}`, row);
+    if (Array.isArray(existingRows)) {
+      existingRows.forEach(r => {
+        existingDbMap.set(`${r.cadet_id}__${r.date}`, r);
       });
     }
   } catch (err) {
-    console.warn('Note on fetching existing attendance logs for merging:', err);
+    console.warn('Note on fetching existing attendance rows for ingest:', err);
   }
 
-  // 3. Process and merge incoming logs against existing database state
-  const mergedRowsMap = new Map();
-  const uniqueCadetsMap = new Map();
-  const uniqueSessionsMap = new Map();
+  // 3. Process each scan: execute targeted UPDATE for TIME-OUT on existing rows, or UPSERT for new
+  const updatePromises = [];
+  const upsertRows = [];
 
-  logs.forEach(log => {
-    const cid = String(log.cadetId || log.id || '').trim().toUpperCase();
-    if (!cid) return;
-    const dateStr = toDateKey(log.date || log.timestamp) || new Date().toISOString().split('T')[0];
-    const key = `${cid}__${dateStr}`;
-    const cadetMeta = inferCadetFromId(cid, log);
+  for (const rawScan of batchScans) {
+    const cid = String(rawScan.cadet_id || rawScan.cadetId || rawScan.id || rawScan.i || '').trim().toUpperCase();
+    if (!cid) continue;
 
-    // Register cadet for auto-provisioning
-    if (!uniqueCadetsMap.has(cid)) {
-      uniqueCadetsMap.set(cid, cadetMeta);
-    }
+    const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
+    const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
+    const key = `${cid}__${scanDate}`;
+    const existing = existingDbMap.get(key);
+    const cadetMeta = uniqueCadetsMap.get(cid) || inferCadetFromId(cid, rawScan);
 
-    // Register session for auto-provisioning
-    if (!uniqueSessionsMap.has(dateStr)) {
-      const dObj = new Date(`${dateStr}T12:00:00`);
-      const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
-      const defaultSessionTitle = dayOfWeek === 6
-        ? `Saturday Formation & Muster (${dateStr})`
-        : `Daily Training & Drill Session (${dateStr})`;
+    const isTimeOut = rawScan.scan_mode === 'Time-Out' ||
+      rawScan.scanMode === 'Time-Out' ||
+      rawScan.mode === 'TIME-OUT' ||
+      rawScan.mode === 'TIME_OUT' ||
+      rawScan.m === 0 ||
+      (rawScan.status && String(rawScan.status).toUpperCase().includes('TIME-OUT'));
 
-      uniqueSessionsMap.set(dateStr, {
-        session_date: dateStr,
-        session_name: log.sessionName || defaultSessionTitle,
-        duty_officer: log.dutyOfficer || 'Duty Officer',
-        cutoff_time: '07:30'
-      });
-    }
+    if (isTimeOut) {
+      if (existing) {
+        // Direct Database UPDATE targeting time_out, time_out_status, and merged status
+        const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (uniqueSessionsMap.get(scanDate)?.cutoff_time) || dbCutoff || getActiveFormationCutoff() || '07:30';
+        const cutoffMins = parseCutoffMinutes(activeCutoffStr);
+        const timeInMins = parseTimeToMinutes(existing.time_in);
+        const isLate = existing.time_in_status === 'LATE' || (!isNaN(timeInMins) && timeInMins > cutoffMins);
+        const finalStatus = isLate ? 'LATE' : 'PRESENT';
 
-    // Existing record in DB or previously merged in this batch
-    const existing = mergedRowsMap.get(key) || existingDbMap.get(key) || null;
+        const updatePromise = client
+          .from('attendance_logs')
+          .update({
+            time_out: scanTimestamp,
+            time_out_status: 'PRESENT',
+            scan_mode: 'Time-Out',
+            status: finalStatus,
+            final_daily_status: finalStatus,
+            duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || existing.duty_officer,
+            session_name: rawScan.session_name || rawScan.sessionName || existing.session_name,
+            updated_at: new Date().toISOString()
+          })
+          .eq('cadet_id', cid)
+          .eq('date', scanDate);
 
-    const isTimeOutScan = log.scanMode === 'Time-Out' ||
-      log.m === 0 ||
-      log.mode === 'TIME_OUT' ||
-      (log.status && String(log.status).toUpperCase().includes('TIME-OUT'));
-
-    let finalTimeIn = null;
-    let finalTimeOut = null;
-
-    if (existing) {
-      if (isTimeOutScan) {
-        // Rule 2 (TIME-OUT Scan on existing record):
-        // Preserve existing time_in and attach new time_out
-        finalTimeIn = existing.time_in || existing.timeIn || null;
-        finalTimeOut = log.timestamp || log.timeOut || existing.time_out || existing.timeOut || null;
+        updatePromises.push(updatePromise);
       } else {
-        // Rule 1 (TIME-IN Scan on existing record):
-        // Keep or update time_in, preserve existing time_out
-        finalTimeIn = log.timestamp || log.timeIn || existing.time_in || existing.timeIn || null;
-        finalTimeOut = existing.time_out || existing.timeOut || log.timeOut || null;
+        // No existing time-in: Insert new record with NO TIME-IN
+        upsertRows.push({
+          cadet_id: cid,
+          name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : cadetMeta.name,
+          rank: rawScan.rank || cadetMeta.rank,
+          battalion: rawScan.battalion || cadetMeta.battalion,
+          company: rawScan.company || cadetMeta.company,
+          platoon: rawScan.platoon || cadetMeta.platoon,
+          designation: rawScan.designation || cadetMeta.designation || 'N/A',
+          date: scanDate,
+          time_in: null,
+          time_out: scanTimestamp,
+          timestamp: scanTimestamp,
+          scan_mode: 'Time-Out',
+          time_in_status: 'NO TIME-IN',
+          time_out_status: 'PRESENT',
+          status: 'NO TIME-IN',
+          final_daily_status: 'NO TIME-IN',
+          duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || 'Duty Officer',
+          session_name: rawScan.session_name || rawScan.sessionName || `Formation Session (${scanDate})`,
+          received_at: new Date().toISOString()
+        });
       }
     } else {
-      if (isTimeOutScan) {
-        // Rule 2 (TIME-OUT Scan with NO existing record):
-        finalTimeIn = log.timeIn || null;
-        finalTimeOut = log.timestamp || log.timeOut || null;
+      // TIME-IN Scan evaluated against dynamic active formation cutoff
+      const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (uniqueSessionsMap.get(scanDate)?.cutoff_time) || dbCutoff || getActiveFormationCutoff() || '07:30';
+      const cutoffMins = parseCutoffMinutes(activeCutoffStr);
+      const timeInMins = parseTimeToMinutes(scanTimestamp);
+      const isLate = !isNaN(timeInMins) && timeInMins > cutoffMins;
+      const timeInStat = isLate ? 'LATE' : 'PRESENT';
+
+      if (existing && existing.time_out) {
+        // Has existing time_out: direct update time_in and complete status
+        const finalStatus = isLate ? 'LATE' : 'PRESENT';
+        const updatePromise = client
+          .from('attendance_logs')
+          .update({
+            time_in: scanTimestamp,
+            time_in_status: timeInStat,
+            scan_mode: 'Time-In',
+            status: finalStatus,
+            final_daily_status: finalStatus,
+            updated_at: new Date().toISOString()
+          })
+          .eq('cadet_id', cid)
+          .eq('date', scanDate);
+
+        updatePromises.push(updatePromise);
       } else {
-        // Rule 1 (TIME-IN Scan with NO existing record):
-        finalTimeIn = log.timestamp || log.timeIn || null;
-        finalTimeOut = log.timeOut || null;
+        upsertRows.push({
+          cadet_id: cid,
+          name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : (existing?.name || cadetMeta.name),
+          rank: rawScan.rank || existing?.rank || cadetMeta.rank,
+          battalion: rawScan.battalion || existing?.battalion || cadetMeta.battalion,
+          company: rawScan.company || existing?.company || cadetMeta.company,
+          platoon: rawScan.platoon || existing?.platoon || cadetMeta.platoon,
+          designation: rawScan.designation || existing?.designation || cadetMeta.designation || 'N/A',
+          date: scanDate,
+          time_in: scanTimestamp,
+          time_out: existing?.time_out || null,
+          timestamp: scanTimestamp,
+          scan_mode: 'Time-In',
+          time_in_status: timeInStat,
+          time_out_status: existing?.time_out ? 'PRESENT' : 'NO TIME-OUT',
+          status: timeInStat,
+          final_daily_status: existing?.time_out ? timeInStat : (isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT'),
+          duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || existing?.duty_officer || 'Duty Officer',
+          session_name: rawScan.session_name || rawScan.sessionName || existing?.session_name || `Formation Session (${scanDate})`,
+          received_at: new Date().toISOString()
+        });
       }
     }
+  }
 
-    // Helper: Determine if Time-In was late (after 07:30 cutoff)
-    let isLate = false;
-    if (finalTimeIn) {
-      const timeInDate = new Date(finalTimeIn);
-      if (!isNaN(timeInDate.getTime())) {
-        const mins = timeInDate.getHours() * 60 + timeInDate.getMinutes();
-        isLate = mins > 450; // 07:30 AM = 450 minutes
+  // Execute all direct updates in parallel
+  if (updatePromises.length > 0) {
+    const updateResults = await Promise.allSettled(updatePromises);
+    updateResults.forEach((res) => {
+      if (res.status === 'rejected' || res.value?.error) {
+        console.error('Direct attendance log update error:', res.reason || res.value?.error);
       }
-    }
+    });
+  }
 
-    // Reconcile status based on merged scans
-    const hasIn = Boolean(finalTimeIn);
-    const hasOut = Boolean(finalTimeOut);
-
-    let timeInStatus = 'ABSENT';
-    let timeOutStatus = 'ABSENT';
-    let finalDailyStatus = 'ABSENT';
-
-    if (hasIn && hasOut) {
-      timeInStatus = isLate ? 'LATE' : 'PRESENT';
-      timeOutStatus = 'PRESENT';
-      finalDailyStatus = isLate ? 'LATE' : 'PRESENT';
-    } else if (hasIn && !hasOut) {
-      timeInStatus = isLate ? 'LATE' : 'PRESENT';
-      timeOutStatus = 'NO TIME-OUT';
-      finalDailyStatus = isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
-    } else if (!hasIn && hasOut) {
-      timeInStatus = 'NO TIME-IN';
-      timeOutStatus = 'PRESENT';
-      finalDailyStatus = 'NO TIME-IN';
-    }
-
-    const mergedRow = {
-      cadet_id: cid,
-      name: (log.name && log.name !== 'UNREGISTERED CADET') ? log.name : (existing?.name || cadetMeta.name),
-      rank: log.rank || existing?.rank || cadetMeta.rank,
-      battalion: log.battalion || existing?.battalion || cadetMeta.battalion,
-      company: log.company || existing?.company || cadetMeta.company,
-      platoon: log.platoon || existing?.platoon || cadetMeta.platoon,
-      designation: log.designation || existing?.designation || cadetMeta.designation || 'N/A',
-      date: dateStr,
-      time_in: finalTimeIn,
-      time_out: finalTimeOut,
-      timestamp: finalTimeIn || finalTimeOut || new Date().toISOString(),
-      scan_mode: isTimeOutScan ? 'Time-Out' : 'Time-In',
-      time_in_status: timeInStatus,
-      time_out_status: timeOutStatus,
-      status: finalDailyStatus === 'NO TIME-OUT' && !isLate ? 'PRESENT' : finalDailyStatus,
-      final_daily_status: finalDailyStatus,
-      duty_officer: log.dutyOfficer || existing?.duty_officer || 'Duty Officer',
-      session_name: log.sessionName || existing?.session_name || `Formation Session (${dateStr})`,
-      received_at: new Date().toISOString()
-    };
-
-    mergedRowsMap.set(key, mergedRow);
-  });
-
-  const finalRows = Array.from(mergedRowsMap.values());
-  if (finalRows.length === 0) return null;
-
-  try {
-    // 4. Ensure all referenced cadets exist in public.cadets to satisfy Foreign Key rules
-    const cadetRows = Array.from(uniqueCadetsMap.values());
-    const CADET_CHUNK_SIZE = 400;
-    for (let i = 0; i < cadetRows.length; i += CADET_CHUNK_SIZE) {
-      const chunk = cadetRows.slice(i, i + CADET_CHUNK_SIZE);
-      const { error: cadetErr } = await client
-        .from('cadets')
-        .upsert(chunk, { onConflict: 'id' });
-      if (cadetErr) {
-        console.warn('Note on auto-provisioning cadets in Supabase:', cadetErr);
-      }
-    }
-
-    // 5. Ensure daily session dates exist in attendance_sessions
-    const sessionRows = Array.from(uniqueSessionsMap.values());
-    for (const session of sessionRows) {
-      const { error: sessErr } = await client
-        .from('attendance_sessions')
-        .upsert(session, { onConflict: 'session_date' });
-      if (sessErr) {
-        console.warn('Note on auto-provisioning session in Supabase:', sessErr);
-      }
-    }
-
-    // 6. Upsert attendance logs (single-row merged model with cadet_id,date unique key)
+  // Execute upserts in chunks
+  if (upsertRows.length > 0) {
     const CHUNK_SIZE = 400;
-    for (let i = 0; i < finalRows.length; i += CHUNK_SIZE) {
-      const chunk = finalRows.slice(i, i + CHUNK_SIZE);
-      const { error: logErr } = await client
+    for (let i = 0; i < upsertRows.length; i += CHUNK_SIZE) {
+      const chunk = upsertRows.slice(i, i + CHUNK_SIZE);
+      const { error } = await client
         .from('attendance_logs')
         .upsert(chunk, { onConflict: 'cadet_id,date' });
-      if (logErr) throw logErr;
+      if (error) {
+        console.error('Batch attendance upsert error:', error);
+      }
+    }
+  }
+
+  // 4. Recalculate session aggregates
+  for (const sDate of uniqueDates) {
+    try {
+      const { data: dateLogs } = await client
+        .from('attendance_logs')
+        .select('final_daily_status, status')
+        .eq('date', sDate);
+
+      if (dateLogs && dateLogs.length > 0) {
+        const totalScanned = dateLogs.length;
+        const presentCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'PRESENT' || (l.final_daily_status || l.status) === 'PRESENT (Complete)').length;
+        const lateCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'LATE' || (l.final_daily_status || l.status) === 'LATE (Complete)').length;
+
+        await client
+          .from('attendance_sessions')
+          .update({
+            total_scanned: totalScanned,
+            present_count: presentCount,
+            late_count: lateCount,
+            updated_at: new Date().toISOString()
+          })
+          .eq('session_date', sDate);
+      }
+    } catch (_) {}
+  }
+
+  return { success: true, count: batchScans.length };
+}
+
+/**
+ * Bulk upserts attendance records to Supabase with automatic Cadet & Session provisioning
+ */
+export async function bulkUpsertAttendanceToSupabase(logs, sessionDate = null) {
+  return ingestBatchToSupabase(logs, sessionDate);
+}
+
+/**
+ * Synchronizes formation cutoff time to both system_settings and today's attendance_sessions row in Supabase.
+ */
+export async function syncSessionCutoffTime(newCutoffTime) {
+  const client = getSupabaseClient();
+  if (!client || !newCutoffTime) return false;
+
+  const today = toDateKey(new Date());
+  const cleanCutoff = String(newCutoffTime).trim();
+
+  try {
+    // 1. Update system_settings table (singleton record)
+    const { data: existingSettings } = await client
+      .from('system_settings')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1);
+
+    if (existingSettings && existingSettings.length > 0) {
+      await client
+        .from('system_settings')
+        .update({
+          formation_cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingSettings[0].id);
+    } else {
+      await client
+        .from('system_settings')
+        .insert({
+          formation_cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        });
     }
 
-    // 7. Update attendance_sessions aggregate statistics for all affected dates
-    for (const dateStr of uniqueSessionsMap.keys()) {
-      try {
-        const { data: dateLogs } = await client
-          .from('attendance_logs')
-          .select('final_daily_status, status')
-          .eq('date', dateStr);
+    // 2. Update active today session in attendance_sessions table
+    await client
+      .from('attendance_sessions')
+      .update({
+        cutoff_time: cleanCutoff,
+        updated_at: new Date().toISOString()
+      })
+      .eq('session_date', today);
 
-        if (dateLogs && dateLogs.length > 0) {
-          const totalScanned = dateLogs.length;
-          const presentCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'PRESENT' || (l.final_daily_status || l.status) === 'PRESENT (Complete)').length;
-          const lateCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'LATE' || (l.final_daily_status || l.status) === 'LATE (Complete)').length;
-
-          await client
-            .from('attendance_sessions')
-            .update({
-              total_scanned: totalScanned,
-              present_count: presentCount,
-              late_count: lateCount,
-              updated_at: new Date().toISOString()
-            })
-            .eq('session_date', dateStr);
-        }
-      } catch (_) {}
-    }
-
-    return finalRows;
+    return true;
   } catch (err) {
-    console.error('Supabase bulk upsert error:', err);
-    return null;
+    console.error('syncSessionCutoffTime error:', err);
+    return false;
   }
 }
 
@@ -681,11 +767,11 @@ export async function fetchSettingsFromSupabase() {
     const { data, error } = await client
       .from('system_settings')
       .select('*')
-      .limit(1)
-      .single();
+      .order('updated_at', { ascending: false })
+      .limit(1);
 
-    if (error && error.code !== 'PGRST116') throw error;
-    return data;
+    if (error) throw error;
+    return (data && data.length > 0) ? data[0] : null;
   } catch (err) {
     console.error('Supabase fetch settings error:', err);
     return null;
@@ -693,36 +779,115 @@ export async function fetchSettingsFromSupabase() {
 }
 
 /**
- * Saves system settings to Supabase
+ * Saves system settings to Supabase across all 4 tab sections:
+ * Tab 1: Muster & Unit (formation_cutoff_time, total_unit_target, unit_structure)
+ * Tab 2: Unit Branding (unit_name, commanding_officer, host_institution, parent_command, rotc_seal_url, university_logo_url)
+ * Tab 3: Exports & Letters (excel_export_path, letterhead_config, auto_backup_enabled)
+ * Tab 4: ID Printing (id_signatory_name, id_signatory_title, id_signature_url, id_card_orientation, officer_ranks_list, officer_roles_list)
  */
 export async function saveSettingsToSupabase(settings) {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
-    const payload = {
-      formation_cutoff_time: settings.formationCutoffTime || '07:30',
-      formation_tardy_grace: Number(settings.formationTardyGrace || 15),
-      cadet_quota_per_platoon: Number(settings.cadetQuotaPerPlatoon || 37),
-      commanding_officer: settings.commandingOfficer || 'LTC RYAN L MARCELO INF (GSC) PA',
-      commanding_officer_title: settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit',
+    const cutoff = settings.morningCutoffTime || settings.formationCutoffTime || (settings.musterAndUnit && settings.musterAndUnit.timeInCutoff) || getActiveFormationCutoff() || '07:30';
+
+    let letterheadObj = settings.letterheadConfig || settings.letterhead_config || null;
+    if (!letterheadObj) {
+      try {
+        const savedLh = localStorage.getItem('csu_rotc_letterhead_settings');
+        if (savedLh) letterheadObj = JSON.parse(savedLh);
+      } catch (_) {}
+    }
+
+    const fullPayload = {
+      // Tab 1: Muster & Unit
+      formation_cutoff_time: cutoff,
+      formation_tardy_grace: Number(settings.formationTardyGrace ?? 15),
+      cadet_quota_per_platoon: Number(settings.cadetQuotaPerPlatoon ?? 37),
+      total_unit_target: Number(settings.totalUnitTarget || settings.unitTargetCapacity || 1184),
+      unit_structure: settings.unitStructure || null,
+
+      // Tab 2: Unit Branding
       unit_name: settings.unitName || '1501st CDC ROTC Unit',
+      commanding_officer: settings.commandingOfficer || 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+      commanding_officer_title: settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit',
       parent_command: settings.parentCommand || '15th RCDG, ARESCOM, Philippine Army',
       host_institution: settings.hostInstitution || 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
       rotc_seal_url: settings.rotcSealUrl || '/rotc-seal-transparent.png',
       university_logo_url: settings.universityLogoUrl || '/csu-logo.png',
+
+      // Tab 3: Exports & Letters
+      excel_export_path: settings.exportDirectory || settings.excelExportPath || './desktop_excel_reports/',
+      letterhead_config: letterheadObj,
       auto_backup_enabled: settings.autoBackupEnabled !== false,
+
+      // Tab 4: ID Printing
+      id_signatory_name: settings.signatoryName || settings.idSignatoryName || settings.commandingOfficer || 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+      id_signatory_title: settings.signatoryDesignation || settings.idSignatoryTitle || settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit',
+      id_signature_url: settings.signatureImageUrl || settings.idSignatureUrl || '',
+      id_card_orientation: settings.cardOrientation || settings.idCardOrientation || 'vertical',
+      officer_ranks_list: settings.officerRanks || settings.officer_ranks_list || null,
+      officer_roles_list: settings.officerDesignations || settings.officer_roles_list || null,
+
       updated_at: new Date().toISOString()
     };
 
-    const { data, error } = await client
+    // Update existing singleton row in system_settings if present, else insert
+    const { data: existingRows } = await client
       .from('system_settings')
-      .upsert(payload)
-      .select()
-      .single();
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1);
 
-    if (error) throw error;
-    return data;
+    let savedData = null;
+    let targetId = (existingRows && existingRows.length > 0) ? existingRows[0].id : null;
+
+    // Resilient upsert: attempts full payload first; if any column not yet migrated in DB, strips missing columns and retries
+    let attemptPayload = { ...fullPayload };
+    const maxAttempts = Object.keys(fullPayload).length + 2;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      let res;
+      if (targetId) {
+        res = await client
+          .from('system_settings')
+          .update(attemptPayload)
+          .eq('id', targetId)
+          .select()
+          .single();
+      } else {
+        res = await client
+          .from('system_settings')
+          .insert(attemptPayload)
+          .select()
+          .single();
+      }
+
+      if (!res.error) {
+        savedData = res.data;
+        break;
+      }
+
+      // Check if error is due to missing column in Supabase schema cache
+      if (res.error.code === 'PGRST204' || res.error.message?.includes('column')) {
+        const match = res.error.message.match(/'([^']+)' column/);
+        if (match && match[1] && match[1] in attemptPayload) {
+          delete attemptPayload[match[1]];
+          continue;
+        }
+      }
+
+      throw res.error;
+    }
+
+    // Propagate cutoff to today's session in attendance_sessions
+    const today = toDateKey(new Date());
+    await client
+      .from('attendance_sessions')
+      .update({ cutoff_time: cutoff, updated_at: new Date().toISOString() })
+      .eq('session_date', today);
+
+    return savedData;
   } catch (err) {
     console.error('Supabase save settings error:', err);
     return null;

@@ -10,21 +10,41 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ==============================================================================
 -- 2. TABLE: system_settings
--- Global administrative configurations, cutoff times, and commanding officer info
+-- Global administrative configurations, cutoff times, unit branding, and ID setup
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    
+    -- Tab 1: Muster & Unit Configuration
     formation_cutoff_time VARCHAR(10) NOT NULL DEFAULT '07:30',
     formation_tardy_grace INTEGER NOT NULL DEFAULT 15,
     cadet_quota_per_platoon INTEGER NOT NULL DEFAULT 37,
+    total_unit_target INTEGER NOT NULL DEFAULT 1184,
+    unit_structure JSONB,
+    
+    -- Tab 2: Unit Branding
+    unit_name VARCHAR(255) NOT NULL DEFAULT '1501st CDC ROTC Unit',
     commanding_officer VARCHAR(255) NOT NULL DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     commanding_officer_title VARCHAR(255) NOT NULL DEFAULT 'Commandant, CSU ROTC Unit',
-    unit_name VARCHAR(255) NOT NULL DEFAULT '1501st CDC ROTC Unit',
     parent_command VARCHAR(255) NOT NULL DEFAULT '15th RCDG, ARESCOM, Philippine Army',
     host_institution VARCHAR(255) NOT NULL DEFAULT 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
     rotc_seal_url TEXT DEFAULT '/rotc-seal-transparent.png',
     university_logo_url TEXT DEFAULT '/csu-logo.png',
+    
+    -- Tab 3: Data Management & Exports
+    excel_export_path TEXT DEFAULT './desktop_excel_reports/',
+    letterhead_config JSONB,
+    auto_excel_export BOOLEAN NOT NULL DEFAULT true,
     auto_backup_enabled BOOLEAN NOT NULL DEFAULT true,
+    
+    -- Tab 4: ROTC ID Printing Setup
+    id_signatory_name VARCHAR(255) DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+    id_signatory_title VARCHAR(255) DEFAULT 'Commandant, CSU ROTC Unit',
+    id_signature_url TEXT DEFAULT '',
+    id_card_orientation VARCHAR(20) NOT NULL DEFAULT 'vertical',
+    officer_ranks_list JSONB,
+    officer_roles_list JSONB,
+    
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
