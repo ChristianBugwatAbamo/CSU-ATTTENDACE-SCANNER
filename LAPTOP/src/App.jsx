@@ -412,6 +412,8 @@ function toDateKey(dateInput) {
             timeOutStatus: reconciled.timeOutStatus,
             finalDailyStatus: reconciled.finalDailyStatus,
             status: reconciled.finalDailyStatus,
+            dutyOfficer: rawRecord.dutyOfficer || rawRecord.duty_officer || 'Duty Officer',
+            sessionName: rawRecord.sessionName || rawRecord.session_name || 'Formation Session',
             timestamp: rawRecord.timestamp,
             receivedAt: new Date().toISOString()
           };

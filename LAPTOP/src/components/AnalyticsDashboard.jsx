@@ -13,7 +13,7 @@ import {
   normalizePlatoon
 } from '../utils/attendanceStatus';
 import { useAttendanceData } from '../hooks/useAttendanceData';
-import { subscribeToAttendanceRealtime } from '../utils/supabaseClient';
+import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase } from '../utils/supabaseClient';
 
 function toDateKey(dateInput) {
   if (!dateInput) return '';
@@ -367,14 +367,42 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     };
   }, [propsCadets, rawMasterLogs, unitStructure]);
 
+  const [supabaseCadetCount, setSupabaseCadetCount] = useState(null);
+
+  // Fetch real-time Total Cadets from Supabase
+  useEffect(() => {
+    let isMounted = true;
+    const fetchUnitStrength = async () => {
+      try {
+        const count = await fetchCadetCountFromSupabase();
+        if (isMounted && typeof count === 'number' && count >= 0) {
+          setSupabaseCadetCount(count);
+        }
+      } catch (err) {
+        console.error('Error fetching cadet count:', err);
+      }
+    };
+
+    fetchUnitStrength();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [propsCadets, rawMasterLogs]);
+
+  // Dynamic Total Unit Strength: prefer real-time Supabase count, falling back to local roster aggregate
+  const totalStrength = typeof supabaseCadetCount === 'number' && supabaseCadetCount > 0
+    ? supabaseCadetCount
+    : dynamicHierarchy.totalUnitStrength;
+
   const totalBasicQuota = dynamicHierarchy.totalBasicStrength;
   const totalOfficerQuota = dynamicHierarchy.totalOfficerStrength;
-  const totalUnitStrengthQuota = dynamicHierarchy.totalUnitStrength;
+  const totalUnitStrengthQuota = totalStrength;
 
   // Expected Target Capacity from Unit Configuration Settings
   const totalConfiguredBasicCapacity = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
   const totalConfiguredOfficerCapacity = 60;
-  const totalConfiguredCapacity = totalConfiguredBasicCapacity + totalConfiguredOfficerCapacity;
+  const totalConfiguredCapacity = totalStrength;
 
   const totalPlatoonsCount = dynamicHierarchy.battalions.reduce((acc, bn) => {
     return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
@@ -784,15 +812,13 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             <div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {dynamicHierarchy.totalUnitStrength} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>{totalConfiguredCapacity > 0 ? `/ ${totalConfiguredCapacity} Target Capacity` : '/ 0'}</span>
+                {totalStrength} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalStrength} Target Capacity</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            {dynamicHierarchy.totalUnitStrength > 0
-              ? (totalConfiguredCapacity > 0
-                ? `${Math.min(100, Math.round((dynamicHierarchy.totalUnitStrength / totalConfiguredCapacity) * 100))}% of Target Capacity (${dynamicHierarchy.totalUnitStrength} Cadets)`
-                : `${dynamicHierarchy.totalUnitStrength} Cadets Registered`)
+            {totalStrength > 0
+              ? `100% of Enrolled Roster (${totalStrength} Cadets)`
               : '0 Cadets Registered in Master Roster'}
           </div>
         </div>

@@ -83,7 +83,7 @@ CREATE INDEX IF NOT EXISTS idx_cadets_name ON public.cadets(name);
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.attendance_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    session_date DATE NOT NULL UNIQUE,
+    session_date DATE NOT NULL,
     session_name VARCHAR(255) NOT NULL,
     duty_officer VARCHAR(255) NOT NULL,
     cutoff_time VARCHAR(10) NOT NULL DEFAULT '07:30',
@@ -93,10 +93,12 @@ CREATE TABLE IF NOT EXISTS public.attendance_sessions (
     absent_count INTEGER NOT NULL DEFAULT 0,
     is_locked BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_session_date_duty_officer UNIQUE (session_date, duty_officer)
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_date ON public.attendance_sessions(session_date DESC);
+CREATE INDEX IF NOT EXISTS idx_sessions_officer ON public.attendance_sessions(duty_officer);
 
 -- ==============================================================================
 -- 5. TABLE: attendance_logs (Master Attendance & Scan Records)

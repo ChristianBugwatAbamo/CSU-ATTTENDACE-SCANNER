@@ -137,14 +137,21 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
     playSuccessBeep();
 
-    const batchRecords = (batch.records || []).map((r) => ({
-      ...r,
-      dutyOfficer: r.dutyOfficer || batch.dutyOfficer || 'Duty Officer',
-      sessionName: r.sessionName || batch.sessionName || 'Formation Session',
-      battalion: r.battalion || batch.battalion || '1st Battalion',
-      company: r.company || batch.company || 'Alpha Company',
-      platoon: r.platoon || batch.platoon || '1st Platoon'
-    }));
+    const batchRecords = (batch.records || []).map((r) => {
+      const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
+      const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
+      return {
+        ...r,
+        cadetId: cid,
+        cadet_id: cid,
+        dutyOfficer: officer,
+        duty_officer: officer,
+        sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
+        battalion: r.battalion || batch.battalion || '1st Battalion',
+        company: r.company || batch.company || 'Alpha Company',
+        platoon: r.platoon || batch.platoon || '1st Platoon'
+      };
+    });
 
     // Commit to master attendance logs
     if (onSyncComplete) {
@@ -209,14 +216,21 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
     let allEnrichedRecords = [];
     pendingBatches.forEach((batch) => {
-      const batchRecords = (batch.records || []).map((r) => ({
-        ...r,
-        dutyOfficer: r.dutyOfficer || batch.dutyOfficer || 'Duty Officer',
-        sessionName: r.sessionName || batch.sessionName || 'Formation Session',
-        battalion: r.battalion || batch.battalion || '1st Battalion',
-        company: r.company || batch.company || 'Alpha Company',
-        platoon: r.platoon || batch.platoon || '1st Platoon'
-      }));
+      const batchRecords = (batch.records || []).map((r) => {
+        const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
+        const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
+        return {
+          ...r,
+          cadetId: cid,
+          cadet_id: cid,
+          dutyOfficer: officer,
+          duty_officer: officer,
+          sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
+          battalion: r.battalion || batch.battalion || '1st Battalion',
+          company: r.company || batch.company || 'Alpha Company',
+          platoon: r.platoon || batch.platoon || '1st Platoon'
+        };
+      });
 
       allEnrichedRecords = allEnrichedRecords.concat(batchRecords);
       if (batch.signature) {

@@ -91,6 +91,26 @@ export async function fetchCadetsFromSupabase() {
 }
 
 /**
+ * Fetches exact registered cadet count from Supabase
+ */
+export async function fetchCadetCountFromSupabase() {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const { count, error } = await client
+      .from('cadets')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) throw error;
+    return count;
+  } catch (err) {
+    console.error('Supabase fetch cadet count error:', err);
+    return null;
+  }
+}
+
+/**
  * Adds a new cadet to Supabase
  */
 export async function addCadetToSupabase(cadet) {
@@ -380,32 +400,63 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     }
   } catch (_) {}
 
-  // 1. Auto-provision any un-provisioned cadets & sessions first
+  // 1. Group scans by (scanDate, dutyOfficer) to establish distinct session rows per Duty Officer
   const uniqueCadetsMap = new Map();
-  const uniqueSessionsMap = new Map();
+  const sessionGroupsMap = new Map();
+
+  // Detect active duty officer from incoming batch scans or local settings
+  let detectedDutyOfficer = null;
+  for (const scan of batchScans) {
+    const doName = scan.duty_officer || scan.dutyOfficer || scan.d;
+    if (doName && doName !== 'Duty Officer' && String(doName).trim() !== '') {
+      detectedDutyOfficer = String(doName).trim();
+      break;
+    }
+  }
+
+  if (!detectedDutyOfficer) {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.activeDutyOfficer) detectedDutyOfficer = parsed.activeDutyOfficer;
+        else if (parsed.signatoryName) detectedDutyOfficer = parsed.signatoryName;
+        else if (parsed.commandingOfficer) detectedDutyOfficer = parsed.commandingOfficer;
+      }
+    } catch (_) {}
+  }
 
   batchScans.forEach(scan => {
     const cid = String(scan.cadet_id || scan.cadetId || scan.id || scan.i || '').trim().toUpperCase();
     if (!cid) return;
     const scanDate = toDateKey(scan.date || scan.session_date || scan.sessionDate || scan.timestamp) || defaultDate;
+    const scanDutyOfficer = (scan.duty_officer && scan.duty_officer !== 'Duty Officer')
+      ? scan.duty_officer
+      : (scan.dutyOfficer && scan.dutyOfficer !== 'Duty Officer' ? scan.dutyOfficer : detectedDutyOfficer) || 'HQ Duty Officer';
+
+    const groupKey = `${scanDate}__${scanDutyOfficer}`;
+
+    if (!sessionGroupsMap.has(groupKey)) {
+      const dObj = new Date(`${scanDate}T12:00:00`);
+      const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
+      const platoonName = scan.platoon || scan.pl || null;
+      const defaultTitle = scan.session_name || scan.sessionName || (platoonName && platoonName !== '1st Platoon'
+        ? `Saturday Formation (${platoonName}) - ${scanDate}`
+        : (dayOfWeek === 6 ? `Saturday Formation & Muster (${scanDate})` : `Daily Training & Drill Session (${scanDate})`));
+
+      sessionGroupsMap.set(groupKey, {
+        sessionDate: scanDate,
+        dutyOfficer: scanDutyOfficer,
+        sessionName: defaultTitle,
+        cutoffTime: scan.cutoff_time || scan.cutoffTime || dbCutoff || '07:30',
+        scans: []
+      });
+    }
+
+    sessionGroupsMap.get(groupKey).scans.push(scan);
 
     if (!uniqueCadetsMap.has(cid)) {
       uniqueCadetsMap.set(cid, inferCadetFromId(cid, scan));
-    }
-
-    if (!uniqueSessionsMap.has(scanDate)) {
-      const dObj = new Date(`${scanDate}T12:00:00`);
-      const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
-      const defaultTitle = dayOfWeek === 6
-        ? `Saturday Formation & Muster (${scanDate})`
-        : `Daily Training & Drill Session (${scanDate})`;
-
-      uniqueSessionsMap.set(scanDate, {
-        session_date: scanDate,
-        session_name: scan.session_name || scan.sessionName || defaultTitle,
-        duty_officer: scan.duty_officer || scan.dutyOfficer || 'Duty Officer',
-        cutoff_time: scan.cutoff_time || scan.cutoffTime || dbCutoff || '07:30'
-      });
     }
   });
 
@@ -419,16 +470,24 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     } catch (_) {}
   }
 
-  // Provision sessions
-  const sessionRows = Array.from(uniqueSessionsMap.values());
-  for (const session of sessionRows) {
+  // Provision distinct session rows per Duty Officer + Date
+  const sessionIdMap = new Map();
+  for (const [groupKey, group] of sessionGroupsMap.entries()) {
     try {
-      await client.from('attendance_sessions').upsert(session, { onConflict: 'session_date' });
+      const sessionObj = await ensureSessionWithDutyOfficer(
+        group.sessionDate,
+        group.dutyOfficer,
+        group.sessionName,
+        group.cutoffTime
+      );
+      if (sessionObj?.id) {
+        sessionIdMap.set(groupKey, sessionObj.id);
+      }
     } catch (_) {}
   }
 
   // 2. Fetch existing logs for these cadets & dates in one batch query
-  const uniqueDates = Array.from(uniqueSessionsMap.keys());
+  const uniqueDates = Array.from(new Set(Array.from(sessionGroupsMap.values()).map(g => g.sessionDate)));
   const uniqueCids = Array.from(uniqueCadetsMap.keys());
   const existingDbMap = new Map();
 
@@ -458,6 +517,9 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
 
     const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
     const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
+    const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'HQ Duty Officer';
+    const groupKey = `${scanDate}__${effectiveDutyOfficer}`;
+    const targetSessionId = sessionIdMap.get(groupKey) || null;
     const key = `${cid}__${scanDate}`;
     const existing = existingDbMap.get(key);
     const cadetMeta = uniqueCadetsMap.get(cid) || inferCadetFromId(cid, rawScan);
@@ -472,31 +534,34 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     if (isTimeOut) {
       if (existing) {
         // Direct Database UPDATE targeting time_out, time_out_status, and merged status
-        const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (uniqueSessionsMap.get(scanDate)?.cutoff_time) || dbCutoff || getActiveFormationCutoff() || '07:30';
+        const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (sessionGroupsMap.get(groupKey)?.cutoffTime) || dbCutoff || getActiveFormationCutoff() || '07:30';
         const cutoffMins = parseCutoffMinutes(activeCutoffStr);
         const timeInMins = parseTimeToMinutes(existing.time_in);
         const isLate = existing.time_in_status === 'LATE' || (!isNaN(timeInMins) && timeInMins > cutoffMins);
         const finalStatus = isLate ? 'LATE' : 'PRESENT';
 
+        const updatePayload = {
+          time_out: scanTimestamp,
+          time_out_status: 'PRESENT',
+          scan_mode: 'Time-Out',
+          status: finalStatus,
+          final_daily_status: finalStatus,
+          duty_officer: effectiveDutyOfficer,
+          session_name: rawScan.session_name || rawScan.sessionName || existing.session_name,
+          updated_at: new Date().toISOString()
+        };
+        if (targetSessionId) updatePayload.session_id = targetSessionId;
+
         const updatePromise = client
           .from('attendance_logs')
-          .update({
-            time_out: scanTimestamp,
-            time_out_status: 'PRESENT',
-            scan_mode: 'Time-Out',
-            status: finalStatus,
-            final_daily_status: finalStatus,
-            duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || existing.duty_officer,
-            session_name: rawScan.session_name || rawScan.sessionName || existing.session_name,
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('cadet_id', cid)
           .eq('date', scanDate);
 
         updatePromises.push(updatePromise);
       } else {
         // No existing time-in: Insert new record with NO TIME-IN
-        upsertRows.push({
+        const insertRow = {
           cadet_id: cid,
           name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : cadetMeta.name,
           rank: rawScan.rank || cadetMeta.rank,
@@ -513,14 +578,16 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           time_out_status: 'PRESENT',
           status: 'NO TIME-IN',
           final_daily_status: 'NO TIME-IN',
-          duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || 'Duty Officer',
+          duty_officer: effectiveDutyOfficer,
           session_name: rawScan.session_name || rawScan.sessionName || `Formation Session (${scanDate})`,
           received_at: new Date().toISOString()
-        });
+        };
+        if (targetSessionId) insertRow.session_id = targetSessionId;
+        upsertRows.push(insertRow);
       }
     } else {
       // TIME-IN Scan evaluated against dynamic active formation cutoff
-      const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (uniqueSessionsMap.get(scanDate)?.cutoff_time) || dbCutoff || getActiveFormationCutoff() || '07:30';
+      const activeCutoffStr = rawScan.cutoff_time || rawScan.cutoffTime || (sessionGroupsMap.get(groupKey)?.cutoffTime) || dbCutoff || getActiveFormationCutoff() || '07:30';
       const cutoffMins = parseCutoffMinutes(activeCutoffStr);
       const timeInMins = parseTimeToMinutes(scanTimestamp);
       const isLate = !isNaN(timeInMins) && timeInMins > cutoffMins;
@@ -529,22 +596,26 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
       if (existing && existing.time_out) {
         // Has existing time_out: direct update time_in and complete status
         const finalStatus = isLate ? 'LATE' : 'PRESENT';
+        const updatePayload = {
+          time_in: scanTimestamp,
+          time_in_status: timeInStat,
+          scan_mode: 'Time-In',
+          status: finalStatus,
+          final_daily_status: finalStatus,
+          duty_officer: effectiveDutyOfficer,
+          updated_at: new Date().toISOString()
+        };
+        if (targetSessionId) updatePayload.session_id = targetSessionId;
+
         const updatePromise = client
           .from('attendance_logs')
-          .update({
-            time_in: scanTimestamp,
-            time_in_status: timeInStat,
-            scan_mode: 'Time-In',
-            status: finalStatus,
-            final_daily_status: finalStatus,
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('cadet_id', cid)
           .eq('date', scanDate);
 
         updatePromises.push(updatePromise);
       } else {
-        upsertRows.push({
+        const insertRow = {
           cadet_id: cid,
           name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : (existing?.name || cadetMeta.name),
           rank: rawScan.rank || existing?.rank || cadetMeta.rank,
@@ -561,10 +632,12 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           time_out_status: existing?.time_out ? 'PRESENT' : 'NO TIME-OUT',
           status: timeInStat,
           final_daily_status: existing?.time_out ? timeInStat : (isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT'),
-          duty_officer: rawScan.duty_officer || rawScan.dutyOfficer || existing?.duty_officer || 'Duty Officer',
+          duty_officer: effectiveDutyOfficer,
           session_name: rawScan.session_name || rawScan.sessionName || existing?.session_name || `Formation Session (${scanDate})`,
           received_at: new Date().toISOString()
-        });
+        };
+        if (targetSessionId) insertRow.session_id = targetSessionId;
+        upsertRows.push(insertRow);
       }
     }
   }
@@ -572,34 +645,69 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
   // Execute all direct updates in parallel
   if (updatePromises.length > 0) {
     const updateResults = await Promise.allSettled(updatePromises);
-    updateResults.forEach((res) => {
-      if (res.status === 'rejected' || res.value?.error) {
-        console.error('Direct attendance log update error:', res.reason || res.value?.error);
+    for (let idx = 0; idx < updateResults.length; idx++) {
+      const res = updateResults[idx];
+      const err = res.status === 'rejected' ? res.reason : res.value?.error;
+      if (err && (err.code === 'PGRST204' || String(err.message).includes('session_id'))) {
+        // Fallback retry without session_id
+        const rawScan = batchScans[idx] || {};
+        const cid = String(rawScan.cadet_id || rawScan.cadetId || rawScan.id || rawScan.i || '').trim().toUpperCase();
+        const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
+        const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
+        const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'HQ Duty Officer';
+
+        try {
+          await client
+            .from('attendance_logs')
+            .update({
+              time_out: scanTimestamp,
+              time_out_status: 'PRESENT',
+              duty_officer: effectiveDutyOfficer,
+              updated_at: new Date().toISOString()
+            })
+            .eq('cadet_id', cid)
+            .eq('date', scanDate);
+        } catch (_) {}
+      } else if (err) {
+        console.error('Direct attendance log update error:', err);
       }
-    });
+    }
   }
 
-  // Execute upserts in chunks
+  // Execute upserts in chunks with resilient schema fallback
   if (upsertRows.length > 0) {
     const CHUNK_SIZE = 400;
     for (let i = 0; i < upsertRows.length; i += CHUNK_SIZE) {
-      const chunk = upsertRows.slice(i, i + CHUNK_SIZE);
-      const { error } = await client
+      let chunk = upsertRows.slice(i, i + CHUNK_SIZE);
+      let { error } = await client
         .from('attendance_logs')
         .upsert(chunk, { onConflict: 'cadet_id,date' });
+
+      if (error && (error.code === 'PGRST204' || String(error.message).includes('session_id'))) {
+        const strippedChunk = chunk.map(row => {
+          const { session_id, ...rest } = row;
+          return rest;
+        });
+        const retryResult = await client
+          .from('attendance_logs')
+          .upsert(strippedChunk, { onConflict: 'cadet_id,date' });
+        error = retryResult.error;
+      }
+
       if (error) {
         console.error('Batch attendance upsert error:', error);
       }
     }
   }
 
-  // 4. Recalculate session aggregates
-  for (const sDate of uniqueDates) {
+  // 4. Recalculate session aggregates for each session group
+  for (const group of sessionGroupsMap.values()) {
     try {
       const { data: dateLogs } = await client
         .from('attendance_logs')
         .select('final_daily_status, status')
-        .eq('date', sDate);
+        .eq('date', group.sessionDate)
+        .eq('duty_officer', group.dutyOfficer);
 
       if (dateLogs && dateLogs.length > 0) {
         const totalScanned = dateLogs.length;
@@ -614,7 +722,8 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
             late_count: lateCount,
             updated_at: new Date().toISOString()
           })
-          .eq('session_date', sDate);
+          .eq('session_date', group.sessionDate)
+          .eq('duty_officer', group.dutyOfficer);
       }
     } catch (_) {}
   }
@@ -627,6 +736,115 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
  */
 export async function bulkUpsertAttendanceToSupabase(logs, sessionDate = null) {
   return ingestBatchToSupabase(logs, sessionDate);
+}
+
+/**
+ * Ensures attendance_sessions record exists for sessionDate specific to this Duty Officer.
+ * Architecture: Distinct session row per (session_date, duty_officer) batch.
+ */
+export async function ensureSessionWithDutyOfficer(sessionDate, officerName = null, sessionTitle = null, cutoffTime = null) {
+  const client = getSupabaseClient();
+  if (!client || !sessionDate) return null;
+
+  let dutyOfficerName = officerName && officerName !== 'Duty Officer' && String(officerName).trim() !== ''
+    ? String(officerName).trim()
+    : null;
+
+  // Fallback to active admin settings if no officer name was provided in the batch
+  if (!dutyOfficerName) {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.activeDutyOfficer) dutyOfficerName = parsed.activeDutyOfficer;
+        else if (parsed.signatoryName) dutyOfficerName = parsed.signatoryName;
+        else if (parsed.commandingOfficer) dutyOfficerName = parsed.commandingOfficer;
+      }
+    } catch (_) {}
+  }
+
+  const finalOfficer = dutyOfficerName || 'HQ Duty Officer';
+  const activeCutoff = cutoffTime || getActiveFormationCutoff() || '07:30';
+
+  try {
+    // 1. Check if a session already exists for this (session_date, duty_officer)
+    const { data: existingSession, error: fetchErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, present_count, late_count')
+      .eq('session_date', sessionDate)
+      .eq('duty_officer', finalOfficer)
+      .maybeSingle();
+
+    if (existingSession) {
+      return existingSession;
+    }
+
+    // 2. Insert new distinct session row for this Duty Officer + Date
+    const dObj = new Date(`${sessionDate}T12:00:00`);
+    const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
+    const defaultTitle = sessionTitle || (dayOfWeek === 6
+      ? `Saturday Formation & Muster (${sessionDate})`
+      : `Daily Training & Drill Session (${sessionDate})`);
+
+    const { data: newSession, error: insertErr } = await client
+      .from('attendance_sessions')
+      .insert({
+        session_date: sessionDate,
+        session_name: defaultTitle,
+        duty_officer: finalOfficer,
+        cutoff_time: activeCutoff
+      })
+      .select()
+      .maybeSingle();
+
+    if (!insertErr && newSession) {
+      return newSession;
+    }
+
+    // Fallback if unique constraint on session_date still exists in DB before migration SQL
+    if (insertErr) {
+      const { data: fallbackSession } = await client
+        .from('attendance_sessions')
+        .select('id, session_date, session_name, duty_officer, cutoff_time')
+        .eq('session_date', sessionDate)
+        .maybeSingle();
+
+      if (fallbackSession) {
+        await client
+          .from('attendance_sessions')
+          .update({ duty_officer: finalOfficer, updated_at: new Date().toISOString() })
+          .eq('id', fallbackSession.id);
+        return fallbackSession;
+      }
+    }
+
+    return null;
+  } catch (err) {
+    console.error('ensureSessionWithDutyOfficer error:', err);
+    return null;
+  }
+}
+
+/**
+ * Ingestion handler for smartphone batch data.
+ * Creates or targets the session row specific to that Duty Officer + Date,
+ * and upserts all scanned cadets into attendance_logs attached to this session.
+ */
+export async function processIncomingBatch(batchData = {}) {
+  const { sessionDate, dutyOfficerName, platoon, scans = [] } = batchData;
+  const targetDate = sessionDate || toDateKey(new Date());
+  const officer = dutyOfficerName || 'HQ Duty Officer';
+
+  const mappedScans = (scans || []).map(scan => ({
+    ...scan,
+    cadet_id: scan.cadet_id || scan.cadetId || scan.id || scan.i,
+    date: targetDate,
+    duty_officer: officer,
+    platoon: scan.platoon || platoon || '1st Platoon',
+    session_name: scan.session_name || scan.sessionName || (platoon ? `Saturday Formation (${platoon}) - ${targetDate}` : `Formation Session (${targetDate})`)
+  }));
+
+  return ingestBatchToSupabase(mappedScans, targetDate);
 }
 
 /**

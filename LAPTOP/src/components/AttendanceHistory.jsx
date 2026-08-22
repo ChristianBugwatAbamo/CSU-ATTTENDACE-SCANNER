@@ -279,6 +279,14 @@ export default function AttendanceHistory({
   const [exportNotice, setExportNotice] = useState(null);
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
 
+  // Session cutoff snapshot: use the specific cutoff saved with this historical session,
+  // falling back to active global cutoff only if no session cutoff exists.
+  const selectedSessionCutoff = useMemo(() => {
+    if (!selectedDate) return formationCutoff;
+    const matchingSession = (dbSessions || []).find(s => s.dateKey === selectedDate && s.cutoffTime);
+    return matchingSession ? matchingSession.cutoffTime : formationCutoff;
+  }, [selectedDate, dbSessions, formationCutoff]);
+
   // 2. Reconcile complete cadet roster ONLY if the date has recorded formation data
   // Empty State Guard: If unrecorded, return 0 counts to prevent false absentee generation
   const { reconciledRoster, summary } = useMemo(() => {
@@ -299,9 +307,9 @@ export default function AttendanceHistory({
       effectiveCadets,
       effectiveLogs,
       new Date(`${selectedDate}T12:00:00`),
-      formationCutoff
+      selectedSessionCutoff
     );
-  }, [effectiveCadets, effectiveLogs, selectedDate, isRecordedDate, formationCutoff]);
+  }, [effectiveCadets, effectiveLogs, selectedDate, isRecordedDate, selectedSessionCutoff]);
 
   // Selected date session metadata
   const selectedDateMeta = useMemo(() => {
@@ -875,16 +883,6 @@ export default function AttendanceHistory({
               </div>
             </div>
           </div>
-          {onNavigateToSyncLogs && (
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              onClick={onNavigateToSyncLogs}
-              style={{ fontSize: '0.78rem', padding: '5px 12px', borderRadius: '6px', fontWeight: 700 }}
-            >
-              Open Live Master Records
-            </button>
-          )}
         </div>
       )}
 
