@@ -1,6 +1,87 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X, Archive, Calendar, History, UserX } from 'lucide-react';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ChevronLeft, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X, Archive, Calendar, History, UserX } from 'lucide-react';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Filler,
+  Legend,
+} from 'chart.js';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
+import { Line } from 'react-chartjs-2';
 import AttendanceHistory from './AttendanceHistory';
+
+// Register Chart.js components + DataLabels plugin
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Filler,
+  Legend,
+  ChartDataLabels
+);
+
+// --- Options for Attendance Trend (Percentages) ---
+const attendanceChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    datalabels: {
+      display: true,
+      align: 'top',
+      anchor: 'end',
+      color: '#1e293b',
+      font: { weight: 'bold', size: 11 },
+      formatter: (value) => `${value}%`, // Adds % above points (e.g., 58%, 100%)
+    },
+  },
+  scales: {
+    x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+    y: {
+      min: 0,
+      max: 100,
+      grid: { color: '#f1f5f9' },
+      ticks: {
+        font: { size: 10 },
+        stepSize: 20,
+        callback: (value) => `${value}%`, // Y-axis shows 0%, 20%, 40%... 100%
+      },
+    },
+  },
+};
+
+// --- Options for Cadet Growth (Raw Totals) ---
+const growthChartOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+    datalabels: {
+      display: true,
+      align: 'top',
+      anchor: 'end',
+      color: '#1e293b',
+      font: { weight: 'bold', size: 11 },
+      formatter: (value) => `${value}`, // Raw count above point (e.g., 12)
+    },
+  },
+  scales: {
+    x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+    y: {
+      beginAtZero: true,
+      grid: { color: '#f1f5f9' },
+      ticks: { font: { size: 10 }, precision: 0 },
+    },
+  },
+};
 import {
   getAttendanceStatus,
   getScannedUnitEchelon,
@@ -13,7 +94,185 @@ import {
   normalizePlatoon
 } from '../utils/attendanceStatus';
 import { useAttendanceData } from '../hooks/useAttendanceData';
-import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase } from '../utils/supabaseClient';
+import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, getSupabaseClient } from '../utils/supabaseClient';
+
+// Dynamic Hook to aggregate daily attendance & fetch real cadet registration growth
+export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
+  const [growthData, setGrowthData] = useState({
+    labels: ['Aug 2026'],
+    datasets: [{
+      fill: true,
+      label: 'Total Cadets Registered',
+      data: [totalCapacity || 12],
+      borderColor: '#0284c7',
+      backgroundColor: 'rgba(2, 132, 199, 0.15)',
+      tension: 0.3,
+      pointRadius: 4,
+      pointBackgroundColor: '#0284c7',
+    }]
+  });
+
+  const [trendData, setTrendData] = useState({
+    labels: ['Aug 22', 'Aug 24'],
+    datasets: [{
+      fill: true,
+      label: 'Total Scanned Cadets',
+      data: [12, 12],
+      borderColor: '#0284c7',
+      backgroundColor: 'rgba(2, 132, 199, 0.15)',
+      tension: 0.4,
+      pointRadius: 4,
+      pointBackgroundColor: '#0284c7',
+    }]
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadData() {
+      try {
+        const client = getSupabaseClient();
+
+        // --- 1. Cadet Growth (Real Database Count / Timestamps) ---
+        let totalCount = totalCapacity || 12;
+        let monthlyGrowthMap = new Map();
+
+        if (client) {
+          const { data: cadets } = await client
+            .from('cadets')
+            .select('created_at');
+
+          if (cadets && cadets.length > 0) {
+            totalCount = cadets.length;
+            // Group cadets by month created
+            cadets.forEach(c => {
+              const d = c.created_at ? new Date(c.created_at) : new Date();
+              const monthLabel = isNaN(d.getTime())
+                ? 'Aug 2026'
+                : d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+              monthlyGrowthMap.set(monthLabel, (monthlyGrowthMap.get(monthLabel) || 0) + 1);
+            });
+          }
+        }
+
+        if (isMounted) {
+          const growthLabels = monthlyGrowthMap.size > 0
+            ? Array.from(monthlyGrowthMap.keys())
+            : ['Aug 2026'];
+
+          let runningTotal = 0;
+          const growthCounts = monthlyGrowthMap.size > 0
+            ? Array.from(monthlyGrowthMap.values()).map(count => {
+                runningTotal += count;
+                return runningTotal;
+              })
+            : [totalCount];
+
+          setGrowthData({
+            labels: growthLabels,
+            datasets: [{
+              fill: true,
+              label: 'Total Cadets Registered',
+              data: growthCounts,
+              borderColor: '#0284c7',
+              backgroundColor: 'rgba(2, 132, 199, 0.15)',
+              tension: 0.3,
+              pointRadius: 4,
+              pointBackgroundColor: '#0284c7',
+            }]
+          });
+        }
+
+        // --- 2. Attendance Trend (Aggregated by Unique Calendar Date) ---
+        let dailyTotals = {};
+
+        if (client) {
+          const { data: sessions } = await client
+            .from('attendance_sessions')
+            .select('session_date, total_scanned, present_count, late_count')
+            .order('session_date', { ascending: true });
+
+          if (sessions && sessions.length > 0) {
+            // Group total scans by unique session_date so dates appear only once
+            dailyTotals = sessions.reduce((acc, curr) => {
+              const d = new Date(curr.session_date);
+              const dateStr = isNaN(d.getTime())
+                ? String(curr.session_date)
+                : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+              const scanned = (curr.total_scanned !== undefined && curr.total_scanned !== null)
+                ? curr.total_scanned
+                : ((curr.present_count || 0) + (curr.late_count || 0));
+
+              acc[dateStr] = (acc[dateStr] || 0) + (scanned || 0);
+              return acc;
+            }, {});
+          }
+        }
+
+        // Fallback / supplement with raw attendance_logs if sessions is empty or partial
+        if (Object.keys(dailyTotals).length === 0 && Array.isArray(rawLogs) && rawLogs.length > 0) {
+          const logsByDate = new Map();
+          rawLogs.forEach(l => {
+            const rawDate = l.date || l.timestamp || l.receivedAt;
+            if (!rawDate) return;
+            const dateKey = toDateKey(rawDate);
+            if (!dateKey) return;
+            if (!logsByDate.has(dateKey)) logsByDate.set(dateKey, new Set());
+            const cid = String(l.cadetId || l.id || '').trim();
+            if (cid) logsByDate.get(dateKey).add(cid);
+          });
+
+          const sortedDates = Array.from(logsByDate.keys()).sort();
+          sortedDates.forEach(dateKey => {
+            const [y, m, d] = dateKey.split('-').map(Number);
+            const dateObj = new Date(y, m - 1, d);
+            const dateStr = isNaN(dateObj.getTime())
+              ? dateKey
+              : dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            dailyTotals[dateStr] = logsByDate.get(dateKey).size;
+          });
+        }
+
+        const labels = Object.keys(dailyTotals);
+        const counts = Object.values(dailyTotals);
+
+        // Convert raw attendance counts to percentage of total active cadets
+        const baseCapacity = totalCount > 0 ? totalCount : (totalCapacity || 12);
+        const percentageRates = counts.map(cnt => {
+          const pct = Math.round(((cnt || 0) / baseCapacity) * 100);
+          return Math.min(100, Math.max(0, pct));
+        });
+
+        if (isMounted && labels.length > 0) {
+          setTrendData({
+            labels: labels.slice(-7),
+            datasets: [{
+              fill: true,
+              label: 'Attendance Rate %',
+              data: percentageRates.slice(-7),
+              borderColor: '#0284c7',
+              backgroundColor: 'rgba(2, 132, 199, 0.15)',
+              tension: 0.4,
+              pointRadius: 4,
+              pointBackgroundColor: '#0284c7',
+            }]
+          });
+        }
+      } catch (err) {
+        console.error('Error in useDashboardAnalyticsData:', err);
+      }
+    }
+
+    loadData();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [rawLogs, totalCapacity]);
+
+  return { growthData, trendData };
+}
 
 function toDateKey(dateInput) {
   if (!dateInput) return '';
@@ -394,6 +653,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   const totalStrength = typeof supabaseCadetCount === 'number' && supabaseCadetCount > 0
     ? supabaseCadetCount
     : dynamicHierarchy.totalUnitStrength;
+
+  // Dynamic Supabase & Historical Analytics Data (Cadet Growth & Unique Daily Attendance Trend)
+  const { growthData: dynamicGrowthData, trendData: dynamicTrendData } = useDashboardAnalyticsData(rawMasterLogs, totalStrength);
 
   const totalBasicQuota = dynamicHierarchy.totalBasicStrength;
   const totalOfficerQuota = dynamicHierarchy.totalOfficerStrength;
@@ -789,10 +1051,81 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      {/* Section Header: Tactical Analytics & Trends */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '-0.5rem' }}>
+        <div>
+          <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.35rem', margin: 0, letterSpacing: '0.5px' }}>
+            TACTICAL ANALYTICS & TRENDS
+          </h2>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+            Real-time enrollment strength, formation muster volume, and active calendar schedule.
+          </div>
+        </div>
+      </div>
+
+      {/* Top Analytics & Calendar Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
+        
+        {/* Widget 1: Cadet/Employee Growth */}
+        <div style={{ gridColumn: 'span 5', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>Cadet Growth</h3>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Active Enrollment ▾</span>
+          </div>
+          <div style={{ height: '160px', width: '100%' }}>
+            <Line data={dynamicGrowthData} options={growthChartOptions} />
+          </div>
+        </div>
+
+        {/* Widget 2: Attendance Trend */}
+        <div style={{ gridColumn: 'span 4', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>Attendance Trend</h3>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Unique Formations ▾</span>
+          </div>
+          <div style={{ height: '160px', width: '100%' }}>
+            <Line data={dynamicTrendData} options={attendanceChartOptions} />
+          </div>
+        </div>
+
+        {/* Widget 3: Mini Calendar */}
+        <div style={{ gridColumn: 'span 3', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <span style={{ cursor: 'pointer', fontSize: '0.875rem', color: '#64748b' }}>‹</span>
+            <h3 style={{ fontSize: '0.875rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>August 2026</h3>
+            <span style={{ cursor: 'pointer', fontSize: '0.875rem', color: '#64748b' }}>›</span>
+          </div>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textTransform: 'uppercase', textAlign: 'center', fontSize: '10px', fontWeight: '600', color: '#94a3b8', gap: '4px', marginBottom: '4px' }}>
+            <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontSize: '11px', gap: '4px' }}>
+            {[26, 27, 28, 29, 30, 31].map(d => <span key={d} style={{ color: '#cbd5e1', padding: '4px 0' }}>{d}</span>)}
+            {Array.from({ length: 31 }, (_, i) => i + 1).map(day => (
+              <span
+                key={day}
+                style={{
+                  padding: '4px 0',
+                  borderRadius: '50%',
+                  fontWeight: day === 24 ? '700' : '500',
+                  backgroundColor: day === 24 ? '#0284c7' : 'transparent',
+                  color: day === 24 ? '#ffffff' : '#334155',
+                  display: 'inline-block',
+                }}
+              >
+                {day}
+              </span>
+            ))}
+          </div>
+        </div>
+
+      </div>
+
       {/* Header Banner */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
+          <h2 className="text-2xl font-black" style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
             COMMAND DASHBOARD
           </h2>
         </div>

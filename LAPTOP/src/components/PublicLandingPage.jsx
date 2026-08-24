@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Shield,
   LogIn,
@@ -17,6 +17,7 @@ import {
   Sparkles,
   Database
 } from 'lucide-react';
+import { fetchSettingsFromSupabase, fetchCadetCountFromSupabase } from '../utils/supabaseClient';
 
 export default function PublicLandingPage({
   onNavigateToLogin,
@@ -25,6 +26,78 @@ export default function PublicLandingPage({
   currentUser
 }) {
   const currentYear = new Date().getFullYear();
+
+  const [commandant, setCommandant] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.commandingOfficer) return parsed.commandingOfficer;
+      }
+    } catch (_) {}
+    return 'LTC CHRISTIAN B ABAMO INF (GSC) PA';
+  });
+
+  const [hostInstitution, setHostInstitution] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.hostInstitution) return parsed.hostInstitution;
+      }
+    } catch (_) {}
+    return 'Caraga State University';
+  });
+
+  const [unitName, setUnitName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.unitName) return parsed.unitName;
+      }
+    } catch (_) {}
+    return 'CSU MAIN ROTC UNIT';
+  });
+
+  const [corpsStrength, setCorpsStrength] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_cadets_roster');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed.length;
+      }
+    } catch (_) {}
+    return 1194;
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadBrandingSettings() {
+      try {
+        const data = await fetchSettingsFromSupabase();
+        if (isMounted && data) {
+          if (data.commanding_officer) setCommandant(data.commanding_officer);
+          if (data.host_institution) setHostInstitution(data.host_institution);
+          if (data.unit_name) setUnitName(data.unit_name);
+        }
+
+        const count = await fetchCadetCountFromSupabase();
+        if (isMounted && typeof count === 'number' && count > 0) {
+          setCorpsStrength(count);
+        }
+      } catch (err) {
+        console.error('Error fetching settings for public landing page:', err);
+      }
+    }
+
+    loadBrandingSettings();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const features = [
     {
@@ -91,7 +164,7 @@ export default function PublicLandingPage({
         {/* Unit Title */}
         <div>
           <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.25rem', fontWeight: 800, letterSpacing: '0.5px', color: '#ffffff' }}>
-            CSU MAIN ROTC UNIT
+            {unitName}
           </div>
           <div style={{ fontSize: '0.74rem', color: '#cbd5e1', fontWeight: 500 }}>
             Attendance & Corps Roster Management System
@@ -279,7 +352,7 @@ export default function PublicLandingPage({
             </div>
             <div>
               <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Host Institution</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>Caraga State University</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{hostInstitution}</div>
             </div>
           </div>
 
@@ -289,7 +362,7 @@ export default function PublicLandingPage({
             </div>
             <div>
               <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Unit Commandant</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>LTC RYAN L MARCELO INF (GSC) PA</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{commandant}</div>
             </div>
           </div>
 
@@ -299,7 +372,7 @@ export default function PublicLandingPage({
             </div>
             <div>
               <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 700, textTransform: 'uppercase' }}>Corps Strength</div>
-              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>1,194 Cadets & Officers</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>{corpsStrength.toLocaleString()} Cadets & Officers</div>
             </div>
           </div>
         </div>

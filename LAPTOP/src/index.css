@@ -1657,4 +1657,21 @@ body {
   }
 }
 
+/* Top Analytics & Calendar Row Styles */
+.top-analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .top-analytics-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .top-analytics-grid > div {
+    grid-column: span 12 / span 12 !important;
+  }
+}
+
 
