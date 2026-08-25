@@ -48,7 +48,7 @@ export default function App() {
           return parsed.user;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
     return null;
   });
 
@@ -62,7 +62,7 @@ export default function App() {
         return savedSession ? 'portal' : 'login';
       }
       if (hash === 'home' || hash === '' || hash === '/') return 'home';
-    } catch (_) {}
+    } catch (_) { }
     return 'home';
   });
 
@@ -77,7 +77,7 @@ export default function App() {
       if (saved && VALID_TABS.includes(saved)) {
         return saved;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'dashboard';
   });
 
@@ -98,7 +98,7 @@ export default function App() {
           window.location.hash = activeTab;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }, [currentRoute, activeTab]);
 
   // Support browser back/forward buttons with hashchange
@@ -145,9 +145,9 @@ export default function App() {
     try {
       const supabase = getSupabaseClient();
       if (supabase) {
-        await supabase.auth.signOut().catch(() => {});
+        await supabase.auth.signOut().catch(() => { });
       }
-    } catch (_) {}
+    } catch (_) { }
     localStorage.removeItem('csu_rotc_auth_session');
     setCurrentUser(null);
   };
@@ -166,7 +166,7 @@ export default function App() {
         setCadets(sbCadets.value);
         try {
           localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(sbCadets.value));
-        } catch (_) {}
+        } catch (_) { }
       }
 
       if (sbLogs.status === 'fulfilled' && Array.isArray(sbLogs.value)) {
@@ -174,7 +174,7 @@ export default function App() {
         try {
           localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(sbLogs.value));
           window.dispatchEvent(new Event('local-attendance-update'));
-        } catch (_) {}
+        } catch (_) { }
       }
 
       setServerOnline(true);
@@ -192,13 +192,13 @@ export default function App() {
         try {
           const saved = localStorage.getItem('csu_rotc_master_attendance');
           if (saved) setAttendanceLogs(JSON.parse(saved));
-        } catch (_) {}
+        } catch (_) { }
       }
       if (!e || e.key === 'csu_rotc_cadets_roster' || e.type === 'local-attendance-update') {
         try {
           const savedCadets = localStorage.getItem('csu_rotc_cadets_roster');
           if (savedCadets) setCadets(JSON.parse(savedCadets));
-        } catch (_) {}
+        } catch (_) { }
       }
     };
 
@@ -210,7 +210,7 @@ export default function App() {
         const updated = recalculateAttendanceLogs(prev, cutoff);
         try {
           localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(updated));
-        } catch (_) {}
+        } catch (_) { }
         return updated;
       });
     };
@@ -255,7 +255,7 @@ export default function App() {
           });
           try {
             localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(remaining));
-          } catch (_) {}
+          } catch (_) { }
           return remaining;
         });
       } else if (clearType === 'CADET' && targetPayload) {
@@ -270,7 +270,7 @@ export default function App() {
           });
           try {
             localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(remaining));
-          } catch (_) {}
+          } catch (_) { }
           return remaining;
         });
       } else if (clearType === 'FILTERED' && Array.isArray(targetPayload)) {
@@ -282,7 +282,7 @@ export default function App() {
           });
           try {
             localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(remaining));
-          } catch (_) {}
+          } catch (_) { }
           return remaining;
         });
       }
@@ -299,18 +299,18 @@ export default function App() {
     window.dispatchEvent(new Event('local-attendance-update'));
   };
 
-function toDateKey(dateInput) {
-  if (!dateInput) return '';
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-    return dateInput.slice(0, 10);
+  function toDateKey(dateInput) {
+    if (!dateInput) return '';
+    if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+      return dateInput.slice(0, 10);
+    }
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
   // Ingest approved batch records into Master Attendance with single-row cadet deduplication and merging
   const handleSyncComplete = (enrichedRecords) => {
@@ -427,7 +427,7 @@ function toDateKey(dateInput) {
         localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(updated));
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('local-attendance-update'));
-      } catch (_) {}
+      } catch (_) { }
 
       return updated;
     });
@@ -450,7 +450,7 @@ function toDateKey(dateInput) {
         try {
           localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
           window.dispatchEvent(new Event('storage'));
-        } catch (_) {}
+        } catch (_) { }
         return updatedCadets;
       }
       return prevCadets;
@@ -530,7 +530,7 @@ function toDateKey(dateInput) {
         <header className="top-header no-print">
           <div className="page-title-group">
             <h2>CSU ROTC ATTENDANCE & ROSTER SYSTEM</h2>
-            <p>Admin HQ Desktop Node • 1501st CDC</p>
+            <p>Admin HQ Desktop</p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>

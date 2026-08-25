@@ -295,10 +295,18 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
 
   // Summary Metrics
   const totalStrength = reconciledList.length;
-  const presentCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'PRESENT' || r.finalDailyStatus === 'PRESENT (Complete)').length;
-  const lateCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'LATE' || r.finalDailyStatus === 'LATE (Complete)').length;
-  const incompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'NO TIME-OUT' || r.finalDailyStatus === 'LATE / NO TIME-OUT' || r.finalDailyStatus.startsWith('INCOMPLETE') || r.finalDailyStatus === 'NO TIME-IN').length;
-  const absentCount = reconciledList.filter(r => r.finalDailyStatus === 'ABSENT').length;
+  const presentCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'PRESENT' || (r.hasTimeIn && !r.finalDailyStatus?.includes('ABSENT'))).length;
+  const lateCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'LATE' || r.finalDailyStatus?.includes('LATE') || r.isLate).length;
+  const incompleteCount = reconciledList.filter(r =>
+    r.finalDailyStatus === 'NO TIME-OUT' ||
+    r.finalDailyStatus === 'NO TIME-IN' ||
+    r.finalDailyStatus?.includes('NO TIME-OUT') ||
+    r.finalDailyStatus?.includes('NO TIME-IN') ||
+    r.finalDailyStatus?.includes('INCOMPLETE') ||
+    (r.hasTimeIn && !r.hasTimeOut) ||
+    (!r.hasTimeIn && r.hasTimeOut)
+  ).length;
+  const absentCount = reconciledList.filter(r => r.finalDailyStatus === 'ABSENT' || r.finalDailyStatus?.includes('ABSENT')).length;
   const totalScanned = reconciledList.filter(r => r.hasTimeIn || r.hasTimeOut).length;
 
   return {

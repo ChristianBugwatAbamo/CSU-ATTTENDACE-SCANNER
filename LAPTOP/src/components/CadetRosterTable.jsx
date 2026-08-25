@@ -61,41 +61,43 @@ export function getDepartmentStyle(dept) {
 export default function CadetRosterTable({ cadets = [], onEditCadet }) {
   return (
     <div
-      className="w-full overflow-hidden border border-slate-200 rounded-xl shadow-sm bg-white"
+      className="w-full border border-slate-200 rounded-xl shadow-sm bg-white"
       style={{
         width: '100%',
-        overflow: 'hidden',
+        maxHeight: '520px',
+        overflowY: 'auto',
+        overflowX: 'auto',
         border: '1px solid #e2e8f0',
         borderRadius: '0.75rem',
         backgroundColor: '#ffffff',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+        position: 'relative'
       }}
     >
-      <div className="overflow-x-auto" style={{ overflowX: 'auto', width: '100%' }}>
-        <table className="w-full text-left border-collapse" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
-          {/* Table Header */}
-          <thead>
-            <tr
-              className="bg-emerald-950 text-white text-[11px] font-black uppercase tracking-wider"
-              style={{
-                backgroundColor: '#022c22',
-                color: '#ffffff',
-                fontSize: '11px',
-                fontWeight: 900,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em'
-              }}
-            >
-              <th className="py-3.5 px-4 text-center w-12" style={{ padding: '0.875rem 1rem', textAlign: 'center', width: '3rem' }}>#</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Cadet ID</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Cadet Name</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Gender</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Department</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Academic Program</th>
-              <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem' }}>Contact Number</th>
-              <th className="py-3.5 px-4 text-center" style={{ padding: '0.875rem 1rem', textAlign: 'center' }}>Action</th>
-            </tr>
-          </thead>
+      <table className="w-full text-left border-collapse" style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse' }}>
+        {/* Table Header */}
+        <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+          <tr
+            className="bg-emerald-950 text-white text-[11px] font-black uppercase tracking-wider"
+            style={{
+              backgroundColor: '#022c22',
+              color: '#ffffff',
+              fontSize: '11px',
+              fontWeight: 900,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em'
+            }}
+          >
+            <th className="py-3.5 px-4 text-center w-12" style={{ padding: '0.875rem 1rem', textAlign: 'center', width: '3rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>#</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet ID</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet Name</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Gender</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Department</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Academic Program</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Contact Number</th>
+            <th className="py-3.5 px-4 text-center" style={{ padding: '0.875rem 1rem', textAlign: 'center', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Action</th>
+          </tr>
+        </thead>
 
           {/* Table Body */}
           <tbody className="divide-y divide-slate-100 text-sm font-bold text-slate-800">
@@ -332,6 +334,5 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
           </tbody>
         </table>
       </div>
-    </div>
-  );
+    );
 }

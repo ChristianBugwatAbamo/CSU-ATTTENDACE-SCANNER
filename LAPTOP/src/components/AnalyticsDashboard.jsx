@@ -172,9 +172,9 @@ export function useAttendanceTrendData() {
         const d = rawDate ? new Date(rawDate) : new Date();
         const dateKey = !isNaN(d.getTime())
           ? d.toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-            })
+            month: 'short',
+            day: 'numeric',
+          })
           : (curr.date || 'Today');
         acc[dateKey] = (acc[dateKey] || 0) + 1;
         return acc;
@@ -285,9 +285,9 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
           let runningTotal = 0;
           const growthCounts = monthlyGrowthMap.size > 0
             ? Array.from(monthlyGrowthMap.values()).map(count => {
-                runningTotal += count;
-                return runningTotal;
-              })
+              runningTotal += count;
+              return runningTotal;
+            })
             : [totalCount];
 
           setGrowthData({
@@ -321,9 +321,9 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
               const d = rawDate ? new Date(rawDate) : new Date();
               const dateKey = !isNaN(d.getTime())
                 ? d.toLocaleDateString('en-US', {
-                    month: 'short',
-                    day: 'numeric',
-                  })
+                  month: 'short',
+                  day: 'numeric',
+                })
                 : (curr.date || 'Today');
               acc[dateKey] = (acc[dateKey] || 0) + 1;
               return acc;
@@ -616,7 +616,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   // Search input state for filtering by Cadet ID or Name
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Status filter applied by clicking stat summary cards ('PRESENT' | 'LATE' | 'NO TIME-OUT' | 'ABSENT' | null)
+  // Status filter applied by clicking stat summary cards ('PRESENT' | 'LATE' | 'NO TIME IN/OUT' | 'ABSENT' | null)
   const [statusFilter, setStatusFilter] = useState(null);
 
   const handleStatusCardClick = (status) => {
@@ -1093,9 +1093,25 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
     // Status filter from stat card click
     if (statusFilter) {
-      const finalStatus = (cadet.finalDailyStatus || 'ABSENT').toUpperCase();
+      const cadetStatus = (cadet.finalDailyStatus || cadet.status || 'ABSENT').toUpperCase();
       const filterNorm = statusFilter.toUpperCase();
-      if (finalStatus !== filterNorm) return false;
+
+      if (filterNorm === 'LATE') {
+        if (!cadetStatus.includes('LATE') && !cadet.isLate) return false;
+      } else if (filterNorm === 'NO TIME IN/OUT' || filterNorm === 'NO TIME-OUT' || filterNorm === 'INCOMPLETE') {
+        if (
+          !cadetStatus.includes('NO TIME-OUT') &&
+          !cadetStatus.includes('NO TIME-IN') &&
+          !cadetStatus.includes('INCOMPLETE') &&
+          !((cadet.hasTimeIn && !cadet.hasTimeOut) || (!cadet.hasTimeIn && cadet.hasTimeOut))
+        ) return false;
+      } else if (filterNorm === 'PRESENT') {
+        if (!cadetStatus.includes('PRESENT') && !cadet.timeIn && !cadet.hasTimeIn) return false;
+      } else if (filterNorm === 'ABSENT') {
+        if (!cadetStatus.includes('ABSENT')) return false;
+      } else {
+        if (!cadetStatus.includes(filterNorm)) return false;
+      }
     }
 
     return matchesBn && matchesCo && matchesPl;
@@ -1122,7 +1138,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
       {/* Top Analytics & Calendar Row */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem', marginBottom: '2rem' }}>
-        
+
         {/* Widget 1: Cadet/Employee Growth */}
         <div style={{ gridColumn: 'span 5', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.75rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
@@ -1152,7 +1168,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             <h3 style={{ fontSize: '0.875rem', fontWeight: '700', color: '#1e293b', margin: 0 }}>August 2026</h3>
             <span style={{ cursor: 'pointer', fontSize: '0.875rem', color: '#64748b' }}>›</span>
           </div>
-          
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textTransform: 'uppercase', textAlign: 'center', fontSize: '10px', fontWeight: '600', color: '#94a3b8', gap: '4px', marginBottom: '4px' }}>
             <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
           </div>
@@ -1216,19 +1232,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{
-              fontSize: '0.75rem',
-              fontWeight: '700',
-              padding: '0.25rem 0.65rem',
-              borderRadius: '6px',
-              backgroundColor: '#f1f5f9',
-              color: '#334155',
-              border: '1px solid #e2e8f0'
-            }}>
-              {departmentDistribution.totalCount} Enrolled Cadets
-            </span>
-          </div>
+
         </div>
 
         <div style={{
@@ -1240,7 +1244,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           {/* Donut Chart Container */}
           <div style={{ position: 'relative', height: '230px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Doughnut data={departmentDistribution.chartData} options={departmentDonutOptions} />
-            
+
             {/* Center Donut Label */}
             <div style={{
               position: 'absolute',
@@ -1347,11 +1351,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-            {totalStrength > 0
-              ? `100% of Enrolled Roster (${totalStrength} Cadets)`
-              : '0 Cadets Registered in Master Roster'}
-          </div>
+
         </div>
 
         {/* Card 2: PRESENT */}
@@ -1410,31 +1410,31 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           </div>
         </div>
 
-        {/* Card 4: NO TIME-OUT */}
+        {/* Card 4: NO TIME IN/OUT */}
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${statusFilter === 'NO TIME-OUT' ? '#ea580c' : '#fed7aa'}`,
+            borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : '#fed7aa'}`,
             cursor: 'pointer',
-            outline: statusFilter === 'NO TIME-OUT' ? '2px solid #ea580c' : 'none',
-            background: statusFilter === 'NO TIME-OUT' ? '#fff7ed' : undefined
+            outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
+            background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#fff7ed' : undefined
           }}
-          onClick={() => handleStatusCardClick('NO TIME-OUT')}
-          title="Click to filter table: No Time-Out cadets only"
+          onClick={() => handleStatusCardClick('NO TIME IN/OUT')}
+          title="Click to filter table: No Time In/Out cadets only"
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
             <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(234, 88, 12, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
               <Activity size={20} />
             </div>
             <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>No Time-Out</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>No Time In/Out</div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
                 {attendanceSummary.incompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {statusFilter === 'NO TIME-OUT' ? '✓ Filtering table by No Time-Out' : 'Click to filter → No Time-Out'}
+            {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
           </div>
         </div>
 
@@ -1686,20 +1686,27 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
             No cadets matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({selectedBattalion || 'All Battalions'}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
         ) : (
-          <div className="table-responsive">
-            <table className="custom-table">
-              <thead>
+          <div
+            className="table-responsive"
+            style={{
+              maxHeight: '520px',
+              overflowY: 'auto',
+              position: 'relative'
+            }}
+          >
+            <table className="custom-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
                 <tr>
-                  <th>#</th>
-                  <th>Cadet ID</th>
-                  <th>Cadet Name</th>
-                  <th>Battalion</th>
-                  <th>Company</th>
-                  <th>Platoon</th>
-                  <th>Time-In</th>
-                  <th>Time-Out</th>
-                  <th>Status</th>
-                  <th>Duty Officer</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>#</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Cadet ID</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Cadet Name</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Battalion</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Company</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Platoon</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Time-In</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Time-Out</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Status</th>
+                  <th style={{ position: 'sticky', top: 0, zIndex: 10 }}>Duty Officer</th>
                 </tr>
               </thead>
               <tbody>

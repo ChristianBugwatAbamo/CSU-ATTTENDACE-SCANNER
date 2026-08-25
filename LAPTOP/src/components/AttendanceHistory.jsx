@@ -29,6 +29,7 @@ import {
   Settings
 } from 'lucide-react';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
+import DashboardUnitHierarchy from './DashboardUnitHierarchy';
 import {
   reconcileRosterAttendance,
   getActiveFormationCutoff,
@@ -269,10 +270,10 @@ export default function AttendanceHistory({
   // Search query state
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Echelon dropdown filters
-  const [battalionFilter, setBattalionFilter] = useState('ALL');
-  const [companyFilter, setCompanyFilter] = useState('ALL');
-  const [platoonFilter, setPlatoonFilter] = useState('ALL');
+  // Echelon drill-down filters (matching DashboardUnitHierarchy)
+  const [selectedBattalion, setSelectedBattalion] = useState(null);
+  const [selectedCompany, setSelectedCompany] = useState(null);
+  const [selectedPlatoon, setSelectedPlatoon] = useState(null);
 
   // Export state
   const [isExporting, setIsExporting] = useState(false);
@@ -284,8 +285,18 @@ export default function AttendanceHistory({
   const selectedSessionCutoff = useMemo(() => {
     if (!selectedDate) return formationCutoff;
     const matchingSession = (dbSessions || []).find(s => s.dateKey === selectedDate && s.cutoffTime);
-    return matchingSession ? matchingSession.cutoffTime : formationCutoff;
-  }, [selectedDate, dbSessions, formationCutoff]);
+    if (matchingSession && matchingSession.cutoffTime) {
+      return matchingSession.cutoffTime;
+    }
+    const matchingLog = (effectiveLogs || []).find(l => {
+      const rawDate = l.timestamp || l.date || l.receivedAt;
+      return toDateKey(rawDate) === selectedDate && (l.cutoff_time || l.cutoffTime);
+    });
+    if (matchingLog) {
+      return matchingLog.cutoff_time || matchingLog.cutoffTime;
+    }
+    return formationCutoff;
+  }, [selectedDate, dbSessions, effectiveLogs, formationCutoff]);
 
   // 2. Reconcile complete cadet roster ONLY if the date has recorded formation data
   // Empty State Guard: If unrecorded, return 0 counts to prevent false absentee generation
@@ -327,37 +338,43 @@ export default function AttendanceHistory({
 
     return reconciledRoster.filter((cadet) => {
       // 1. Status Filter
-      if (statusFilter === 'PRESENT' && !(cadet.finalDailyStatus === 'PRESENT' || cadet.finalDailyStatus === 'PRESENT (Complete)')) {
+      if (statusFilter === 'PRESENT' && !(cadet.finalDailyStatus === 'PRESENT' || cadet.finalDailyStatus === 'PRESENT (Complete)' || (cadet.hasTimeIn && !cadet.finalDailyStatus?.includes('ABSENT')))) {
         return false;
       }
-      if (statusFilter === 'LATE' && !(cadet.finalDailyStatus === 'LATE' || cadet.finalDailyStatus === 'LATE (Complete)')) {
+      if (statusFilter === 'LATE' && !(cadet.finalDailyStatus === 'LATE' || cadet.finalDailyStatus === 'LATE (Complete)' || cadet.finalDailyStatus?.includes('LATE') || cadet.isLate)) {
         return false;
       }
-      if (statusFilter === 'INCOMPLETE' && !(cadet.finalDailyStatus === 'NO TIME-OUT' || cadet.finalDailyStatus === 'INCOMPLETE (No Time-Out)' || cadet.finalDailyStatus === 'LATE / NO TIME-OUT' || cadet.finalDailyStatus === 'INCOMPLETE (Late / No Time-Out)')) {
+      if ((statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') && !(
+        cadet.finalDailyStatus?.includes('NO TIME-OUT') ||
+        cadet.finalDailyStatus?.includes('NO TIME-IN') ||
+        cadet.finalDailyStatus?.includes('INCOMPLETE') ||
+        (cadet.hasTimeIn && !cadet.hasTimeOut) ||
+        (!cadet.hasTimeIn && cadet.hasTimeOut)
+      )) {
         return false;
       }
-      if (statusFilter === 'ABSENT' && cadet.finalDailyStatus !== 'ABSENT') {
+      if (statusFilter === 'ABSENT' && !(cadet.finalDailyStatus === 'ABSENT' || cadet.finalDailyStatus?.includes('ABSENT'))) {
         return false;
       }
 
       // 2. Battalion Filter
-      if (battalionFilter !== 'ALL') {
+      if (selectedBattalion) {
         const cadetBn = normalizeBattalion(cadet.battalion);
-        const filterBn = normalizeBattalion(battalionFilter);
+        const filterBn = normalizeBattalion(selectedBattalion);
         if (cadetBn !== filterBn) return false;
       }
 
       // 3. Company Filter
-      if (companyFilter !== 'ALL') {
+      if (selectedCompany) {
         const cadetCo = normalizeCompany(cadet.company);
-        const filterCo = normalizeCompany(companyFilter);
+        const filterCo = normalizeCompany(selectedCompany);
         if (cadetCo !== filterCo) return false;
       }
 
       // 4. Platoon Filter
-      if (platoonFilter !== 'ALL') {
+      if (selectedPlatoon) {
         const cadetPl = normalizePlatoon(cadet.platoon);
-        const filterPl = normalizePlatoon(platoonFilter);
+        const filterPl = normalizePlatoon(selectedPlatoon);
         if (cadetPl !== filterPl) return false;
       }
 
@@ -373,7 +390,7 @@ export default function AttendanceHistory({
 
       return true;
     });
-  }, [reconciledRoster, isRecordedDate, statusFilter, battalionFilter, companyFilter, platoonFilter, searchQuery]);
+  }, [reconciledRoster, isRecordedDate, statusFilter, selectedBattalion, selectedCompany, selectedPlatoon, searchQuery]);
 
   // Navigate between recorded formation dates step-by-step
   const handleStepDate = (direction) => {
@@ -446,7 +463,7 @@ export default function AttendanceHistory({
     ? Math.round(((summary.presentCompleteCount + summary.lateCompleteCount) / summary.totalStrength) * 100)
     : 0;
 
-  const hasActiveFilters = searchQuery || statusFilter !== 'ALL' || battalionFilter !== 'ALL' || companyFilter !== 'ALL' || platoonFilter !== 'ALL';
+  const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'ALL' || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
 
   // Calendar rendering calculations
   const calYear = calendarMonth.getFullYear();
@@ -838,10 +855,30 @@ export default function AttendanceHistory({
             </div>
           </div>
 
-          {/* Active Date Header Indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--rotc-green-dark)' }}>
+          {/* Active Date Header Indicator with Cut-Off Time Badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--rotc-green-dark)', flexWrap: 'wrap' }}>
             <CalendarCheck size={16} />
             <span>{formatHumanDate(selectedDate)}</span>
+            {selectedSessionCutoff && (
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  background: '#fef3c7',
+                  color: '#92400e',
+                  border: '1px solid #fde68a',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title={`Official Cut-off Time for this formation session is ${selectedSessionCutoff}`}
+              >
+                <Clock size={11} color="#d97706" />
+                CUT-OFF: {selectedSessionCutoff}
+              </span>
+            )}
             {isRecordedDate && (
               <span style={{ fontSize: '0.7rem', fontWeight: 800, padding: '2px 7px', borderRadius: '4px', background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>
                 {selectedDateMeta.scansCount} SCANS
@@ -1099,35 +1136,35 @@ export default function AttendanceHistory({
                 {summary.lateCompleteCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                After {formationCutoff}
+                After {selectedSessionCutoff || formationCutoff || '07:30'}
               </div>
             </div>
 
-            {/* Stat Card 4: NO TIME-OUT */}
+            {/* Stat Card 4: NO TIME IN/OUT */}
             <div
               className="card"
-              onClick={() => setStatusFilter('INCOMPLETE')}
+              onClick={() => setStatusFilter(prev => (prev === 'NO TIME IN/OUT' || prev === 'INCOMPLETE' || prev === 'NO TIME-OUT') ? 'ALL' : 'NO TIME IN/OUT')}
               style={{
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #ea580c',
                 borderRadius: '10px',
                 padding: '1rem',
                 cursor: 'pointer',
-                background: statusFilter === 'INCOMPLETE' ? '#fff7ed' : '#ffffff',
-                boxShadow: statusFilter === 'INCOMPLETE' ? '0 0 0 2px #ea580c' : 'var(--shadow-sm)',
+                background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') ? '#fff7ed' : '#ffffff',
+                boxShadow: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') ? '0 0 0 2px #ea580c' : 'var(--shadow-sm)',
                 transition: 'all 0.15s ease'
               }}
-              title="Click to filter cadets missing Time-Out"
+              title="Click to filter cadets missing Time-In or Time-Out"
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase' }}>No Time-Out</span>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase' }}>No Time In/Out</span>
                 <Activity size={16} color="#ea580c" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
                 {summary.incompleteCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                Missing afternoon scan
+                Missing entry or exit scan
               </div>
             </div>
 
@@ -1159,6 +1196,16 @@ export default function AttendanceHistory({
               </div>
             </div>
           </div>
+
+          {/* Unit Hierarchy Drill-Down Selector */}
+          <DashboardUnitHierarchy
+            selectedBattalion={selectedBattalion}
+            setSelectedBattalion={setSelectedBattalion}
+            selectedCompany={selectedCompany}
+            setSelectedCompany={setSelectedCompany}
+            selectedPlatoon={selectedPlatoon}
+            setSelectedPlatoon={setSelectedPlatoon}
+          />
 
           {/* ========================================================================= */}
           {/* Combined Table & Filter Bar                                                */}
@@ -1228,157 +1275,27 @@ export default function AttendanceHistory({
                 )}
               </div>
 
-              {/* Center: Unit Echelon Dropdowns */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                <select
-                  value={battalionFilter}
-                  onChange={(e) => {
-                    setBattalionFilter(e.target.value);
-                    setCompanyFilter('ALL');
-                    setPlatoonFilter('ALL');
-                  }}
-                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.78rem', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', outline: 'none' }}
-                >
-                  <option value="ALL">All Battalions</option>
-                  <option value="1st Battalion">1st Battalion</option>
-                  <option value="2nd Battalion">2nd Battalion</option>
-                  <option value="CADET OFFICERS">Cadet Officers</option>
-                </select>
-
-                <select
-                  value={companyFilter}
-                  onChange={(e) => {
-                    setCompanyFilter(e.target.value);
-                    setPlatoonFilter('ALL');
-                  }}
-                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.78rem', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', outline: 'none' }}
-                >
-                  <option value="ALL">All Companies</option>
-                  <option value="Alpha">Alpha Company</option>
-                  <option value="Bravo">Bravo Company</option>
-                  <option value="Charlie">Charlie Company</option>
-                  <option value="Delta">Delta Company</option>
-                </select>
-
-                <select
-                  value={platoonFilter}
-                  onChange={(e) => setPlatoonFilter(e.target.value)}
-                  style={{ padding: '0.35rem 0.6rem', fontSize: '0.78rem', borderRadius: '6px', border: '1px solid #cbd5e1', background: '#ffffff', outline: 'none' }}
-                >
-                  <option value="ALL">All Platoons</option>
-                  <option value="1st Platoon">1st Platoon</option>
-                  <option value="2nd Platoon">2nd Platoon</option>
-                  <option value="3rd Platoon">3rd Platoon</option>
-                  <option value="4th Platoon">4th Platoon</option>
-                </select>
-              </div>
-
-              {/* Right Side: Status Filter Pill Tags */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('ALL')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: statusFilter === 'ALL' ? '1px solid var(--rotc-green-dark)' : '1px solid #cbd5e1',
-                    background: statusFilter === 'ALL' ? 'var(--rotc-green-dark)' : '#ffffff',
-                    color: statusFilter === 'ALL' ? '#ffffff' : 'var(--text-dark)'
-                  }}
-                >
-                  All
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('PRESENT')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: statusFilter === 'PRESENT' ? '1px solid #059669' : '1px solid #cbd5e1',
-                    background: statusFilter === 'PRESENT' ? '#059669' : '#ffffff',
-                    color: statusFilter === 'PRESENT' ? '#ffffff' : '#065f46'
-                  }}
-                >
-                  Present
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('LATE')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: statusFilter === 'LATE' ? '1px solid #d97706' : '1px solid #cbd5e1',
-                    background: statusFilter === 'LATE' ? '#d97706' : '#ffffff',
-                    color: statusFilter === 'LATE' ? '#ffffff' : '#92400e'
-                  }}
-                >
-                  Late
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('INCOMPLETE')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: statusFilter === 'INCOMPLETE' ? '1px solid #ea580c' : '1px solid #cbd5e1',
-                    background: statusFilter === 'INCOMPLETE' ? '#ea580c' : '#ffffff',
-                    color: statusFilter === 'INCOMPLETE' ? '#ffffff' : '#9a3412'
-                  }}
-                >
-                  No Time-Out
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setStatusFilter('ABSENT')}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '6px',
-                    fontSize: '0.72rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    border: statusFilter === 'ABSENT' ? '1px solid #dc2626' : '1px solid #fca5a5',
-                    background: statusFilter === 'ABSENT' ? '#dc2626' : '#fee2e2',
-                    color: statusFilter === 'ABSENT' ? '#ffffff' : '#991b1b'
-                  }}
-                >
-                  Absent ({summary.absentCount})
-                </button>
-
-                {hasActiveFilters && (
+              {/* Right Side: Reset Filters Button */}
+              {hasActiveFilters && (
+                <div>
                   <button
                     type="button"
                     onClick={() => {
                       setSearchQuery('');
                       setStatusFilter('ALL');
-                      setBattalionFilter('ALL');
-                      setCompanyFilter('ALL');
-                      setPlatoonFilter('ALL');
+                      setSelectedBattalion(null);
+                      setSelectedCompany(null);
+                      setSelectedPlatoon(null);
                     }}
                     className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.72rem', padding: '3px 8px', color: '#dc2626', borderColor: '#fca5a5', borderRadius: '6px' }}
+                    style={{ fontSize: '0.72rem', padding: '4px 10px', color: '#dc2626', borderColor: '#fca5a5', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                     title="Reset all search & echelon filters"
                   >
-                    <RotateCcw size={11} style={{ display: 'inline', marginRight: '3px' }} />
-                    Reset
+                    <RotateCcw size={11} />
+                    Reset Filters
                   </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Attendance Records Table */}
@@ -1387,20 +1304,27 @@ export default function AttendanceHistory({
                 No cadet attendance records matching current filters for {formatHumanDate(selectedDate)}.
               </div>
             ) : (
-              <div className="table-responsive">
+              <div
+                className="table-responsive"
+                style={{
+                  maxHeight: '520px',
+                  overflowY: 'auto',
+                  position: 'relative'
+                }}
+              >
                 <table className="custom-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0' }}>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>#</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Cadet ID</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Cadet Name</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Battalion</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Company</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Platoon</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Time-In</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Time-Out</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Daily Status</th>
-                      <th style={{ padding: '12px 16px', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-dark)', textAlign: 'left' }}>Duty Officer</th>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                    <tr>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>#</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Cadet ID</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Cadet Name</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Battalion</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Company</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Platoon</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Time-In</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Time-Out</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Daily Status</th>
+                      <th style={{ position: 'sticky', top: 0, zIndex: 10, color: '#ffffff' }}>Duty Officer</th>
                     </tr>
                   </thead>
                   <tbody>

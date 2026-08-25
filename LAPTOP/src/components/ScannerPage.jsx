@@ -36,7 +36,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
   useEffect(() => {
     try {
       localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(pendingBatches));
-    } catch (_) {}
+    } catch (_) { }
   }, [pendingBatches]);
 
   // Hydrate Approved Batch Signatures from localStorage and prune if attendanceLogs empty
@@ -51,7 +51,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           recentApprovedSignaturesRef.current = new Set(JSON.parse(savedSignatures));
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }, [attendanceLogs]);
 
   // Listen to external clear / purge attendance events
@@ -64,7 +64,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           recentApprovedSignaturesRef.current.clear();
           localStorage.removeItem('csu_rotc_recent_approved_signatures');
         }
-      } catch (_) {}
+      } catch (_) { }
     };
 
     window.addEventListener('storage', handleLogsCleared);
@@ -81,7 +81,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
         'csu_rotc_recent_approved_signatures',
         JSON.stringify(Array.from(recentApprovedSignaturesRef.current))
       );
-    } catch (_) {}
+    } catch (_) { }
   };
 
   // Audio synthesizer chime for approval
@@ -116,7 +116,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
       osc2.start(now);
       osc1.stop(now + 0.4);
       osc2.stop(now + 0.4);
-    } catch (_) {}
+    } catch (_) { }
   };
 
   // Called whenever a batch is auto-queued from the modal scanner
@@ -169,8 +169,8 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           sessionName: batch.sessionName || 'Field Session',
           records: batchRecords
         })
-      }).catch(() => {});
-    } catch (_) {}
+      }).catch(() => { });
+    } catch (_) { }
 
     if (batch.signature) {
       recentApprovedSignaturesRef.current.add(batch.signature);
@@ -245,8 +245,8 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
             sessionName: batch.sessionName || 'Field Session',
             records: batchRecords
           })
-        }).catch(() => {});
-      } catch (_) {}
+        }).catch(() => { });
+      } catch (_) { }
     });
 
     saveApprovedSignatures();
@@ -415,56 +415,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
         </div>
       </div>
 
-      {/* 3-Step Synchronization Guide (Placed above Pending Batches) */}
-      <div className="card" style={{ marginBottom: '1.75rem' }}>
-        <div className="card-header">
-          <div className="card-title" style={{ fontSize: '1.05rem' }}>
-            <QrCode size={20} />
-            <span>How Offline QR-to-Camera Sync Works</span>
-          </div>
-        </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem' }}>
-          {/* Step 1 */}
-          <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(6, 78, 46, 0.1)', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.05rem', marginBottom: '0.75rem' }}>
-              1
-            </div>
-            <h4 style={{ margin: '0 0 0.4rem 0', color: 'var(--rotc-green-dark)', fontSize: '0.95rem' }}>
-              Field Duty Officer Scans Cadets
-            </h4>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Duty Officers scan cadet ID cards in the field using their smartphone web app. Scans are saved securely in local phone storage.
-            </p>
-          </div>
-
-          {/* Step 2 */}
-          <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(229, 169, 0, 0.15)', color: '#b48400', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.05rem', marginBottom: '0.75rem' }}>
-              2
-            </div>
-            <h4 style={{ margin: '0 0 0.4rem 0', color: 'var(--rotc-green-dark)', fontSize: '0.95rem' }}>
-              Present Batch Sync QR Code
-            </h4>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Officer taps <strong>[ PRESENT BATCH SYNC QR ]</strong> on the phone. The phone generates a high-contrast, low-density QR code.
-            </p>
-          </div>
-
-          {/* Step 3 */}
-          <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: '12px', border: '1px solid var(--border-light)' }}>
-            <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(5, 150, 105, 0.15)', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.05rem', marginBottom: '0.75rem' }}>
-              3
-            </div>
-            <h4 style={{ margin: '0 0 0.4rem 0', color: 'var(--rotc-green-dark)', fontSize: '0.95rem' }}>
-              Auto-Queue & In-Page Approval
-            </h4>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-              Laptop webcam rapidly scans batches into the pending queue in the background. Admin reviews cadet rosters and clicks Approve or Reject on the page.
-            </p>
-          </div>
-        </div>
-      </div>
 
       {/* SECTION: PENDING BATCHES FOR APPROVAL QUEUE */}
       <div className="card" style={{ marginBottom: '1.75rem' }}>

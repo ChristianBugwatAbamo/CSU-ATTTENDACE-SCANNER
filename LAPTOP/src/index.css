@@ -333,6 +333,9 @@ body {
 }
 
 .custom-table th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   background-color: var(--rotc-green-dark);
   color: #ffffff;
   padding: 0.85rem 1rem;
