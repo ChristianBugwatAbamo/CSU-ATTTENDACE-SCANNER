@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers } from 'lucide-react';
+import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2 } from 'lucide-react';
 import IDCardPreview from './IDCardPreview';
 import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
+import { getSupabaseClient, supabase } from '../utils/supabaseClient';
 
 export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
 
@@ -36,6 +37,43 @@ export const getLastNameOnly = (fullName) => {
   return parts[parts.length - 1].toUpperCase();
 };
 
+// Helper to normalize company name to full string (e.g. "Alpha" -> "Alpha Company")
+export const normalizeCompany = (companyStr) => {
+  if (!companyStr) return 'Alpha Company';
+  const str = String(companyStr).trim();
+  const upper = str.toUpperCase();
+  if (['1CL', '2CL', '3CL', '4CL', 'ASPIRANT', 'COCC', 'OFFICER CORPS', 'COMMAND STAFF', 'SPECIAL STAFF'].includes(upper)) {
+    return str;
+  }
+  if (upper.includes('ALPHA') || upper === '1') return 'Alpha Company';
+  if (upper.includes('BRAVO') || upper === '2') return 'Bravo Company';
+  if (upper.includes('CHARLIE') || upper === '3') return 'Charlie Company';
+  if (upper.includes('DELTA') || upper === '4') return 'Delta Company';
+  if (upper.includes('HEADQUARTERS') || upper === 'HQ') return 'Headquarters';
+  return str.endsWith('Company') ? str : `${str} Company`;
+};
+
+// Helper to normalize cadet type string (e.g. "basic" -> "Basic Cadet", "officer" -> "Cadet Officer")
+export const normalizeCadetType = (typeStr, rankStr = '') => {
+  const t = String(typeStr || '').trim().toLowerCase();
+  const r = String(rankStr || '').trim().toUpperCase();
+  if (
+    t === 'officer' ||
+    t === 'cadet officer' ||
+    r.includes('1CL') ||
+    r.includes('2CL') ||
+    r.includes('3CL') ||
+    r.includes('4CL') ||
+    r.includes('COL') ||
+    r.includes('MAJ') ||
+    r.includes('CPT') ||
+    r.includes('LT')
+  ) {
+    return 'Cadet Officer';
+  }
+  return 'Basic Cadet';
+};
+
 // Generate Compact QR Payload String
 export const generateQrPayload = (cadet) => {
   if (!cadet) return '{}';
@@ -50,7 +88,7 @@ export const generateQrPayload = (cadet) => {
   return JSON.stringify(payload);
 };
 
-export default function IDGenerator({ cadets = [] }) {
+export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoster }) {
   // Category state: 'basic' | 'officer'
   const [category, setCategory] = useState(() => {
     try {
@@ -218,6 +256,9 @@ export default function IDGenerator({ cadets = [] }) {
     return [];
   });
 
+  const [isSaving, setIsSaving] = useState(false);
+  const [toastMessage, setToastMessage] = useState(null);
+
   // Synchronize Form State to LocalStorage
   useEffect(() => {
     try {
@@ -315,10 +356,10 @@ export default function IDGenerator({ cadets = [] }) {
       name: fullName,
       rank: category === 'basic' ? 'Cadet' : rank,
       battalion: category === 'basic' ? battalion : 'CADET OFFICERS',
-      company: category === 'basic' ? company : officerClass,
+      company: category === 'basic' ? normalizeCompany(company) : officerClass,
       platoon: category === 'basic' ? platoon : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
       designation: category === 'basic' ? 'None' : designation,
-      type: category
+      type: normalizeCadetType(category, rank)
     };
     setBatchQueue(prev => [...prev, newCard]);
   };
@@ -329,8 +370,131 @@ export default function IDGenerator({ cadets = [] }) {
     setBatchQueue(prev => prev.filter((_, idx) => idx !== index));
   };
 
-  const handlePrint = () => {
-    window.print();
+  // Supabase Sync + Print Execution Handler
+  const handlePrintAndSaveCadets = async () => {
+    try {
+      // 1. Gather all cadets to save (Single card or Batch queue)
+      const isBatchMode = printMode === 'batch';
+      const currentFormData = {
+        id: cadetId || '221-11101',
+        name: fullName || 'SANTOS, MARIA L',
+        rank: category === 'basic' ? 'Cadet' : rank,
+        battalion: category === 'basic' ? (battalion || '1st Battalion') : 'CADET OFFICERS',
+        company: category === 'basic' ? normalizeCompany(company || 'Alpha') : singleOfficerClass,
+        platoon: category === 'basic' ? (platoon || '1st Platoon') : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
+        designation: category === 'basic' ? 'None' : designation,
+        type: normalizeCadetType(category, rank)
+      };
+
+      const cadetsToSave = isBatchMode ? batchQueue : [currentFormData];
+
+      if (!cadetsToSave || cadetsToSave.length === 0) {
+        alert("No cadet cards available to print.");
+        return;
+      }
+
+      // 2. Format cadet objects for Supabase cadets table
+      const formattedCadets = cadetsToSave.map((c) => ({
+        id: c.id || c.cadet_id || c.cadetId,
+        name: c.name || `${c.last_name || ''}, ${c.first_name || ''} ${c.middle_initial || ''}`.trim(),
+        rank: c.rank || (normalizeCadetType(c.type, c.rank) === 'Cadet Officer' ? 'Cadet Officer' : 'Cadet'),
+        battalion: c.battalion || '1st Battalion',
+        company: normalizeCompany(c.company),
+        platoon: c.platoon || '1st Platoon',
+        type: normalizeCadetType(c.type, c.rank),
+        designation: c.designation || 'N/A',
+        is_active: true
+      }));
+
+      // 3. Upsert records into Supabase `cadets` table
+      const client = getSupabaseClient();
+      if (client) {
+        const { error } = await client
+          .from('cadets')
+          .upsert(formattedCadets, { onConflict: 'id' });
+
+        if (error) {
+          console.error("Failed to sync cadets to Supabase:", error);
+          alert("Warning: Could not save cadet records to database before printing.");
+          return;
+        }
+      }
+
+      // 4. Trigger local state refresh so it reflects on Cadets Roster immediately
+      if (typeof refreshCadetsRoster === 'function') {
+        refreshCadetsRoster();
+      }
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+      window.dispatchEvent(new Event('local-attendance-update'));
+
+      // 5. Trigger Browser Print Dialog after successful database save
+      window.print();
+
+    } catch (err) {
+      console.error("Print and save execution error:", err);
+    }
+  };
+
+  // Function to save batch queue to Supabase and reset queue
+  const handleSaveBatchToDatabase = async () => {
+    if (!batchQueue || batchQueue.length === 0) {
+      alert("Batch print queue is empty.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+
+      // Format cadet records for Supabase `cadets` table
+      const formattedCadets = batchQueue.map((cadet) => ({
+        id: cadet.id || cadet.cadet_id || cadet.cadetId,
+        name: cadet.name || `${cadet.last_name || ''}, ${cadet.first_name || ''} ${cadet.middle_initial || ''}`.trim(),
+        rank: cadet.rank || (normalizeCadetType(cadet.type, cadet.rank) === 'Cadet Officer' ? 'Cadet Officer' : 'Cadet'),
+        battalion: cadet.battalion || '1st Battalion',
+        company: normalizeCompany(cadet.company),
+        platoon: cadet.platoon || '1st Platoon',
+        type: normalizeCadetType(cadet.type, cadet.rank),
+        designation: cadet.designation || 'N/A',
+        is_active: true
+      }));
+
+      // Upsert into Supabase (insert or update existing profiles)
+      const client = getSupabaseClient();
+      if (client) {
+        const { error } = await client
+          .from('cadets')
+          .upsert(formattedCadets, { onConflict: 'id' });
+
+        if (error) throw error;
+      }
+
+      // Show Success Alert Notification
+      setToastMessage({
+        type: 'SUCCESS',
+        message: `Successfully saved ${batchQueue.length} cadets to Database!`,
+      });
+      setTimeout(() => setToastMessage(null), 3500);
+
+      // Refresh Cadets Roster view state if callback exists
+      if (typeof refreshCadetsRoster === 'function') {
+        refreshCadetsRoster();
+      }
+      if (typeof onRefresh === 'function') {
+        onRefresh();
+      }
+      window.dispatchEvent(new Event('local-attendance-update'));
+
+      // AUTOMATICALLY CLEAR THE BATCH PRINT QUEUE AFTER SAVING
+      setBatchQueue([]);
+
+    } catch (err) {
+      console.error("Error saving batch queue to Supabase:", err);
+      alert("Failed to save batch to database. Please check connection.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   let singleOfficerClass = '1CL';
@@ -377,7 +541,7 @@ export default function IDGenerator({ cadets = [] }) {
             </button>
           </div>
 
-          <button className="btn-print-action" onClick={handlePrint}>
+          <button className="btn-print-action" onClick={handlePrintAndSaveCadets}>
             <Printer size={18} /> Print {printMode === 'single' ? 'ID Card' : `Batch (${batchQueue.length} Cards)`}
           </button>
         </div>
@@ -597,24 +761,86 @@ export default function IDGenerator({ cadets = [] }) {
             {/* Batch Queue Manager */}
             {printMode === 'batch' && (
               <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-light)', paddingTop: '0.85rem' }}>
-                <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <Layers size={16} /> Batch Print Queue ({batchQueue.length})
-                  </span>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>4 Cards / A4 Sheet</span>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', paddingBottom: '0.4rem', borderBottom: '1px solid #f1f5f9' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '0.88rem', color: 'var(--rotc-green-dark)' }}>
+                    <Layers size={17} />
+                    <span>Batch Print Queue ({batchQueue.length})</span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>4 Cards / A4 Sheet</span>
+
+                    {/* Save to Database Button */}
+                    <button
+                      type="button"
+                      onClick={handleSaveBatchToDatabase}
+                      disabled={batchQueue.length === 0 || isSaving}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        background: '#065f46',
+                        color: '#ffffff',
+                        fontWeight: 700,
+                        fontSize: '0.75rem',
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '8px',
+                        border: 'none',
+                        cursor: batchQueue.length === 0 || isSaving ? 'not-allowed' : 'pointer',
+                        opacity: batchQueue.length === 0 || isSaving ? 0.55 : 1,
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                        transition: 'all 0.15s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#044e3a';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#065f46';
+                      }}
+                    >
+                      <Database size={13} />
+                      <span>{isSaving ? 'Saving...' : 'Save to Database'}</span>
+                    </button>
+                  </div>
                 </div>
 
+                {/* Success Alert Notification */}
+                {toastMessage && (
+                  <div style={{
+                    marginBottom: '0.6rem',
+                    padding: '0.45rem 0.75rem',
+                    borderRadius: '8px',
+                    background: '#ecfdf5',
+                    border: '1px solid #10b981',
+                    color: '#065f46',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}>
+                    <CheckCircle2 size={15} color="#059669" />
+                    <span>{toastMessage.message}</span>
+                  </div>
+                )}
+
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '160px', overflowY: 'auto' }}>
-                  {batchQueue.map((item, idx) => (
-                    <div key={`${item.id}-${idx}`} className="queue-item-anim" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '0.4rem 0.65rem', borderRadius: '6px', fontSize: '0.78rem' }}>
-                      <div>
-                        <strong>{item.id}</strong> - {item.name} <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 600 }}>({item.company} Coy • {item.platoon})</span>
-                      </div>
-                      <button onClick={() => handleRemoveFromBatch(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }} title="Remove from batch queue">
-                        <Trash2 size={14} />
-                      </button>
+                  {batchQueue.length === 0 ? (
+                    <div style={{ textAlign: 'center', padding: '0.85rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                      Batch queue is empty. Add cadet cards using the form above.
                     </div>
-                  ))}
+                  ) : (
+                    batchQueue.map((item, idx) => (
+                      <div key={`${item.id}-${idx}`} className="queue-item-anim" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '0.4rem 0.65rem', borderRadius: '6px', fontSize: '0.78rem' }}>
+                        <div>
+                          <strong>{item.id}</strong> - {item.name} <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 600 }}>({item.company} Coy • {item.platoon})</span>
+                        </div>
+                        <button onClick={() => handleRemoveFromBatch(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }} title="Remove from batch queue">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}

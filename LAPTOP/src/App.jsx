@@ -586,6 +586,8 @@ export default function App() {
           {activeTab === 'idcards' && (
             <IDGenerator
               cadets={cadets}
+              onRefresh={fetchData}
+              refreshCadetsRoster={fetchData}
             />
           )}
 
