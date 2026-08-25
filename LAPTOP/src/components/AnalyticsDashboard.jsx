@@ -96,6 +96,74 @@ import {
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, getSupabaseClient } from '../utils/supabaseClient';
 
+// Standalone Hook to fetch attendance trend counting both Present & Late cadets
+export function useAttendanceTrendData() {
+  const [trendData, setTrendData] = useState({ labels: [], datasets: [] });
+
+  useEffect(() => {
+    async function fetchTurnoutTrend() {
+      const client = getSupabaseClient() || supabase;
+      if (!client) return;
+
+      // 1. Fetch total enrolled cadets for capacity baseline
+      const { count: totalCadets } = await client
+        .from('cadets')
+        .select('*', { count: 'exact', head: true });
+
+      const unitCapacity = totalCadets || 12;
+
+      // 2. Query attendance logs for Present or Late statuses grouped by date
+      const { data: logs, error } = await client
+        .from('attendance_logs')
+        .select('created_at, date, timestamp, status')
+        .in('status', ['PRESENT', 'LATE', 'Present', 'Late']); // Counts both Present & Late
+
+      if (error || !logs) return;
+
+      // 3. Aggregate count by unique date string (e.g., "Aug 22")
+      const dailyAttended = logs.reduce((acc, curr) => {
+        const rawDate = curr.created_at || curr.date || curr.timestamp;
+        const d = rawDate ? new Date(rawDate) : new Date();
+        const dateKey = !isNaN(d.getTime())
+          ? d.toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+            })
+          : (curr.date || 'Today');
+        acc[dateKey] = (acc[dateKey] || 0) + 1;
+        return acc;
+      }, {});
+
+      // 4. Calculate percentage rates per date
+      const labels = Object.keys(dailyAttended);
+      const percentageRates = Object.values(dailyAttended).map((attendedCount) => {
+        const rate = Math.round((attendedCount / unitCapacity) * 100);
+        return rate > 100 ? 100 : rate;
+      });
+
+      setTrendData({
+        labels,
+        datasets: [
+          {
+            fill: true,
+            label: 'Muster Attendance Rate %',
+            data: percentageRates,
+            borderColor: '#0284c7',
+            backgroundColor: 'rgba(2, 132, 199, 0.15)',
+            tension: 0.4,
+            pointRadius: 4,
+            pointBackgroundColor: '#0284c7',
+          },
+        ],
+      });
+    }
+
+    fetchTurnoutTrend();
+  }, []);
+
+  return trendData;
+}
+
 // Dynamic Hook to aggregate daily attendance & fetch real cadet registration growth
 export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
   const [growthData, setGrowthData] = useState({
@@ -116,8 +184,8 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
     labels: ['Aug 22', 'Aug 24'],
     datasets: [{
       fill: true,
-      label: 'Total Scanned Cadets',
-      data: [12, 12],
+      label: 'Muster Attendance Rate %',
+      data: [100, 100],
       borderColor: '#0284c7',
       backgroundColor: 'rgba(2, 132, 199, 0.15)',
       tension: 0.4,
@@ -131,19 +199,27 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
 
     async function loadData() {
       try {
-        const client = getSupabaseClient();
+        const client = getSupabaseClient() || supabase;
 
         // --- 1. Cadet Growth (Real Database Count / Timestamps) ---
         let totalCount = totalCapacity || 12;
         let monthlyGrowthMap = new Map();
 
         if (client) {
+          const { count: exactCadetCount } = await client
+            .from('cadets')
+            .select('*', { count: 'exact', head: true });
+
+          if (typeof exactCadetCount === 'number' && exactCadetCount > 0) {
+            totalCount = exactCadetCount;
+          }
+
           const { data: cadets } = await client
             .from('cadets')
             .select('created_at');
 
           if (cadets && cadets.length > 0) {
-            totalCount = cadets.length;
+            if (!exactCadetCount) totalCount = cadets.length;
             // Group cadets by month created
             cadets.forEach(c => {
               const d = c.created_at ? new Date(c.created_at) : new Date();
@@ -183,44 +259,69 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
           });
         }
 
-        // --- 2. Attendance Trend (Aggregated by Unique Calendar Date) ---
+        // --- 2. Attendance Trend (Aggregated by Date, Counting Both Present & Late) ---
         let dailyTotals = {};
 
         if (client) {
-          const { data: sessions } = await client
-            .from('attendance_sessions')
-            .select('session_date, total_scanned, present_count, late_count')
-            .order('session_date', { ascending: true });
+          // Query attendance logs for Present or Late statuses
+          const { data: logs, error: logsError } = await client
+            .from('attendance_logs')
+            .select('created_at, date, timestamp, status')
+            .in('status', ['PRESENT', 'LATE', 'Present', 'Late']);
 
-          if (sessions && sessions.length > 0) {
-            // Group total scans by unique session_date so dates appear only once
-            dailyTotals = sessions.reduce((acc, curr) => {
-              const d = new Date(curr.session_date);
-              const dateStr = isNaN(d.getTime())
-                ? String(curr.session_date)
-                : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-
-              const scanned = (curr.total_scanned !== undefined && curr.total_scanned !== null)
-                ? curr.total_scanned
-                : ((curr.present_count || 0) + (curr.late_count || 0));
-
-              acc[dateStr] = (acc[dateStr] || 0) + (scanned || 0);
+          if (!logsError && Array.isArray(logs) && logs.length > 0) {
+            dailyTotals = logs.reduce((acc, curr) => {
+              const rawDate = curr.created_at || curr.date || curr.timestamp;
+              const d = rawDate ? new Date(rawDate) : new Date();
+              const dateKey = !isNaN(d.getTime())
+                ? d.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric',
+                  })
+                : (curr.date || 'Today');
+              acc[dateKey] = (acc[dateKey] || 0) + 1;
               return acc;
             }, {});
+          } else {
+            // Fallback to attendance_sessions (summing present_count + late_count)
+            const { data: sessions } = await client
+              .from('attendance_sessions')
+              .select('session_date, total_scanned, present_count, late_count')
+              .order('session_date', { ascending: true });
+
+            if (sessions && sessions.length > 0) {
+              dailyTotals = sessions.reduce((acc, curr) => {
+                const d = new Date(curr.session_date);
+                const dateStr = isNaN(d.getTime())
+                  ? String(curr.session_date)
+                  : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                const scanned = (curr.present_count !== undefined || curr.late_count !== undefined)
+                  ? ((curr.present_count || 0) + (curr.late_count || 0))
+                  : ((curr.total_scanned !== undefined && curr.total_scanned !== null) ? curr.total_scanned : 0);
+
+                acc[dateStr] = (acc[dateStr] || 0) + (scanned || 0);
+                return acc;
+              }, {});
+            }
           }
         }
 
-        // Fallback / supplement with raw attendance_logs if sessions is empty or partial
+        // Fallback / supplement with raw attendance_logs if sessions/logs empty
         if (Object.keys(dailyTotals).length === 0 && Array.isArray(rawLogs) && rawLogs.length > 0) {
           const logsByDate = new Map();
           rawLogs.forEach(l => {
-            const rawDate = l.date || l.timestamp || l.receivedAt;
-            if (!rawDate) return;
-            const dateKey = toDateKey(rawDate);
-            if (!dateKey) return;
-            if (!logsByDate.has(dateKey)) logsByDate.set(dateKey, new Set());
-            const cid = String(l.cadetId || l.id || '').trim();
-            if (cid) logsByDate.get(dateKey).add(cid);
+            const rawStatus = String(l.status || l.timeInStatus || l.finalDailyStatus || '').toUpperCase();
+            // Count both PRESENT and LATE scans
+            if (rawStatus === 'PRESENT' || rawStatus === 'LATE' || (rawStatus && rawStatus !== 'ABSENT' && rawStatus !== 'EXCUSED')) {
+              const rawDate = l.date || l.timestamp || l.receivedAt;
+              if (!rawDate) return;
+              const dateKey = toDateKey(rawDate);
+              if (!dateKey) return;
+              if (!logsByDate.has(dateKey)) logsByDate.set(dateKey, new Set());
+              const cid = String(l.cadetId || l.id || '').trim();
+              if (cid) logsByDate.get(dateKey).add(cid);
+            }
           });
 
           const sortedDates = Array.from(logsByDate.keys()).sort();
@@ -234,14 +335,11 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
           });
         }
 
+        const unitCapacity = totalCount > 0 ? totalCount : (totalCapacity || 12);
         const labels = Object.keys(dailyTotals);
-        const counts = Object.values(dailyTotals);
-
-        // Convert raw attendance counts to percentage of total active cadets
-        const baseCapacity = totalCount > 0 ? totalCount : (totalCapacity || 12);
-        const percentageRates = counts.map(cnt => {
-          const pct = Math.round(((cnt || 0) / baseCapacity) * 100);
-          return Math.min(100, Math.max(0, pct));
+        const percentageRates = Object.values(dailyTotals).map((attendedCount) => {
+          const rate = Math.round(((attendedCount || 0) / unitCapacity) * 100);
+          return rate > 100 ? 100 : (rate < 0 ? 0 : rate);
         });
 
         if (isMounted && labels.length > 0) {
@@ -249,7 +347,7 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
             labels: labels.slice(-7),
             datasets: [{
               fill: true,
-              label: 'Attendance Rate %',
+              label: 'Muster Attendance Rate %',
               data: percentageRates.slice(-7),
               borderColor: '#0284c7',
               backgroundColor: 'rgba(2, 132, 199, 0.15)',

@@ -8,6 +8,7 @@ import ScannerPage from './components/ScannerPage';
 import AdminSettings from './components/AdminSettings';
 import LoginPage from './components/LoginPage';
 import PublicLandingPage from './components/PublicLandingPage';
+import CadetRosterHierarchy from './components/CadetRosterHierarchy';
 import {
   evaluateSingleScan,
   reconcileCadetDailyStatus,
@@ -30,7 +31,7 @@ import {
 import { LogOut, ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'history', 'idcards', 'scanner', 'settings'];
+  const VALID_TABS = ['dashboard', 'cadets', 'history', 'idcards', 'scanner', 'settings'];
 
   // Authentication Session State
   const [currentUser, setCurrentUser] = useState(() => {
@@ -567,6 +568,10 @@ function toDateKey(dateInput) {
               onRefresh={fetchData}
               onNavigateToHistory={() => setActiveTab('history')}
             />
+          )}
+
+          {activeTab === 'cadets' && (
+            <CadetRosterHierarchy />
           )}
 
           {activeTab === 'history' && (

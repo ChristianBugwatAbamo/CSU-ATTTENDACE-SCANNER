@@ -64,6 +64,15 @@ export function getSupabaseClient() {
   return supabaseInstance;
 }
 
+export const supabase = new Proxy({}, {
+  get: (_, prop) => {
+    const client = getSupabaseClient();
+    if (!client) return undefined;
+    const val = client[prop];
+    return typeof val === 'function' ? val.bind(client) : val;
+  }
+});
+
 // ==============================================================================
 // 1. CADETS ROSTER CRUD (Supabase Cloud)
 // ==============================================================================
