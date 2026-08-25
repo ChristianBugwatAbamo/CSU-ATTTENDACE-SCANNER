@@ -137,6 +137,9 @@ export async function addCadetToSupabase(cadet) {
       type: cadet.type || 'Basic Cadet',
       designation: cadet.designation || 'N/A',
       course: cadet.course || '',
+      gender: cadet.gender || null,
+      department: cadet.department || null,
+      program: cadet.program || null,
       contact_number: cadet.contactNumber || cadet.contact_number || '',
       emergency_contact: cadet.emergencyContact || cadet.emergency_contact || '',
       is_active: true
@@ -381,6 +384,10 @@ export function inferCadetFromId(cadetId, partial = {}) {
     platoon: pl || '1st Platoon',
     type: type,
     designation: partial.designation || 'N/A',
+    course: partial.course || '',
+    gender: partial.gender || null,
+    department: partial.department || null,
+    program: partial.program || null,
     is_active: true
   };
 }

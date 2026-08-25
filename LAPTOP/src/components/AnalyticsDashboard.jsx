@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ChevronLeft, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X, Archive, Calendar, History, UserX } from 'lucide-react';
+import { Users, UserCheck, Shield, Award, Activity, RefreshCw, Layers, Compass, Building, CheckCircle2, Filter, XCircle, ChevronRight, ChevronLeft, ArrowLeft, RotateCcw, Star, Medal, Clock, Search, X, Archive, Calendar, History, UserX, PieChart } from 'lucide-react';
 import {
   Chart as ChartJS,
   CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  ArcElement,
   Title,
   Tooltip,
   Filler,
   Legend,
 } from 'chart.js';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { Line } from 'react-chartjs-2';
+import { Line, Doughnut } from 'react-chartjs-2';
 import AttendanceHistory from './AttendanceHistory';
+import DashboardUnitHierarchy from './DashboardUnitHierarchy';
 
 // Register Chart.js components + DataLabels plugin
 ChartJS.register(
@@ -21,6 +23,7 @@ ChartJS.register(
   LinearScale,
   PointElement,
   LineElement,
+  ArcElement,
   Title,
   Tooltip,
   Filler,
@@ -79,6 +82,49 @@ const growthChartOptions = {
       beginAtZero: true,
       grid: { color: '#f1f5f9' },
       ticks: { font: { size: 10 }, precision: 0 },
+    },
+  },
+};
+
+// --- Options for Department Distribution Donut Chart ---
+const departmentDonutOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  cutout: '68%',
+  plugins: {
+    legend: {
+      display: false,
+    },
+    datalabels: {
+      display: (context) => {
+        const val = context.dataset.data[context.dataIndex];
+        return val > 0;
+      },
+      color: '#ffffff',
+      font: { weight: 'bold', size: 10 },
+      formatter: (value, ctx) => {
+        const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+        return pct >= 6 ? `${pct}%` : '';
+      },
+      textShadowColor: 'rgba(0, 0, 0, 0.45)',
+      textShadowBlur: 4,
+    },
+    tooltip: {
+      backgroundColor: '#0f172a',
+      titleFont: { size: 12, weight: 'bold' },
+      bodyFont: { size: 11 },
+      padding: 10,
+      cornerRadius: 8,
+      callbacks: {
+        label: (context) => {
+          const label = context.label || '';
+          const value = context.parsed || 0;
+          const total = context.dataset.data.reduce((a, b) => a + b, 0);
+          const pct = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+          return ` ${label}: ${value} Cadets (${pct}%)`;
+        },
+      },
     },
   },
 };
@@ -562,9 +608,6 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   const formationCutoff = activeCutoff || getActiveFormationCutoff();
   const unitStructure = hookSettings?.unitStructure?.length > 0 ? hookSettings.unitStructure : DEFAULT_UNIT_STRUCTURE;
 
-  // Top-Level Category Selection ('BASIC_CADETS' | 'CADET_OFFICERS' | null)
-  const [mainCategory, setMainCategory] = useState(null);
-
   // Cascading Selection State for drill-downs
   const [selectedBattalion, setSelectedBattalion] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -578,49 +621,6 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
   const handleStatusCardClick = (status) => {
     setStatusFilter(prev => prev === status ? null : status);
-  };
-
-  // Helper: Match whether a log is a Cadet Officer
-  const isOfficerLog = (log) => {
-    const r = (log.rank || '').toLowerCase();
-    const b = (log.battalion || '').toLowerCase();
-    const c = (log.company || '').toLowerCase();
-    const p = (log.platoon || '').toLowerCase();
-    const d = (log.designation || '').toLowerCase();
-    const t = (log.type || log.category || '').toLowerCase();
-
-    return t === 'officer' || t.includes('officer') ||
-      b.includes('officer') || b.includes('brigade') ||
-      c.includes('officer') || c.includes('headquarters') ||
-      r.includes('1cl') || r.includes('2cl') || r.includes('3cl') || r.includes('4cl') || r.includes('aspirant') ||
-      r.includes('col') || r.includes('maj') || r.includes('cpt') || r.includes('lt') ||
-      d.includes('commander') || d.includes('staff') || d.includes('adjutant') || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7');
-  };
-
-  // Helper: Match a log to a specific Officer Class (1CL, 2CL, 3CL, 4CL, ASPIRANT)
-  const matchesOfficerClass = (log, classKey) => {
-    const r = (log.rank || '').toLowerCase();
-    const c = (log.company || '').toLowerCase();
-    const p = (log.platoon || '').toLowerCase();
-    const d = (log.designation || '').toLowerCase();
-    const k = (classKey || '').toLowerCase();
-
-    if (k === '1cl' || k.includes('1st')) {
-      return r.includes('1cl') || d.includes('corps commander') || d.includes('deputy commander') || r.includes('col');
-    }
-    if (k === '2cl' || k.includes('2nd')) {
-      return r.includes('2cl') || (r.includes('maj') && !r.includes('1cl')) || d.includes('s1') || d.includes('s2') || d.includes('s3') || d.includes('s4') || d.includes('s7') || d.includes('bn commander');
-    }
-    if (k === '3cl' || k.includes('3rd')) {
-      return r.includes('3cl') || (r.includes('cpt') && !r.includes('2cl')) || d.includes('coy commander');
-    }
-    if (k === '4cl' || k.includes('4th')) {
-      return r.includes('4cl') || (r.includes('2lt') || (r.includes('1lt') && !r.includes('3cl'))) || d.includes('platoon leader');
-    }
-    if (k === 'aspirant' || k.includes('aspirant')) {
-      return r.includes('aspirant') || r.includes('candidate') || r.includes('cocc') || c.includes('aspirant') || p.includes('aspirant');
-    }
-    return false;
   };
 
   // 1. Dynamic Hierarchical Structure & Auto-Expanding Total Strength
@@ -648,13 +648,11 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     });
 
     const allCadetsList = Array.from(allCadetsMap.values());
-    const basicCadets = allCadetsList.filter(c => !isOfficerLog(c));
-    const officerCadets = allCadetsList.filter(isOfficerLog);
 
     // Build dynamic Battalions -> Companies -> Platoons
     const battalions = unitStructure.map((bn, bnIdx) => {
       const bnNorm = normalizeBattalion(bn.name);
-      const bnCadets = basicCadets.filter(c => {
+      const bnCadets = allCadetsList.filter(c => {
         const cBnNorm = normalizeBattalion(c.battalion);
         return bnNorm && cBnNorm ? (bnNorm === cBnNorm) : false;
       });
@@ -674,7 +672,6 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           });
 
           // Platoon Strength is dynamically calculated from actual registered/scanned cadets in this platoon
-          // If no cadets exist anywhere in the app, it defaults strictly to 0
           const dynamicPlatoonStrength = plCadets.length;
 
           return {
@@ -706,20 +703,11 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       };
     });
 
-    // Basic Cadets Quota = Sum of Battalions
-    const totalBasicStrength = battalions.reduce((acc, b) => acc + b.targetQuota, 0);
-    // Officer Quota = Exact count of registered/scanned officers
-    const totalOfficerStrength = officerCadets.length;
-    // Total Unit Strength = Basic Cadets + Officer Corps = allCadetsList.length
     const totalUnitStrength = allCadetsList.length;
 
     return {
       allCadetsList,
-      basicCadets,
-      officerCadets,
       battalions,
-      totalBasicStrength,
-      totalOfficerStrength,
       totalUnitStrength
     };
   }, [propsCadets, rawMasterLogs, unitStructure]);
@@ -755,62 +743,89 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   // Dynamic Supabase & Historical Analytics Data (Cadet Growth & Unique Daily Attendance Trend)
   const { growthData: dynamicGrowthData, trendData: dynamicTrendData } = useDashboardAnalyticsData(rawMasterLogs, totalStrength);
 
-  const totalBasicQuota = dynamicHierarchy.totalBasicStrength;
-  const totalOfficerQuota = dynamicHierarchy.totalOfficerStrength;
+  // Department Distribution (Official CSU Palette)
+  const departmentDistribution = useMemo(() => {
+    const cadetList = (dynamicHierarchy.allCadetsList && dynamicHierarchy.allCadetsList.length > 0)
+      ? dynamicHierarchy.allCadetsList
+      : (propsCadets || []);
+
+    const counts = {
+      CAA: 0,
+      CCIS: 0,
+      CED: 0,
+      CEGS: 0,
+      CHASS: 0,
+      CMNS: 0,
+      COFES: 0,
+    };
+
+    let unassignedCount = 0;
+
+    cadetList.forEach(cadet => {
+      const deptRaw = String(cadet.department || '').trim().toUpperCase();
+      if (counts.hasOwnProperty(deptRaw)) {
+        counts[deptRaw] += 1;
+      } else if (deptRaw) {
+        if (deptRaw.includes('AGRI') || deptRaw.includes('CAA')) counts.CAA += 1;
+        else if (deptRaw.includes('COMPUT') || deptRaw.includes('CCIS') || deptRaw.includes('IT') || deptRaw.includes('CS')) counts.CCIS += 1;
+        else if (deptRaw.includes('EDUC') || deptRaw.includes('CED')) counts.CED += 1;
+        else if (deptRaw.includes('ENGIN') || deptRaw.includes('CEGS')) counts.CEGS += 1;
+        else if (deptRaw.includes('HUMAN') || deptRaw.includes('CHASS') || deptRaw.includes('ARTS')) counts.CHASS += 1;
+        else if (deptRaw.includes('MATH') || deptRaw.includes('NATURAL') || deptRaw.includes('CMNS') || deptRaw.includes('SCIENCE')) counts.CMNS += 1;
+        else if (deptRaw.includes('FOREST') || deptRaw.includes('COFES')) counts.COFES += 1;
+        else unassignedCount += 1;
+      } else {
+        unassignedCount += 1;
+      }
+    });
+
+    const totalCalculated = Object.values(counts).reduce((a, b) => a + b, 0) + unassignedCount;
+
+    const deptList = [
+      { key: 'CAA', name: 'College of Agriculture & Agri-Industries', color: '#EAB308', count: counts.CAA },
+      { key: 'CCIS', name: 'College of Computing & Information Sciences', color: '#F97316', count: counts.CCIS },
+      { key: 'CED', name: 'College of Education', color: '#3B82F6', count: counts.CED },
+      { key: 'CEGS', name: 'College of Engineering & Geosciences', color: '#881337', count: counts.CEGS },
+      { key: 'CHASS', name: 'College of Humanities & Social Sciences', color: '#8B5CF6', count: counts.CHASS },
+      { key: 'CMNS', name: 'College of Mathematics & Natural Sciences', color: '#EF4444', count: counts.CMNS },
+      { key: 'COFES', name: 'College of Forestry & Environmental Science', color: '#10B981', count: counts.COFES },
+    ];
+
+    if (unassignedCount > 0) {
+      deptList.push({ key: 'OTHER', name: 'Unassigned / Other', color: '#94A3B8', count: unassignedCount });
+    }
+
+    const hasData = deptList.some(d => d.count > 0);
+
+    const chartData = {
+      labels: deptList.map(d => d.key),
+      datasets: [
+        {
+          data: hasData ? deptList.map(d => d.count) : [0, 0, 0, 0, 0, 0, 0],
+          backgroundColor: deptList.map(d => d.color),
+          borderColor: '#ffffff',
+          borderWidth: 2,
+          hoverOffset: 6,
+        },
+      ],
+    };
+
+    return {
+      deptList,
+      chartData,
+      totalCount: totalCalculated,
+      hasData,
+    };
+  }, [dynamicHierarchy.allCadetsList, propsCadets]);
+
   const totalUnitStrengthQuota = totalStrength;
 
   // Expected Target Capacity from Unit Configuration Settings
-  const totalConfiguredBasicCapacity = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
-  const totalConfiguredOfficerCapacity = 60;
-  const totalConfiguredCapacity = totalStrength;
+  const totalConfiguredCapacity = unitStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0) || totalStrength;
 
   const totalPlatoonsCount = dynamicHierarchy.battalions.reduce((acc, bn) => {
     return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
   }, 0);
-
-  // Officer Classes Structure
-  const OFFICER_CLASSES = [
-    {
-      key: '1CL',
-      title: '1st Class',
-      name: '1st Class Officers',
-      shortName: '1st Class',
-      desc: 'Cadet COL, Cadet LT COL • Corps Command & Special Staff',
-      target: 4
-    },
-    {
-      key: '2CL',
-      title: '2nd Class',
-      name: '2nd Class Officers',
-      shortName: '2nd Class',
-      desc: 'Cadet MAJ, Cadet CPT • Brigade Staff & Battalion Commanders',
-      target: 8
-    },
-    {
-      key: '3CL',
-      title: '3rd Class',
-      name: '3rd Class Officers',
-      shortName: '3rd Class',
-      desc: 'Cadet CPT, Cadet 1LT • Company Commanders & Executive Officers',
-      target: 12
-    },
-    {
-      key: '4CL',
-      title: '4th Class',
-      name: '4th Class Officers',
-      shortName: '4th Class',
-      desc: 'Cadet 1LT, Cadet 2LT • Platoon Leaders & Junior Staff Officers',
-      target: 16
-    },
-    {
-      key: 'ASPIRANT',
-      title: 'Aspirant',
-      name: 'Aspirants & Candidates',
-      shortName: 'Aspirant',
-      desc: 'Cadet Officer Candidates (COCC) & Probationary Aspirants',
-      target: 20
-    }
-  ];
 
   // 2. Dynamic Counts calculated directly from today's attendanceLogs
   const { reconciledRoster: rawReconciledRoster, summary: rawSummary } = useMemo(() => {
@@ -859,30 +874,20 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   const uniqueCadetIds = new Set(attendanceLogs.map(l => (l.cadetId || '').trim()).filter(Boolean));
   const uniqueCadetsCount = uniqueCadetIds.size;
 
-  const basicCadetsCount = attendanceLogs.filter(l => !isOfficerLog(l)).length;
-  const cadetOfficersCount = attendanceLogs.filter(isOfficerLog).length;
-
-  const isOfficerSelected = mainCategory === 'CADET_OFFICERS';
-  const isBasicCadetsSelected = mainCategory === 'BASIC_CADETS';
-
   // 3. Filtered logs according to active Battalion selector for contextual counts
   const bnSelectorClean = selectedBattalion ? selectedBattalion.replace(' Battalion', '').toLowerCase().trim() : '';
   const activeLogs = selectedBattalion
     ? attendanceLogs.filter(log => {
-      if (selectedBattalion === 'CADET OFFICERS') {
-        return isOfficerLog(log);
-      }
       const echelon = getScannedUnitEchelon(log);
       return (echelon.battalion || '').toLowerCase().includes(bnSelectorClean);
     })
-    : (isOfficerSelected ? attendanceLogs.filter(isOfficerLog) : attendanceLogs);
+    : attendanceLogs;
 
-  // 4. Dynamic Basic Cadet Battalions from dynamicHierarchy
-  const basicBattalions = dynamicHierarchy.battalions.map((bn, idx) => {
+  // 4. Dynamic Battalions List from dynamicHierarchy
+  const battalionsList = dynamicHierarchy.battalions.map((bn, idx) => {
     const bnName = bn.name;
     const bnNorm = normalizeBattalion(bnName);
     const scanned = attendanceLogs.filter(l => {
-      if (isOfficerLog(l)) return false;
       const echelon = getScannedUnitEchelon(l);
       const lBnNorm = normalizeBattalion(echelon.battalion || l.battalion);
       return bnNorm && lBnNorm ? (bnNorm === lBnNorm) : false;
@@ -930,7 +935,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       const coNorm = normalizeCompany(echelon.company || log.company);
       return cNorm && coNorm ? (cNorm === coNorm) : false;
     }).length;
-    const percent = Math.min(100, Math.round((scanned / target) * 100));
+    const percent = target > 0 ? Math.min(100, Math.round((scanned / target) * 100)) : 0;
     return {
       key: c.shortCode || c.name,
       title: c.name,
@@ -974,7 +979,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       return matchCo && matchPl;
     }).length;
     const target = p.targetQuota;
-    const percent = Math.min(100, Math.round((scanned / target) * 100));
+    const percent = target > 0 ? Math.min(100, Math.round((scanned / target) * 100)) : 0;
 
     return {
       name: pName,
@@ -986,27 +991,11 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     };
   });
 
-  const overallPercent = Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100));
+  const overallPercent = totalUnitStrengthQuota > 0
+    ? Math.min(100, Math.round(((uniqueCadetsCount || totalAttendanceScans) / totalUnitStrengthQuota) * 100))
+    : 0;
 
-  // 6. Navigation / Selection Handlers
-  const handleSelectMainCategory = (cat) => {
-    if (mainCategory === cat) {
-      setMainCategory(null);
-      setSelectedBattalion(null);
-      setSelectedCompany(null);
-      setSelectedPlatoon(null);
-    } else {
-      setMainCategory(cat);
-      if (cat === 'CADET_OFFICERS') {
-        setSelectedBattalion('CADET OFFICERS');
-      } else {
-        setSelectedBattalion(null);
-      }
-      setSelectedCompany(null);
-      setSelectedPlatoon(null);
-    }
-  };
-
+  // 7. Navigation / Selection Handlers
   const handleSelectBattalion = (bnName) => {
     if (selectedBattalion === bnName) {
       setSelectedBattalion(null);
@@ -1038,21 +1027,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   };
 
   const handleResetToAllUnits = () => {
-    setMainCategory(null);
     setSelectedBattalion(null);
     setSelectedCompany(null);
     setSelectedPlatoon(null);
-  };
-
-  const handleResetToMainCategory = () => {
-    if (mainCategory === 'BASIC_CADETS') {
-      setSelectedBattalion(null);
-      setSelectedCompany(null);
-      setSelectedPlatoon(null);
-    } else if (mainCategory === 'CADET_OFFICERS') {
-      setSelectedCompany(null);
-      setSelectedPlatoon(null);
-    }
   };
 
   const handleBackToBattalions = () => {
@@ -1067,7 +1044,6 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   };
 
   const handleClearAllFilters = () => {
-    setMainCategory(null);
     setSelectedBattalion(null);
     setSelectedCompany(null);
     setSelectedPlatoon(null);
@@ -1076,14 +1052,13 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
   };
 
   const isAnyFilterActive =
-    mainCategory !== null ||
     selectedBattalion !== null ||
     selectedCompany !== null ||
     selectedPlatoon !== null ||
     searchQuery.trim().length > 0 ||
     statusFilter !== null;
 
-  // 7. Interactive Filtered Master Roster Records (All 1,194 Cadets including Absentees)
+  // 8. Interactive Filtered Master Roster Records
   const tableFilteredCadets = reconciledRoster.filter(cadet => {
     // Search query filter (Cadet ID or Name, case-insensitive)
     if (searchQuery.trim()) {
@@ -1095,15 +1070,8 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
       }
     }
 
-    // Top-Level Main Category Filter
-    if (mainCategory === 'BASIC_CADETS') {
-      if (isOfficerLog(cadet)) return false;
-    } else if (mainCategory === 'CADET_OFFICERS') {
-      if (!isOfficerLog(cadet)) return false;
-    }
-
     let matchesBn = true;
-    if (selectedBattalion && selectedBattalion !== 'CADET OFFICERS') {
+    if (selectedBattalion) {
       const selectedBnNorm = normalizeBattalion(selectedBattalion);
       const cadetBnNorm = normalizeBattalion(cadet.battalion);
       matchesBn = selectedBnNorm && cadetBnNorm ? (selectedBnNorm === cadetBnNorm) : (cadet.battalion || '').toLowerCase().includes(selectedBattalion.toLowerCase());
@@ -1111,17 +1079,13 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
     let matchesCo = true;
     if (selectedCompany) {
-      if (isOfficerSelected) {
-        matchesCo = matchesOfficerClass(cadet, selectedCompany);
-      } else {
-        const selectedCoNorm = normalizeCompany(selectedCompany);
-        const cadetCoNorm = normalizeCompany(cadet.company);
-        matchesCo = selectedCoNorm && cadetCoNorm ? (selectedCoNorm === cadetCoNorm) : (cadet.company || '').toLowerCase().includes(selectedCompany.toLowerCase());
-      }
+      const selectedCoNorm = normalizeCompany(selectedCompany);
+      const cadetCoNorm = normalizeCompany(cadet.company);
+      matchesCo = selectedCoNorm && cadetCoNorm ? (selectedCoNorm === cadetCoNorm) : (cadet.company || '').toLowerCase().includes(selectedCompany.toLowerCase());
     }
 
     let matchesPl = true;
-    if (!isOfficerSelected && selectedPlatoon) {
+    if (selectedPlatoon) {
       const selectedPlNorm = normalizePlatoon(selectedPlatoon);
       const cadetPlNorm = normalizePlatoon(cadet.platoon);
       matchesPl = selectedPlNorm && cadetPlNorm ? (selectedPlNorm === cadetPlNorm) : false;
@@ -1137,13 +1101,8 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
     return matchesBn && matchesCo && matchesPl;
   });
 
-  // Get active Officer Class display label for breadcrumbs
   const getSelectedCompanyDisplay = () => {
     if (!selectedCompany) return '';
-    if (isOfficerSelected) {
-      const cls = OFFICER_CLASSES.find(c => c.key === selectedCompany || c.title === selectedCompany || c.name === selectedCompany);
-      return cls ? cls.title : selectedCompany;
-    }
     return `${selectedCompany} Company`;
   };
 
@@ -1218,6 +1177,147 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           </div>
         </div>
 
+      </div>
+
+      {/* ========================================================================= */}
+      {/* Department Distribution Donut Chart Widget (Tactical College Breakdown)   */}
+      {/* ========================================================================= */}
+      <div
+        style={{
+          backgroundColor: '#ffffff',
+          padding: '1.25rem 1.5rem',
+          borderRadius: '0.75rem',
+          border: '1px solid #e2e8f0',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          marginBottom: '2rem'
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '8px',
+              background: 'rgba(6, 78, 46, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--rotc-green-dark, #064e2e)'
+            }}>
+              <PieChart size={20} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '0.95rem', fontWeight: '800', color: '#1e293b', margin: 0, letterSpacing: '0.2px' }}>
+                DEPARTMENT DISTRIBUTION
+              </h3>
+              <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                Cadet strength allocation across CSU Academic Colleges
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{
+              fontSize: '0.75rem',
+              fontWeight: '700',
+              padding: '0.25rem 0.65rem',
+              borderRadius: '6px',
+              backgroundColor: '#f1f5f9',
+              color: '#334155',
+              border: '1px solid #e2e8f0'
+            }}>
+              {departmentDistribution.totalCount} Enrolled Cadets
+            </span>
+          </div>
+        </div>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'minmax(260px, 320px) 1fr',
+          gap: '2rem',
+          alignItems: 'center'
+        }}>
+          {/* Donut Chart Container */}
+          <div style={{ position: 'relative', height: '230px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Doughnut data={departmentDistribution.chartData} options={departmentDonutOptions} />
+            
+            {/* Center Donut Label */}
+            <div style={{
+              position: 'absolute',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              textAlign: 'center',
+              pointerEvents: 'none'
+            }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: '900', color: '#0f172a', lineHeight: 1 }}>
+                {departmentDistribution.totalCount}
+              </div>
+              <div style={{ fontSize: '0.68rem', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', marginTop: '3px' }}>
+                Total Cadets
+              </div>
+            </div>
+          </div>
+
+          {/* Department Breakdown Progress Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
+            gap: '0.75rem'
+          }}>
+            {departmentDistribution.deptList.map(dept => {
+              const pct = departmentDistribution.totalCount > 0
+                ? Math.round((dept.count / departmentDistribution.totalCount) * 100)
+                : 0;
+
+              return (
+                <div
+                  key={dept.key}
+                  style={{
+                    backgroundColor: '#f8fafc',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: '10px',
+                        height: '10px',
+                        borderRadius: '50%',
+                        backgroundColor: dept.color,
+                        boxShadow: `0 0 6px ${dept.color}66`
+                      }}></span>
+                      <strong style={{ fontSize: '0.82rem', color: '#1e293b' }}>
+                        {dept.key}
+                      </strong>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', fontWeight: '800', color: '#0f172a' }}>
+                      {dept.count} <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: '600' }}>({pct}%)</span>
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: '0.4rem' }} title={dept.name}>
+                    {dept.name}
+                  </div>
+
+                  <div style={{ width: '100%', height: '5px', backgroundColor: '#e2e8f0', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${pct}%`,
+                      height: '100%',
+                      backgroundColor: dept.color,
+                      borderRadius: '3px',
+                      transition: 'width 0.5s ease-out'
+                    }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       {/* Header Banner */}
@@ -1371,515 +1471,15 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
 
 
 
-      {/* ========================================================================= */}
-      {/* LEVEL 0: Select Unit Category (Basic Cadets vs Cadet Officers)            */}
-      {/* ========================================================================= */}
-      <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>
-        <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div>
-            <div className="card-title" style={{ fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-dark)' }}>
-              <Compass size={20} color="var(--rotc-green-dark)" />
-              <span style={{ fontWeight: 800 }}>Select Unit Category</span>
-            </div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-              Choose whether to view and filter the <strong>Basic Cadets</strong> hierarchy ({unitStructure.length} Battalions) or the <strong>Cadet Officers</strong> Corps.
-            </div>
-          </div>
-
-          {mainCategory && (
-            <span className="badge" style={{
-              background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
-              color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
-              fontWeight: 800,
-              border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`
-            }}>
-              ✓ {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'} Selected
-            </span>
-          )}
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
-
-          {/* Option 1: BASIC CADETS (Theme: Dark Slate / Charcoal) */}
-          <div
-            onClick={() => handleSelectMainCategory('BASIC_CADETS')}
-            style={{
-              background: isBasicCadetsSelected ? '#f1f5f9' : '#ffffff',
-              padding: '1.25rem',
-              borderRadius: '12px',
-              border: isBasicCadetsSelected ? '2px solid #334155' : '1px solid var(--border-light)',
-              boxShadow: isBasicCadetsSelected ? '0 4px 16px rgba(51, 65, 85, 0.25)' : 'var(--shadow-sm)',
-              cursor: 'pointer',
-              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.6rem'
-            }}
-            title="Click to select Basic Cadets hierarchy"
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: isBasicCadetsSelected ? '#334155' : 'rgba(51, 65, 85, 0.12)',
-                  color: isBasicCadetsSelected ? '#ffffff' : '#334155',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 800
-                }}>
-                  <Shield size={22} />
-                </div>
-                <div>
-                  <div style={{ color: isBasicCadetsSelected ? '#0f172a' : '#1e293b', fontSize: '1.1rem', fontWeight: 800 }}>
-                    BASIC CADETS
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    {unitStructure.length} Battalions • {totalPlatoonsCount} Platoons
-                  </div>
-                </div>
-              </div>
-
-              <span className="badge" style={{
-                background: isBasicCadetsSelected ? '#334155' : '#e2e8f0',
-                color: isBasicCadetsSelected ? '#ffffff' : '#1e293b',
-                fontWeight: 800
-              }}>
-                {basicCadetsCount} / {totalBasicQuota}
-              </span>
-            </div>
-
-            <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${Math.min(100, Math.round((basicCadetsCount / totalBasicQuota) * 100))}%`, height: '100%', background: 'linear-gradient(90deg, #1e293b, #475569)', transition: 'width 0.4s ease' }}></div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isBasicCadetsSelected ? '#0f172a' : 'var(--text-muted)', fontWeight: 700 }}>
-              <span>{isBasicCadetsSelected ? '▼ Battalions Revealed Below' : '▶ Click to Drill Down into Battalions'}</span>
-              <span>{totalBasicQuota.toLocaleString()} Cadets Quota</span>
-            </div>
-          </div>
-
-          {/* Option 2: CADET OFFICERS (Theme: Indigo / Purple) */}
-          <div
-            onClick={() => handleSelectMainCategory('CADET_OFFICERS')}
-            style={{
-              background: isOfficerSelected ? '#eef2ff' : '#ffffff',
-              padding: '1.25rem',
-              borderRadius: '12px',
-              border: isOfficerSelected ? '2px solid #4f46e5' : '1px solid var(--border-light)',
-              boxShadow: isOfficerSelected ? '0 4px 16px rgba(79, 70, 229, 0.25)' : 'var(--shadow-sm)',
-              cursor: 'pointer',
-              transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.6rem'
-            }}
-            title="Click to select Cadet Officers and view officer classes"
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: isOfficerSelected ? '#4f46e5' : 'rgba(79, 70, 229, 0.12)',
-                  color: isOfficerSelected ? '#ffffff' : '#4f46e5',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 800
-                }}>
-                  <Medal size={22} />
-                </div>
-                <div>
-                  <div style={{ color: isOfficerSelected ? '#312e81' : '#3730a3', fontSize: '1.1rem', fontWeight: 800 }}>
-                    CADET OFFICERS
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    1st, 2nd, 3rd, 4th Class & Aspirants
-                  </div>
-                </div>
-              </div>
-
-              <span className="badge" style={{
-                background: isOfficerSelected ? '#4f46e5' : '#e0e7ff',
-                color: isOfficerSelected ? '#ffffff' : '#3730a3',
-                fontWeight: 800
-              }}>
-                {cadetOfficersCount} / {totalOfficerQuota}
-              </span>
-            </div>
-
-            <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden' }}>
-              <div style={{ width: `${totalOfficerQuota > 0 ? Math.min(100, Math.round((cadetOfficersCount / totalOfficerQuota) * 100)) : 0}%`, height: '100%', background: 'linear-gradient(90deg, #4338ca, #6366f1)', transition: 'width 0.4s ease' }}></div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isOfficerSelected ? '#3730a3' : 'var(--text-muted)', fontWeight: 700 }}>
-              <span>{isOfficerSelected ? '▼ Officer Classes Revealed Below' : '▶ Click to View Officer Classes'}</span>
-              <span>{totalOfficerQuota.toLocaleString()} Officers Registered</span>
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* LEVEL 1: Basic Cadets -> Battalion Selection (Theme: BLUE)               */}
-      {/* ========================================================================= */}
-      {isBasicCadetsSelected && (
-        <div className="card">
-          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              <div className="card-title" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px', color: '#1e40af' }}>
-                <Layers size={18} color="#2563eb" />
-                <span style={{ color: '#1e3a8a', fontWeight: 800 }}>Step 1: Battalion ({basicBattalions.length} Configured)</span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {selectedBattalion
-                  ? `Active Battalion: ${selectedBattalion}. Click another card or click again to change.`
-                  : 'Click a Battalion card below to drill down into its Companies.'}
-              </div>
-            </div>
-
-            {selectedBattalion && (
-              <span className="badge" style={{ background: '#dbeafe', color: '#1e40af', fontWeight: 800, border: '1px solid #93c5fd' }}>
-                ✓ {selectedBattalion} Selected
-              </span>
-            )}
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem' }}>
-            {basicBattalions.map(bn => {
-              const pct = Math.min(100, Math.round((bn.scanned / bn.target) * 100));
-              const isSelected = selectedBattalion === bn.name;
-              const IconComp = bn.icon || Shield;
-
-              return (
-                <div
-                  key={bn.id || bn.name}
-                  onClick={() => handleSelectBattalion(bn.name)}
-                  style={{
-                    background: isSelected ? '#eff6ff' : '#f8fafc',
-                    padding: '1.1rem',
-                    borderRadius: '12px',
-                    border: isSelected ? '2px solid #2563eb' : '1px solid var(--border-light)',
-                    boxShadow: isSelected ? '0 4px 16px rgba(37, 99, 235, 0.25)' : 'var(--shadow-sm)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-                    position: 'relative'
-                  }}
-                  title={`Click to select ${bn.name} and view companies`}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <IconComp size={18} color="#2563eb" />
-                      <strong style={{ color: isSelected ? '#1e3a8a' : '#1e40af', fontSize: '1rem' }}>
-                        {bn.name}
-                      </strong>
-                      <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: '4px' }}>
-                        {bn.shortCode}
-                      </span>
-                    </div>
-                    <span className="badge" style={{
-                      background: isSelected ? '#2563eb' : (bn.scanned > 0 ? '#dbeafe' : '#f1f5f9'),
-                      color: isSelected ? '#ffffff' : (bn.scanned > 0 ? '#1e40af' : '#64748b'),
-                      fontWeight: 800
-                    }}>
-                      {bn.scanned} / {bn.target} ({pct}%)
-                    </span>
-                  </div>
-
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.75rem' }}>
-                    {bn.companiesDesc}
-                  </div>
-
-                  <div style={{ width: '100%', height: '8px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #1d4ed8, #3b82f6)', transition: 'width 0.4s ease' }}></div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: isSelected ? '#1d4ed8' : 'var(--text-muted)', fontWeight: 700 }}>
-                    <span>{isSelected ? '▼ Companies Revealed Below' : '▶ Click to Drill Down'}</span>
-                    <span>{bn.target} Quota</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* LEVEL 2: Basic Cadets -> Company Selection (Theme: EMERALD / GREEN)       */}
-      {/* ========================================================================= */}
-      {isBasicCadetsSelected && selectedBattalion && (
-        <div className="card" style={{ border: '2px solid #a7f3d0', background: '#f6fdf9' }}>
-          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              <div className="card-title" style={{ fontSize: '1rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Building size={18} color="#059669" />
-                <span style={{ color: '#064e2e', fontWeight: 800 }}>
-                  Step 2: Companies • {selectedBattalion} ({companyCounts.length} Coys)
-                </span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {selectedCompany
-                  ? `Active Company: ${selectedCompany}. Platoons revealed below.`
-                  : 'Click a Company card below to view its Platoon formations.'}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {selectedCompany && (
-                <span className="badge" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 800, border: '1px solid #6ee7b7' }}>
-                  ✓ {selectedCompany} Selected
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-            {companyCounts.map(comp => {
-              const isSelected = selectedCompany === comp.key || selectedCompany === comp.shortName || selectedCompany === comp.name;
-
-              return (
-                <div
-                  key={comp.key}
-                  onClick={() => handleSelectCompany(comp.key)}
-                  style={{
-                    padding: '1rem',
-                    background: isSelected ? '#ecfdf5' : '#ffffff',
-                    borderRadius: '10px',
-                    border: isSelected ? '2px solid #059669' : '1px solid #a7f3d0',
-                    boxShadow: isSelected ? '0 4px 14px rgba(5, 150, 105, 0.2)' : 'var(--shadow-sm)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
-                  }}
-                  title={`Click to select ${comp.name} and view its platoons`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 800, color: isSelected ? '#064e2e' : '#065f46', fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>{comp.name}</span>
-                        <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#d1fae5', color: '#065f46', padding: '1px 5px', borderRadius: '3px' }}>
-                          {comp.shortName}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{comp.desc}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span className="badge" style={{
-                        background: isSelected ? '#059669' : (comp.scanned > 0 ? '#d1fae5' : '#f1f5f9'),
-                        color: isSelected ? '#ffffff' : (comp.scanned > 0 ? '#065f46' : '#64748b'),
-                        fontWeight: 800,
-                        fontSize: '0.75rem'
-                      }}>
-                        {comp.scanned} / {comp.target} ({comp.percent}%)
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', margin: '0.5rem 0' }}>
-                    <div style={{ width: `${comp.percent}%`, height: '100%', background: 'linear-gradient(90deg, #064e2e, #059669)', transition: 'width 0.4s ease' }}></div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#065f46' : 'var(--text-muted)', fontWeight: 700 }}>
-                    <span>{isSelected ? '▼ Platoons Revealed Below' : '▶ Click to Reveal Platoons'}</span>
-                    <span>{comp.target} Quota</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* LEVEL 3: Basic Cadets -> Platoon Selection (Theme: AMBER / ORANGE)        */}
-      {/* ========================================================================= */}
-      {isBasicCadetsSelected && selectedBattalion && selectedCompany && (
-        <div className="card" style={{ border: '2px solid #fde68a', background: '#fffdf5' }}>
-          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              <div className="card-title" style={{ fontSize: '1rem', color: '#92400e', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Users size={18} color="#d97706" />
-                <span style={{ color: '#78350f', fontWeight: 800 }}>
-                  Step 3: Platoon Formations • {selectedCompany} ({selectedBattalion})
-                </span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {selectedPlatoon
-                  ? `Filtering table by: ${selectedPlatoon}. Click again to clear platoon focus.`
-                  : 'Click a platoon card to focus the attendance table specifically on that platoon.'}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {selectedPlatoon && (
-                <span className="badge" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 800, border: '1px solid #fcd34d' }}>
-                  ✓ {selectedPlatoon} Focused
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem' }}>
-            {platoonCounts.map(pltn => {
-              const isSelected = selectedPlatoon === pltn.name;
-
-              return (
-                <div
-                  key={pltn.name}
-                  onClick={() => handleSelectPlatoon(pltn.name)}
-                  style={{
-                    padding: '1rem',
-                    background: isSelected ? '#fffbeb' : '#ffffff',
-                    borderRadius: '10px',
-                    border: isSelected ? '2px solid #d97706' : '1px solid #fde68a',
-                    boxShadow: isSelected ? '0 4px 14px rgba(217, 119, 6, 0.2)' : 'var(--shadow-sm)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)'
-                  }}
-                  title={`Click to filter attendance logs by ${pltn.name}`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                    <div>
-                      <div style={{ fontWeight: 800, color: isSelected ? '#78350f' : '#92400e', fontSize: '0.92rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>{pltn.name}</span>
-                        <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 5px', borderRadius: '3px' }}>
-                          {pltn.shortCode}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{pltn.desc}</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span className="badge" style={{
-                        background: isSelected ? '#d97706' : (pltn.scanned > 0 ? '#fef3c7' : '#f1f5f9'),
-                        color: isSelected ? '#ffffff' : (pltn.scanned > 0 ? '#92400e' : '#64748b'),
-                        fontWeight: 800,
-                        fontSize: '0.75rem'
-                      }}>
-                        {pltn.scanned} / {pltn.target} ({pltn.percent}%)
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ width: '100%', height: '7px', background: '#e2e8f0', borderRadius: '4px', overflow: 'hidden', margin: '0.5rem 0' }}>
-                    <div style={{ width: `${pltn.percent}%`, height: '100%', background: 'linear-gradient(90deg, #d97706, #f59e0b)', transition: 'width 0.4s ease' }}></div>
-                  </div>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#92400e' : 'var(--text-muted)', fontWeight: 700 }}>
-                    <span>{isSelected ? '● Table Filter Active' : '▶ Click to Filter Table'}</span>
-                    <span>{pltn.target} Quota</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* CADET OFFICERS: Clean Stacked Full-Width Vertical Cards (EMERALD Theme)   */}
-      {/* ========================================================================= */}
-      {isOfficerSelected && (
-        <div className="card" style={{ border: '2px solid #a7f3d0', background: '#f6fdf9' }}>
-          <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
-            <div>
-              <div className="card-title" style={{ fontSize: '1rem', color: '#065f46', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Medal size={18} color="#059669" />
-                <span style={{ color: '#064e2e', fontWeight: 800 }}>
-                  Cadet Officer Classes (Click to Filter Attendance Table)
-                </span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {selectedCompany
-                  ? `Active Selection: ${getSelectedCompanyDisplay()}. Table filtered below.`
-                  : 'Click any stacked Officer Class below to directly filter the attendance records.'}
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {selectedCompany && (
-                <span className="badge" style={{ background: '#d1fae5', color: '#065f46', fontWeight: 800, border: '1px solid #6ee7b7' }}>
-                  ✓ {getSelectedCompanyDisplay()} Active
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {OFFICER_CLASSES.map(comp => {
-              const isSelected = selectedCompany === comp.key || selectedCompany === comp.title || selectedCompany === comp.shortName || selectedCompany === comp.name;
-
-              return (
-                <div
-                  key={comp.key}
-                  onClick={() => handleSelectCompany(comp.key)}
-                  style={{
-                    padding: '1.1rem 1.35rem',
-                    background: isSelected ? '#ecfdf5' : '#ffffff',
-                    borderRadius: '10px',
-                    border: isSelected ? '2px solid #059669' : '1px solid #d1fae5',
-                    boxShadow: isSelected ? '0 4px 14px rgba(5, 150, 105, 0.2)' : 'var(--shadow-sm)',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    flexWrap: 'wrap',
-                    gap: '0.75rem'
-                  }}
-                  title={`Click to filter attendance logs by ${comp.title}`}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-                    <div style={{
-                      width: '42px',
-                      height: '42px',
-                      borderRadius: '10px',
-                      background: isSelected ? '#059669' : 'rgba(5, 150, 105, 0.1)',
-                      color: isSelected ? '#ffffff' : '#059669',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontWeight: 800,
-                      fontSize: '1rem',
-                      flexShrink: 0
-                    }}>
-                      <Star size={20} />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 800, color: isSelected ? '#064e2e' : '#065f46', fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span>{comp.title}</span>
-                        {isSelected && (
-                          <span style={{ background: '#059669', color: '#ffffff', fontSize: '0.68rem', fontWeight: 800, padding: '2px 8px', borderRadius: '4px' }}>
-                            ACTIVE FILTER
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)', marginTop: '2px' }}>{comp.desc}</div>
-                    </div>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      color: isSelected ? '#059669' : 'var(--text-muted)',
-                      background: isSelected ? 'rgba(5, 150, 105, 0.1)' : 'transparent',
-                      padding: '4px 10px',
-                      borderRadius: '6px'
-                    }}>
-                      {isSelected ? '✓ Filter Active' : '▶ Click to Filter'}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Replace old Step 1/2/3 cards with this single unified component */}
+      <DashboardUnitHierarchy
+        selectedBattalion={selectedBattalion}
+        setSelectedBattalion={setSelectedBattalion}
+        selectedCompany={selectedCompany}
+        setSelectedCompany={setSelectedCompany}
+        selectedPlatoon={selectedPlatoon}
+        setSelectedPlatoon={setSelectedPlatoon}
+      />
 
       {/* ========================================================================= */}
       {/* Attendance Ingestions Table (Dynamically Filtered by Active Echelons)      */}
@@ -1895,23 +1495,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
               <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '3px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <Filter size={13} color="var(--rotc-green-dark)" />
                 <span style={{ color: 'var(--text-muted)' }}>Active filters:</span>
-                {mainCategory && (
-                  <strong
-                    onClick={() => { setMainCategory(null); setSelectedBattalion(null); setSelectedCompany(null); setSelectedPlatoon(null); }}
-                    style={{
-                      background: isBasicCadetsSelected ? '#e2e8f0' : '#e0e7ff',
-                      color: isBasicCadetsSelected ? '#1e293b' : '#3730a3',
-                      border: `1px solid ${isBasicCadetsSelected ? '#94a3b8' : '#a5b4fc'}`,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      cursor: 'pointer'
-                    }}
-                    title="Click to clear category filter"
-                  >
-                    {isBasicCadetsSelected ? 'BASIC CADETS' : 'CADET OFFICERS'} ×
-                  </strong>
-                )}
-                {isBasicCadetsSelected && selectedBattalion && (
+                {selectedBattalion && (
                   <strong
                     onClick={() => { setSelectedBattalion(null); setSelectedCompany(null); setSelectedPlatoon(null); }}
                     style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
@@ -1929,7 +1513,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                     {getSelectedCompanyDisplay()} ×
                   </strong>
                 )}
-                {isBasicCadetsSelected && selectedPlatoon && (
+                {selectedPlatoon && (
                   <strong
                     onClick={() => setSelectedPlatoon(null)}
                     style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
@@ -1959,7 +1543,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
               </div>
             ) : (
               <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '3px' }}>
-                Showing full Brigade Master Roster (1,194 Cadets). Scanned cadets update to Present/Late in real-time.
+                Showing full Brigade Master Roster ({totalStrength} Cadets). Scanned cadets update to Present/Late in real-time.
               </div>
             )}
           </div>
@@ -2099,7 +1683,7 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
           </div>
         ) : tableFilteredCadets.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-            No cadets matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({mainCategory ? (isBasicCadetsSelected ? 'Basic Cadets' : 'Cadet Officers') : 'All Units'}{selectedBattalion && isBasicCadetsSelected ? ` • ${selectedBattalion}` : ''}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{isBasicCadetsSelected && selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
+            No cadets matching active filters {searchQuery.trim() ? `and search term "${searchQuery.trim()}"` : ''} ({selectedBattalion || 'All Battalions'}{selectedCompany ? ` • ${getSelectedCompanyDisplay()}` : ''}{selectedPlatoon ? ` • ${selectedPlatoon}` : ''}).
           </div>
         ) : (
           <div className="table-responsive">
@@ -2120,7 +1704,6 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
               </thead>
               <tbody>
                 {tableFilteredCadets.map((cadet, idx) => {
-                  const isOfficer = isOfficerLog(cadet);
                   const timeInDisplay = cadet.timeIn
                     ? new Date(cadet.timeIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                     : null;
@@ -2134,9 +1717,9 @@ export default function AnalyticsDashboard({ cadets: propsCadets = [], attendanc
                       <td>{idx + 1}</td>
                       <td style={{ fontWeight: 700, color: 'var(--rotc-green-dark)' }}>{cadet.cadetId}</td>
                       <td style={{ fontWeight: 600 }}>{cadet.name}</td>
-                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{cadet.battalion || (isOfficer ? 'CADET OFFICERS' : '1st Battalion')}</span></td>
-                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{cadet.company || (isOfficer ? 'Cadet Officer' : 'Alpha')}</span></td>
-                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{cadet.platoon || (isOfficer ? 'Officer Corps' : '1st Platoon')}</span></td>
+                      <td><span className="badge" style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #bfdbfe' }}>{cadet.battalion || '1st Battalion'}</span></td>
+                      <td><span className="badge" style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #a7f3d0' }}>{cadet.company || 'Alpha Company'}</span></td>
+                      <td><span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a' }}>{cadet.platoon || '1st Platoon'}</span></td>
 
                       {/* Time-In Column */}
                       <td>
