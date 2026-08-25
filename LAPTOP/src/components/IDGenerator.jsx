@@ -5,6 +5,51 @@ import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSett
 
 export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
 
+// Helper to parse Company Name to Numeric Code (1-4)
+export const getCompanyCode = (companyStr) => {
+  if (!companyStr) return 1;
+  const upper = String(companyStr).toUpperCase();
+  if (upper.includes('ALPHA') || upper === '1') return 1;
+  if (upper.includes('BRAVO') || upper === '2') return 2;
+  if (upper.includes('CHARLIE') || upper === '3') return 3;
+  if (upper.includes('DELTA') || upper === '4') return 4;
+  return 1;
+};
+
+// Helper to extract numeric values (e.g., "1ST BATTALION" -> 1)
+export const extractNumber = (str) => {
+  if (!str && str !== 0) return 1;
+  if (typeof str === 'number') return str;
+  const match = String(str).match(/\d+/);
+  return match ? parseInt(match[0], 10) : 1;
+};
+
+// Helper to extract Last Name ONLY
+export const getLastNameOnly = (fullName) => {
+  if (!fullName) return '';
+  const str = String(fullName).trim();
+  // Handles "LASTNAME, FIRSTNAME M" or "FIRSTNAME LASTNAME"
+  if (str.includes(',')) {
+    return str.split(',')[0].trim().toUpperCase();
+  }
+  const parts = str.split(/\s+/);
+  return parts[parts.length - 1].toUpperCase();
+};
+
+// Generate Compact QR Payload String
+export const generateQrPayload = (cadet) => {
+  if (!cadet) return '{}';
+  const payload = {
+    id: cadet.id || cadet.cadet_id || cadet.cadetId || '',
+    name: getLastNameOnly(cadet.name || cadet.full_name || cadet.fullName || ''),
+    bat: extractNumber(cadet.battalion),
+    coy: getCompanyCode(cadet.company),
+    pl: extractNumber(cadet.platoon),
+  };
+
+  return JSON.stringify(payload);
+};
+
 export default function IDGenerator({ cadets = [] }) {
   // Category state: 'basic' | 'officer'
   const [category, setCategory] = useState(() => {

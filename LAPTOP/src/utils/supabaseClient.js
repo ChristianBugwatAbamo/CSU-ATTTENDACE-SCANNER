@@ -315,7 +315,7 @@ export async function bulkUpsertCadetsToSupabase(cadetsList) {
       const chunk = cadetRows.slice(i, i + CHUNK_SIZE);
       const { error } = await client
         .from('cadets')
-        .upsert(chunk, { onConflict: 'id' });
+        .upsert(chunk, { onConflict: 'id', ignoreDuplicates: true });
       if (error) throw error;
     }
     return cadetRows;
@@ -375,7 +375,7 @@ export function inferCadetFromId(cadetId, partial = {}) {
     ? String(partial.name).trim()
     : `CADET ${cid}`;
 
-  return {
+  const inferred = {
     id: cid,
     name: cleanName,
     rank: rank,
@@ -384,12 +384,17 @@ export function inferCadetFromId(cadetId, partial = {}) {
     platoon: pl || '1st Platoon',
     type: type,
     designation: partial.designation || 'N/A',
-    course: partial.course || '',
-    gender: partial.gender || null,
-    department: partial.department || null,
-    program: partial.program || null,
+    course: partial.course || partial.program || '',
     is_active: true
   };
+
+  if (partial.gender) inferred.gender = partial.gender;
+  if (partial.department) inferred.department = partial.department;
+  if (partial.program) inferred.program = partial.program;
+  if (partial.contact_number || partial.contactNumber) inferred.contact_number = partial.contact_number || partial.contactNumber;
+  if (partial.emergency_contact || partial.emergencyContact) inferred.emergency_contact = partial.emergency_contact || partial.emergencyContact;
+
+  return inferred;
 }
 
 /**
@@ -476,13 +481,13 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     }
   });
 
-  // Provision cadets
+  // Provision newly discovered cadets without modifying or overwriting existing cadet profiles
   const cadetRows = Array.from(uniqueCadetsMap.values());
   const CADET_CHUNK_SIZE = 400;
   for (let i = 0; i < cadetRows.length; i += CADET_CHUNK_SIZE) {
     const chunk = cadetRows.slice(i, i + CADET_CHUNK_SIZE);
     try {
-      await client.from('cadets').upsert(chunk, { onConflict: 'id' });
+      await client.from('cadets').upsert(chunk, { onConflict: 'id', ignoreDuplicates: true });
     } catch (_) {}
   }
 

@@ -63,6 +63,9 @@ export default function QRScanner({
   // Manual override candidate for scanning beyond quota
   const [overrideCandidate, setOverrideCandidate] = useState(null);
 
+  // Echelon Mismatch Alert state
+  const [echelonMismatchAlert, setEchelonMismatchAlert] = useState(null);
+
   // Real-time Ref Set of scanned Cadet IDs to prevent stale closures and rapid frame duplicates
   const scannedIdsSetRef = useRef(new Set());
 
@@ -99,6 +102,12 @@ export default function QRScanner({
     } catch (e) {
       console.log("Audio beep unavailable:", e);
     }
+  };
+
+  // Warning Buzzer Sound & Haptic Vibration for Echelon Mismatches
+  const playWarningBuzzer = () => {
+    playBeep(260, 'sawtooth', 0.4);
+    triggerHaptic([200, 100, 200, 100, 200]);
   };
 
   // Haptic Feedback
@@ -236,68 +245,166 @@ export default function QRScanner({
     };
   }, [facingMode]);
 
+// Strict JSON Structural Validator for Official CSU ROTC Cadet ID QR Code
+const isValidRotcPayload = (data) => {
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+
+  // Ensure exact keys exist and no extra metadata is added
+  const keys = Object.keys(data);
+  const requiredKeys = ['id', 'name', 'bat', 'coy', 'pl'];
+
+  // Reject if key count doesn't match exactly 5
+  if (keys.length !== 5) return false;
+
+  // Validate presence and data types of required short keys
+  const hasValidKeys = requiredKeys.every((key) => key in data);
+  const hasValidTypes =
+    typeof data.id === 'string' &&
+    data.id.trim().length > 0 &&
+    typeof data.name === 'string' &&
+    data.name.trim().length > 0 &&
+    typeof data.bat === 'number' &&
+    typeof data.coy === 'number' &&
+    typeof data.pl === 'number';
+
+  return hasValidKeys && hasValidTypes;
+};
+
+// Helper to extract numeric values
+const extractNumber = (str) => {
+  if (!str && str !== 0) return null;
+  if (typeof str === 'number') return str;
+  const match = String(str).match(/\d+/);
+  return match ? parseInt(match[0], 10) : null;
+};
+
+// Helper to extract numeric company code 1-4
+const getCompanyCode = (companyStr) => {
+  if (!companyStr && companyStr !== 0) return null;
+  if (typeof companyStr === 'number') return companyStr;
+  const upper = String(companyStr).toUpperCase();
+  if (upper.includes('ALPHA') || upper === '1') return 1;
+  if (upper.includes('BRAVO') || upper === '2') return 2;
+  if (upper.includes('CHARLIE') || upper === '3') return 3;
+  if (upper.includes('DELTA') || upper === '4') return 4;
+  return null;
+};
+
+const companyMap = {
+  1: 'Alpha Company',
+  2: 'Bravo Company',
+  3: 'Charlie Company',
+  4: 'Delta Company'
+};
+
+const companyNameMap = {
+  1: 'ALPHA COY',
+  2: 'BRAVO COY',
+  3: 'CHARLIE COY',
+  4: 'DELTA COY'
+};
+
   const handleScannedCode = (decodedText) => {
     if (!decodedText) return;
 
-    let data = decodedText;
+    let data = null;
     try {
       if (typeof decodedText === 'string' && decodedText.trim().startsWith('{')) {
         data = JSON.parse(decodedText.trim());
       }
     } catch (e) {
-      console.warn("JSON parse fallback to plain string:", e);
+      data = null;
     }
 
-    let rawId = '';
-    let embeddedName = '';
-
-    if (typeof data === 'object' && data !== null) {
-      // If it's a Laptop Batch Sync QR payload, silently ignore it
-      if (data.T === 'RBS' || data.TYPE === 'ROTC_BATCH_SYNC' || data.records || data.r) {
-        return;
-      }
-
-      // Extract Cadet ID and Full Name directly from QR JSON
-      rawId = data.id || data.cadetId || data.ID || data.CADET_ID || data.cadet_id || '';
-      embeddedName = data.name || data.fullName || data.NAME || data.full_name || '';
-    } else {
-      const textStr = String(decodedText).trim();
-      if (textStr.startsWith('[') || textStr.startsWith('http')) {
-        return;
-      }
-      const match = textStr.match(/\b\d{3}-\d{5}\b/) || textStr.match(/\b\d{5,8}\b/);
-      if (match) {
-        rawId = match[0];
-      } else {
-        rawId = textStr.split(/[\n,;]/)[0].trim();
-      }
+    // Silently ignore Laptop Batch Sync QR payload if presented
+    if (data && (data.T === 'RBS' || data.TYPE === 'ROTC_BATCH_SYNC' || data.records || data.r)) {
+      return;
     }
 
-    rawId = String(rawId).trim().toUpperCase();
-    if (embeddedName) {
-      embeddedName = String(embeddedName).trim().toUpperCase();
+    // 1. STRICT JSON STRUCTURAL VALIDATION: Reject any non-official ROTC QR code
+    if (!isValidRotcPayload(data)) {
+      playWarningBuzzer();
+      setScanFlash('warning');
+      setTimeout(() => setScanFlash(null), 850);
+
+      setLastScanToast({
+        type: 'warning',
+        title: 'UNAUTHORIZED QR CODE',
+        cadetId: 'INVALID ROTC FORMAT',
+        message: 'Invalid format. This scanner only accepts official CSU ROTC ID cards.'
+      });
+      setTimeout(() => setLastScanToast(null), 3500);
+      return;
     }
 
-    if (!rawId) return;
+    const cadetId = String(data.id).trim().toUpperCase();
+    const cadetName = String(data.name).trim().toUpperCase();
+    const cadetBat = data.bat;
+    const cadetCoy = data.coy;
+    const cadetPl = data.pl;
+
+    // 2. ACTIVE SESSION ECHELON VALIDATION: Check against scanner session settings
+    const targetBat = sessionSetup?.battalion && !sessionSetup.battalion.includes('All') && sessionSetup.battalion !== 'CADET OFFICERS'
+      ? extractNumber(sessionSetup.battalion)
+      : null;
+    const targetCoy = sessionSetup?.company && !sessionSetup.company.includes('All') && !['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(sessionSetup.company)
+      ? getCompanyCode(sessionSetup.company)
+      : null;
+    const targetPl = sessionSetup?.platoon && !sessionSetup.platoon.includes('All') && sessionSetup.platoon !== 'Officer Corps'
+      ? extractNumber(sessionSetup.platoon)
+      : null;
+
+    const isBatMismatch = targetBat !== null && cadetBat !== targetBat;
+    const isCoyMismatch = targetCoy !== null && cadetCoy !== targetCoy;
+    const isPlMismatch = targetPl !== null && cadetPl !== targetPl;
+
+    if (isBatMismatch || isCoyMismatch || isPlMismatch) {
+      playWarningBuzzer();
+      setScanFlash('warning');
+      setTimeout(() => setScanFlash(null), 850);
+
+      const cadetBatLabel = `${cadetBat === 1 ? '1ST' : '2ND'} BN`;
+      const cadetCoyLabel = companyNameMap[cadetCoy] || `COY ${cadetCoy}`;
+      const cadetPlLabel = `PL ${cadetPl}`;
+
+      const targetBatLabel = targetBat ? `${targetBat === 1 ? '1ST' : '2ND'} BN` : (sessionSetup?.battalion || '1ST BN');
+      const targetCoyLabel = targetCoy ? (companyNameMap[targetCoy] || `COY ${targetCoy}`) : (sessionSetup?.company || 'ALPHA COY');
+      const targetPlLabel = targetPl ? `PL ${targetPl}` : (sessionSetup?.platoon || 'PL 1');
+
+      setEchelonMismatchAlert({
+        show: true,
+        cadetId: cadetId,
+        cadetName: cadetName,
+        cadetEchelon: `${cadetBatLabel} • ${cadetCoyLabel} • ${cadetPlLabel}`,
+        scannerEchelon: `${targetBatLabel} • ${targetCoyLabel} • ${targetPlLabel}`,
+        message: `WRONG PLATOON! CDT ${cadetName} belongs to Platoon ${cadetPl}, not your active Platoon ${targetPl || 1}.`
+      });
+
+      return; // Reject wrong platoon scan
+    }
 
     const activeMode = scanMode || 'Time-In';
     const nowIso = new Date().toISOString();
 
+    const decodedBattalion = cadetBat === 2 ? '2nd Battalion' : '1st Battalion';
+    const decodedCompany = companyMap[cadetCoy] || 'Alpha Company';
+    const decodedPlatoon = cadetPl === 1 ? '1st Platoon' : cadetPl === 2 ? '2nd Platoon' : cadetPl === 3 ? '3rd Platoon' : cadetPl === 4 ? '4th Platoon' : `${cadetPl}th Platoon`;
+
     const scanRecord = {
-      cadetId: rawId,
-      name: embeddedName || '',
+      cadetId: cadetId,
+      name: cadetName,
       rank: 'Cadet',
       scanMode: activeMode,
       timestamp: nowIso,
-      battalion: sessionSetup ? sessionSetup.battalion : '1st Battalion',
-      company: sessionSetup ? sessionSetup.company : 'Alpha Company',
-      platoon: sessionSetup ? sessionSetup.platoon : '1st Platoon',
+      battalion: decodedBattalion,
+      company: decodedCompany,
+      platoon: decodedPlatoon,
       status: activeMode === 'Time-In' ? 'TIME-IN' : 'TIME-OUT'
     };
     const headingName = formatCadetHeading(scanRecord);
 
-    // 1. STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
-    if (scannedIdsSetRef.current.has(rawId)) {
+    // 3. STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
+    if (scannedIdsSetRef.current.has(cadetId)) {
       playBeep(523.25, 'sine', 0.18); // Pleasant confirmation chime
       triggerHaptic([60, 40, 60]);
       setScanFlash('success');
@@ -313,7 +420,7 @@ export default function QRScanner({
       return;
     }
 
-    // 2. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED)
+    // 4. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED)
     if (scannedIdsSetRef.current.size >= PLATOON_QUOTA) {
       playBeep(300, 'sawtooth', 0.35);
       triggerHaptic([300, 100, 300, 100, 300]);
@@ -332,15 +439,14 @@ export default function QRScanner({
       setOverrideCandidate({
         scanRecord,
         headingName,
-        rawId
+        rawId: cadetId
       });
       return;
     }
 
-    // 3. UNDER CAPACITY: Process normal scan
-    scannedIdsSetRef.current.add(rawId);
+    // 5. UNDER CAPACITY: Process normal scan
+    scannedIdsSetRef.current.add(cadetId);
 
-    // Standard Neutral Success feedback
     playBeep(1046.5, 'sine', 0.15); // High C pitch beep
     triggerHaptic([80, 40, 80]);
     setScanFlash('success');
@@ -352,7 +458,7 @@ export default function QRScanner({
       type: 'success',
       title: `✅ SCANNED / RECORDED (${activeMode.toUpperCase()})`,
       cadetId: headingName,
-      message: `ID: ${rawId} • ${sessionSetup?.platoon || '1st Platoon'} (${scannedIdsSetRef.current.size}/${PLATOON_QUOTA})`
+      message: `ID: ${cadetId} • ${sessionSetup?.platoon || decodedPlatoon} (${scannedIdsSetRef.current.size}/${PLATOON_QUOTA})`
     });
 
     setTimeout(() => setLastScanToast(null), 3000);
@@ -578,6 +684,114 @@ export default function QRScanner({
         onCancel={handleCancelOverride}
         isDestructive={false}
       />
+
+      {/* Echelon Mismatch Alert Modal */}
+      {echelonMismatchAlert?.show && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.65)',
+          backdropFilter: 'blur(5px)',
+          WebkitBackdropFilter: 'blur(5px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: '#ffffff',
+            border: '2px solid #f59e0b',
+            borderRadius: '1.25rem',
+            padding: '1.5rem',
+            maxWidth: '380px',
+            width: '100%',
+            textAlign: 'center',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.85rem'
+          }}>
+            <div style={{
+              width: '52px',
+              height: '52px',
+              background: '#fef3c7',
+              color: '#d97706',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto'
+            }}>
+              <AlertTriangle size={28} />
+            </div>
+
+            <h3 style={{
+              fontWeight: 900,
+              color: '#0f172a',
+              fontSize: '1.15rem',
+              textTransform: 'uppercase',
+              letterSpacing: '-0.025em',
+              margin: 0,
+              fontFamily: 'Oswald, sans-serif'
+            }}>
+              Platoon Mismatch!
+            </h3>
+
+            <div style={{
+              background: '#fffbeb',
+              border: '1px solid #fde68a',
+              borderRadius: '0.75rem',
+              padding: '0.85rem',
+              textAlign: 'left',
+              fontSize: '0.78rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '4px'
+            }}>
+              <p style={{ margin: 0, fontWeight: 700, color: '#78350f' }}>
+                Cadet: <span style={{ fontWeight: 900 }}>{echelonMismatchAlert.cadetName} ({echelonMismatchAlert.cadetId})</span>
+              </p>
+              <p style={{ margin: 0, color: '#475569' }}>
+                Assigned to: <span style={{ fontWeight: 800, color: '#e11d48' }}>{echelonMismatchAlert.cadetEchelon}</span>
+              </p>
+              <p style={{ margin: 0, color: '#475569' }}>
+                Scanner Session: <span style={{ fontWeight: 800, color: '#047857' }}>{echelonMismatchAlert.scannerEchelon}</span>
+              </p>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.75rem', fontWeight: 700, color: '#64748b' }}>
+              This cadet cannot log attendance in this scanner session.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setEchelonMismatchAlert({ show: false })}
+              style={{
+                width: '100%',
+                padding: '0.75rem',
+                background: '#f59e0b',
+                color: '#ffffff',
+                fontWeight: 900,
+                fontSize: '0.85rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                borderRadius: '0.75rem',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(245, 158, 11, 0.35)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              Dismiss Alert
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

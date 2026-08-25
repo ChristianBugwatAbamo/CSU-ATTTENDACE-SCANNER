@@ -1,6 +1,7 @@
 import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { User } from 'lucide-react';
+import { generateQrPayload } from './IDGenerator';
 
 export default function IDCardPreview({ card }) {
   if (!card) return null;
@@ -142,12 +143,9 @@ export default function IDCardPreview({ card }) {
           <div className="cr80-qr-section">
             <div className="qr-wrapper">
               <QRCodeSVG
-                value={JSON.stringify({
-                  id: cleanId,
-                  name: cleanName
-                })}
-                size={78}
-                level="M"
+                value={generateQrPayload(card)}
+                size={80}
+                level="H"
                 includeMargin={false}
               />
             </div>

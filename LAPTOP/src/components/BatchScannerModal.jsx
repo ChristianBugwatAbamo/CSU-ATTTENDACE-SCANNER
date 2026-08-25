@@ -105,6 +105,37 @@ export default function BatchScannerModal({
       };
     }
 
+    // Support single compact Cadet ID QR Code (e.g. {"id":"221-00006","name":"SAMONTE","bat":1,"coy":1,"pl":2})
+    if (raw.id && (raw.bat !== undefined || raw.coy !== undefined || raw.pl !== undefined || raw.name)) {
+      const companyMap = { 1: 'Alpha Company', 2: 'Bravo Company', 3: 'Charlie Company', 4: 'Delta Company' };
+      const bnNum = typeof raw.bat === 'number' ? raw.bat : parseInt(raw.bat, 10);
+      const bn = bnNum === 2 ? '2nd Battalion' : '1st Battalion';
+      const co = companyMap[raw.coy] || (typeof raw.coy === 'string' ? raw.coy : 'Alpha Company');
+      const plNum = typeof raw.pl === 'number' ? raw.pl : parseInt(raw.pl, 10);
+      const pl = plNum === 1 ? '1st Platoon' : plNum === 2 ? '2nd Platoon' : plNum === 3 ? '3rd Platoon' : plNum === 4 ? '4th Platoon' : '1st Platoon';
+
+      return {
+        type: 'ROTC_BATCH_SYNC',
+        dutyOfficer: raw.dutyOfficer || raw.d || 'Duty Officer',
+        sessionName: raw.sessionName || `${bn} - ${co} (${pl})`,
+        battalion: bn,
+        company: co,
+        platoon: pl,
+        page: 1,
+        totalPages: 1,
+        records: [{
+          cadetId: raw.id,
+          name: raw.name || '',
+          battalion: bn,
+          company: co,
+          platoon: pl,
+          rank: 'Cadet',
+          scanMode: raw.scanMode || 'Time-In',
+          timestamp: new Date().toISOString()
+        }]
+      };
+    }
+
     return null;
   };
 
