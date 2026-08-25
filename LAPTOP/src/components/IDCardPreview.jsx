@@ -146,7 +146,7 @@ export default function IDCardPreview({ card }) {
                   id: cleanId,
                   name: cleanName
                 })}
-                size={60}
+                size={78}
                 level="M"
                 includeMargin={false}
               />
