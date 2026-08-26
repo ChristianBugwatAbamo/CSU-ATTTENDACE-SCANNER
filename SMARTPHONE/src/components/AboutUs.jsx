@@ -139,3 +139,5 @@ export default function AboutUs() {
     </div>
   );
 }
+
+export { AboutUs as AboutUsView };

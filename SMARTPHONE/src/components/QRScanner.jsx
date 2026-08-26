@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus, Info } from 'lucide-react';
+import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus, Info, Settings, Lock, ShieldAlert } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
+import scannerAudio from '../services/scannerAudio';
 import ConfirmModal from './ConfirmModal';
 
 const PLATOON_QUOTA = 37;
@@ -36,8 +37,8 @@ const getActiveUnitScans = (scans, setup, mode) => {
     const setupPlClean = activePltn.replace(' Platoon', '');
     const matchPl = !setup?.platoon ||
       setup.platoon === 'All Platoons' ||
-      (scan.platoon || '').includes(setupPlClean) ||
-      (scan.sessionName || '').includes(setupPlClean);
+      scan.platoon === setup.platoon ||
+      (scan.sessionName || '').includes(setup.platoon);
 
     // Scan Mode match (Time-In vs Time-Out)
     const matchMode = !activeMode || scan.scanMode === activeMode;
@@ -48,11 +49,12 @@ const getActiveUnitScans = (scans, setup, mode) => {
 
 export default function QRScanner({
   onScanSuccess,
-  activeSessionScans,
-  scanMode,
-  sessionSetup,
+  activeSessionScans = [],
+  scanMode = 'Time-In',
+  sessionSetup = {},
   facingMode = 'environment',
-  isTorchOn = false
+  isTorchOn = false,
+  onOpenSettings
 }) {
   const html5QrcodeScannerRef = useRef(null);
   const [isScanning, setIsScanning] = useState(false);
@@ -60,11 +62,33 @@ export default function QRScanner({
   const [lastScanToast, setLastScanToast] = useState(null);
   const [scanFlash, setScanFlash] = useState(null); // 'success' | 'warning' | null
 
+  // Setup Required Modal State (shown when scanning while setup is incomplete)
+  const [isSetupRequiredModalOpen, setIsSetupRequiredModalOpen] = useState(false);
+
+  // Check if session setup is fully configured
+  const isSetupComplete = Boolean(
+    sessionSetup?.dutyOfficer &&
+    sessionSetup?.dutyOfficer.trim() &&
+    sessionSetup?.dutyOfficer !== '(Not Configured)' &&
+    sessionSetup?.battalion &&
+    sessionSetup?.battalion.trim() &&
+    sessionSetup?.company &&
+    sessionSetup?.company.trim() &&
+    sessionSetup?.platoon &&
+    sessionSetup?.platoon.trim()
+  );
+
   // Manual override candidate for scanning beyond quota
   const [overrideCandidate, setOverrideCandidate] = useState(null);
 
   // Echelon Mismatch Alert state
   const [echelonMismatchAlert, setEchelonMismatchAlert] = useState(null);
+
+  // Steady, non-flickering notification overlay alert state
+  const [alertState, setAlertState] = useState({ active: false, type: '', message: '' });
+
+  // Steady Invalid QR Modal State
+  const [scanErrorModal, setScanErrorModal] = useState({ visible: false, title: '', message: '' });
 
   // Real-time Ref Set of scanned Cadet IDs to prevent stale closures and rapid frame duplicates
   const scannedIdsSetRef = useRef(new Set());
@@ -83,38 +107,29 @@ export default function QRScanner({
     scannedIdsSetRef.current = currentSet;
   }, [activeSessionScans, sessionSetup, scanMode]);
 
-  // Audio Synthesizer Beep
-  const playBeep = (freq = 880, type = 'sine', duration = 0.15) => {
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = type;
-      osc.frequency.setValueAtTime(freq, ctx.currentTime);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + duration);
-    } catch (e) {
-      console.log("Audio beep unavailable:", e);
-    }
-  };
-
-  // Warning Buzzer Sound & Haptic Vibration for Echelon Mismatches
+  // Warning Buzzer Sound (Haptic Vibration Disabled)
   const playWarningBuzzer = () => {
-    playBeep(260, 'sawtooth', 0.4);
-    triggerHaptic([200, 100, 200, 100, 200]);
+    scannerAudio.playMismatchWarning();
   };
 
-  // Haptic Feedback
+  // Invalid QR Warning Handler without Haptic Vibration
+  const handleInvalidQrCode = (errorDetails) => {
+    scannerAudio.playInvalidQrError();
+
+    // 3. Set steady modal state
+    setScanErrorModal({
+      visible: true,
+      title: 'UNAUTHORIZED QR CODE',
+      message: errorDetails || 'Invalid format. This scanner only accepts official CSU ROTC ID cards.',
+    });
+  };
+
+  // Haptic Feedback - Strictly Disabled
   const triggerHaptic = (pattern = [100, 50, 100]) => {
-    if (navigator.vibrate) {
-      navigator.vibrate(pattern);
-    }
+    // DISABLE DEVICE VIBRATION ON ALL ALERTS
+    // if (navigator.vibrate) {
+    //   navigator.vibrate(pattern);
+    // }
   };
 
   // Flashlight / Torch Control using MediaStreamTrack API
@@ -307,6 +322,18 @@ const companyNameMap = {
   const handleScannedCode = (decodedText) => {
     if (!decodedText) return;
 
+    // 0. ENFORCE REQUIRED SETUP: Block QR scan execution if activeSession is incomplete
+    if (!isSetupComplete) {
+      scannerAudio.playSetupRequiredAlert();
+      setAlertState({
+        active: true,
+        type: 'WARNING',
+        message: 'Field session setup is incomplete. Please configure Platoon Leader, Unit & Platoon before scanning.'
+      });
+      setIsSetupRequiredModalOpen(true);
+      return;
+    }
+
     let data = null;
     try {
       if (typeof decodedText === 'string' && decodedText.trim().startsWith('{')) {
@@ -323,17 +350,7 @@ const companyNameMap = {
 
     // 1. STRICT JSON STRUCTURAL VALIDATION: Reject any non-official ROTC QR code
     if (!isValidRotcPayload(data)) {
-      playWarningBuzzer();
-      setScanFlash('warning');
-      setTimeout(() => setScanFlash(null), 850);
-
-      setLastScanToast({
-        type: 'warning',
-        title: 'UNAUTHORIZED QR CODE',
-        cadetId: 'INVALID ROTC FORMAT',
-        message: 'Invalid format. This scanner only accepts official CSU ROTC ID cards.'
-      });
-      setTimeout(() => setLastScanToast(null), 3500);
+      handleInvalidQrCode('Invalid format. This scanner only accepts official CSU ROTC ID cards.');
       return;
     }
 
@@ -359,27 +376,12 @@ const companyNameMap = {
     const isPlMismatch = targetPl !== null && cadetPl !== targetPl;
 
     if (isBatMismatch || isCoyMismatch || isPlMismatch) {
-      playWarningBuzzer();
-      setScanFlash('warning');
-      setTimeout(() => setScanFlash(null), 850);
-
-      const cadetBatLabel = `${cadetBat === 1 ? '1ST' : '2ND'} BN`;
-      const cadetCoyLabel = companyNameMap[cadetCoy] || `COY ${cadetCoy}`;
-      const cadetPlLabel = `PL ${cadetPl}`;
-
-      const targetBatLabel = targetBat ? `${targetBat === 1 ? '1ST' : '2ND'} BN` : (sessionSetup?.battalion || '1ST BN');
-      const targetCoyLabel = targetCoy ? (companyNameMap[targetCoy] || `COY ${targetCoy}`) : (sessionSetup?.company || 'ALPHA COY');
-      const targetPlLabel = targetPl ? `PL ${targetPl}` : (sessionSetup?.platoon || 'PL 1');
-
-      setEchelonMismatchAlert({
-        show: true,
-        cadetId: cadetId,
-        cadetName: cadetName,
-        cadetEchelon: `${cadetBatLabel} • ${cadetCoyLabel} • ${cadetPlLabel}`,
-        scannerEchelon: `${targetBatLabel} • ${targetCoyLabel} • ${targetPlLabel}`,
-        message: `WRONG PLATOON! CDT ${cadetName} belongs to Platoon ${cadetPl}, not your active Platoon ${targetPl || 1}.`
+      scannerAudio.playMismatchWarning();
+      setAlertState({
+        active: true,
+        type: 'MISMATCH',
+        message: `CDT ${cadetName} is assigned to Platoon ${cadetPl}, which does not match active ${sessionSetup?.platoon || '1st Platoon'}.`
       });
-
       return; // Reject wrong platoon scan
     }
 
@@ -405,35 +407,23 @@ const companyNameMap = {
 
     // 3. STRICT CHECK: ONLY ONCE PER ID QR CODE IN ACTIVE SCOPE
     if (scannedIdsSetRef.current.has(cadetId)) {
-      playBeep(523.25, 'sine', 0.18); // Pleasant confirmation chime
-      triggerHaptic([60, 40, 60]);
-      setScanFlash('success');
-      setTimeout(() => setScanFlash(null), 850);
-
-      setLastScanToast({
-        type: 'info',
-        title: 'CADET ALREADY RECORDED',
-        cadetId: headingName,
-        message: `${headingName} has already logged attendance for this session!`
+      scannerAudio.playDuplicateScan();
+      setAlertState({
+        active: true,
+        type: 'ALREADY_RECORDED',
+        message: `${headingName} has already logged attendance for this ${activeMode} session.`
       });
-      setTimeout(() => setLastScanToast(null), 3000);
       return;
     }
 
     // 4. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED)
     if (scannedIdsSetRef.current.size >= PLATOON_QUOTA) {
-      playBeep(300, 'sawtooth', 0.35);
-      triggerHaptic([300, 100, 300, 100, 300]);
-      setScanFlash('warning');
-      setTimeout(() => setScanFlash(null), 850);
-
-      setLastScanToast({
-        type: 'warning',
-        title: `CAPACITY REACHED (${PLATOON_QUOTA}/${PLATOON_QUOTA})`,
-        cadetId: headingName,
-        message: `Maximum quota of ${PLATOON_QUOTA} cadets is reached for ${sessionSetup?.platoon || '1st Platoon'}! Scan blocked.`
+      scannerAudio.playQuotaLimitAlert();
+      setAlertState({
+        active: true,
+        type: 'WARNING',
+        message: `Maximum quota of ${PLATOON_QUOTA} cadets reached for ${sessionSetup?.platoon || '1st Platoon'}! Scan blocked.`
       });
-      setTimeout(() => setLastScanToast(null), 4000);
 
       // Offer manual override option modal
       setOverrideCandidate({
@@ -447,10 +437,15 @@ const companyNameMap = {
     // 5. UNDER CAPACITY: Process normal scan
     scannedIdsSetRef.current.add(cadetId);
 
-    playBeep(1046.5, 'sine', 0.15); // High C pitch beep
-    triggerHaptic([80, 40, 80]);
-    setScanFlash('success');
-    setTimeout(() => setScanFlash(null), 850);
+    // Play distinct single-play tone based on Time-In vs Time-Out mode
+    if (activeMode === 'Time-Out') {
+      scannerAudio.playTimeOutSuccess();
+    } else {
+      scannerAudio.playTimeInSuccess();
+    }
+
+    setAlertState({ active: false, type: '', message: '' });
+    setScanErrorModal({ visible: false, title: '', message: '' });
 
     onScanSuccess(scanRecord);
 
@@ -475,10 +470,9 @@ const companyNameMap = {
     };
 
     scannedIdsSetRef.current.add(rawId);
-    playBeep(1046.5, 'sine', 0.15);
-    triggerHaptic([80, 40, 80]);
-    setScanFlash('success');
-    setTimeout(() => setScanFlash(null), 850);
+    scannerAudio.playTimeInSuccess();
+    setAlertState({ active: false, type: '', message: '' });
+    setScanErrorModal({ visible: false, title: '', message: '' });
 
     onScanSuccess(extraRecord);
 
@@ -498,25 +492,179 @@ const companyNameMap = {
   };
 
   // Formatted active unit echelon banner text
-  const activeBn = (sessionSetup?.battalion || '1st Battalion').toUpperCase();
-  const activeCoy = (sessionSetup?.company || 'Alpha Company').replace(' Company', ' COY').toUpperCase();
-  const activePltn = (sessionSetup?.platoon || '1st Platoon').toUpperCase();
+  const isSetupUnconfigured = !sessionSetup?.dutyOfficer || !sessionSetup?.battalion || !sessionSetup?.company || !sessionSetup?.platoon;
+  const activeBn = (sessionSetup?.battalion || 'All Battalions').toUpperCase();
+  const activeCoy = (sessionSetup?.company ? sessionSetup.company.replace(' Company', ' COY') : 'All Companies').toUpperCase();
+  const activePltn = (sessionSetup?.platoon || 'All Platoons').toUpperCase();
+  const activeScanModeLabel = (scanMode || 'Time-In').toUpperCase();
   const formattedUnitBanner = `${activeBn} • ${activeCoy} • ${activePltn}`;
 
   return (
-    <div className="scanner-page-layout">
-      {/* Active Unit Header Banner */}
-      <div className="active-unit-scanner-banner">
-        <div className="unit-banner-content">
-          <Shield size={15} className="unit-banner-shield" />
-          <span className="unit-banner-text">{formattedUnitBanner}</span>
-        </div>
-      </div>
-
-      {/* Centered Camera Container Card */}
+    <div className="scanner-edge-container">
+      {/* Dynamic Camera Feed Container Card */}
       <div className={`camera-container-card ${scanFlash ? `flash-${scanFlash}` : ''}`}>
-        {/* Underlying Camera Feed (Constrained inside centered card) */}
-        <div id="reader"></div>
+        {/* HTML5 QR Camera Element */}
+        <div id="reader" className="camera-feed-viewport"></div>
+
+        {/* Steady Invalid QR Overlay Modal */}
+        {scanErrorModal.visible && (
+          <div className="absolute inset-x-4 top-16 z-50 bg-slate-900 border-2 border-red-600 rounded-2xl p-4 shadow-2xl transition-none" style={{
+            position: 'absolute',
+            left: '1rem',
+            right: '1rem',
+            top: '4rem',
+            zIndex: 50,
+            background: '#0f172a',
+            border: '2px solid #dc2626',
+            borderRadius: '1rem',
+            padding: '1rem',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
+            transition: 'none',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.75rem'
+          }}>
+            {/* Static Warning Icon */}
+            <div className="w-10 h-10 rounded-xl bg-red-500/20 border border-red-500/40 flex items-center justify-center shrink-0" style={{
+              width: '2.5rem',
+              height: '2.5rem',
+              borderRadius: '0.75rem',
+              background: 'rgba(239, 68, 68, 0.2)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              <AlertTriangle className="w-5 h-5 text-red-500" style={{ width: '1.25rem', height: '1.25rem', color: '#ef4444' }} />
+            </div>
+
+            <div className="flex-1" style={{ flex: 1 }}>
+              <h4 className="text-xs font-black text-red-500 uppercase tracking-wide" style={{
+                fontSize: '0.75rem',
+                fontWeight: 900,
+                color: '#ef4444',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                margin: 0
+              }}>
+                {scanErrorModal.title}
+              </h4>
+              <p className="text-xs font-bold text-white mt-0.5" style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                color: '#ffffff',
+                margin: '0.15rem 0 0 0'
+              }}>
+                INVALID ROTC FORMAT
+              </p>
+              <p className="text-[11px] text-slate-300 mt-1 leading-snug" style={{
+                fontSize: '0.7rem',
+                color: '#cbd5e1',
+                marginTop: '0.25rem',
+                lineHeight: 1.35,
+                margin: '0.25rem 0 0 0'
+              }}>
+                {scanErrorModal.message}
+              </p>
+            </div>
+
+            {/* Dismiss Button */}
+            <button
+              type="button"
+              onClick={() => setScanErrorModal({ visible: false })}
+              className="text-slate-400 hover:text-white text-xs font-bold p-1"
+              style={{
+                color: '#94a3b8',
+                background: 'none',
+                border: 'none',
+                fontSize: '0.85rem',
+                fontWeight: 'bold',
+                padding: '0.25rem',
+                cursor: 'pointer',
+                lineHeight: 1
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Steady, non-flickering notification overlay for Platoon Mismatch or Already Logged */}
+        {alertState.active && (
+          <div className="absolute top-4 left-4 right-4 z-50 bg-slate-900 border-2 border-amber-500 rounded-2xl p-4 shadow-2xl transition-opacity duration-200" style={{
+            position: 'absolute',
+            top: '1rem',
+            left: '1rem',
+            right: '1rem',
+            zIndex: 50,
+            background: '#0f172a',
+            border: '2px solid #f59e0b',
+            borderRadius: '1rem',
+            padding: '1rem',
+            boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7)',
+            transition: 'opacity 0.2s ease',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.75rem'
+          }}>
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center shrink-0" style={{
+              width: '2.5rem',
+              height: '2.5rem',
+              borderRadius: '0.75rem',
+              background: 'rgba(245, 158, 11, 0.2)',
+              border: '1px solid rgba(245, 158, 11, 0.4)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}>
+              <AlertTriangle className="w-5 h-5 text-amber-400" style={{ width: '1.25rem', height: '1.25rem', color: '#fbbf24' }} />
+            </div>
+
+            <div className="flex-1" style={{ flex: 1 }}>
+              <h4 className="text-xs font-black text-amber-400 uppercase tracking-wide" style={{
+                fontSize: '0.75rem',
+                fontWeight: 900,
+                color: '#fbbf24',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                margin: 0
+              }}>
+                {alertState.type === 'MISMATCH' ? 'Platoon Mismatch' : (alertState.type === 'ALREADY_RECORDED' ? 'Already Recorded' : 'Scan Alert')}
+              </h4>
+              <p className="text-xs text-slate-200 mt-1 font-medium leading-snug" style={{
+                fontSize: '0.75rem',
+                color: '#e2e8f0',
+                marginTop: '0.25rem',
+                fontWeight: 500,
+                lineHeight: 1.35,
+                margin: '0.25rem 0 0 0'
+              }}>
+                {alertState.message}
+              </p>
+            </div>
+
+            {/* Dismiss Button */}
+            <button
+              type="button"
+              onClick={() => setAlertState({ active: false })}
+              className="text-slate-400 hover:text-white text-xs font-bold p-1"
+              style={{
+                color: '#94a3b8',
+                background: 'none',
+                border: 'none',
+                fontSize: '0.85rem',
+                fontWeight: 'bold',
+                padding: '0.25rem',
+                cursor: 'pointer',
+                lineHeight: 1
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Floating Top Header Bar on Camera Feed */}
         <div className="scanner-floating-topbar">
@@ -545,8 +693,8 @@ const companyNameMap = {
               <span>{activeScannedCount}/{PLATOON_QUOTA}</span>
             </span>
 
-            <span className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : 'mode-timeout'}`}>
-              {scanMode === 'Time-In' ? '🟢 TIME-IN' : '🟡 TIME-OUT'}
+            <span className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : scanMode === 'Time-Out' ? 'mode-timeout' : 'mode-unselected'}`}>
+              {scanMode === 'Time-In' ? '🟢 TIME-IN' : scanMode === 'Time-Out' ? '🟡 TIME-OUT' : '⚪ MODE UNSET'}
             </span>
 
             <div className="scanner-live-pill">
@@ -591,24 +739,25 @@ const companyNameMap = {
               border: `1.5px solid ${
                 lastScanToast.type === 'warning' ? '#ef4444' : '#10b981'
               }`,
-              background: lastScanToast.type === 'warning' ? '#fef2f2' : '#ecfdf5',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.22)',
+              background: lastScanToast.type === 'warning' ? 'var(--bg-dark-card)' : 'var(--bg-dark-card)',
+              color: '#ffffff',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
               borderRadius: '12px'
             }}
           >
             {lastScanToast.type === 'warning' ? (
-              <AlertTriangle size={28} color="#ef4444" />
+              <AlertTriangle size={28} color="#f59e0b" />
             ) : lastScanToast.type === 'info' ? (
-              <CheckCircle2 size={28} color="#059669" />
+              <CheckCircle2 size={28} color="#10b981" />
             ) : (
-              <CheckCircle2 size={28} color="#059669" />
+              <CheckCircle2 size={28} color="#10b981" />
             )}
             <div>
               <div
                 style={{
                   fontWeight: 850,
                   fontSize: '0.85rem',
-                  color: lastScanToast.type === 'warning' ? '#dc2626' : '#065f46'
+                  color: lastScanToast.type === 'warning' ? '#f59e0b' : 'var(--rotc-gold-bright)'
                 }}
               >
                 {lastScanToast.title}
@@ -617,7 +766,7 @@ const companyNameMap = {
                 style={{
                   fontSize: '0.8rem',
                   fontWeight: 700,
-                  color: lastScanToast.type === 'warning' ? '#7f1d1d' : '#047857'
+                  color: '#ffffff'
                 }}
               >
                 {lastScanToast.cadetId}
@@ -625,7 +774,7 @@ const companyNameMap = {
               <div
                 style={{
                   fontSize: '0.75rem',
-                  color: lastScanToast.type === 'warning' ? '#991b1b' : '#065f46',
+                  color: 'var(--text-subtle)',
                   fontWeight: 500
                 }}
               >
@@ -792,8 +941,129 @@ const companyNameMap = {
           </div>
         </div>
       )}
+
+      {/* Required Setup Gate Modal */}
+      {isSetupRequiredModalOpen && (
+        <div
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsSetupRequiredModalOpen(false);
+          }}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 15, 8, 0.82)',
+            backdropFilter: 'blur(6px)',
+            WebkitBackdropFilter: 'blur(6px)',
+            zIndex: 600,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem',
+            animation: 'fadeIn 0.2s ease-out'
+          }}
+        >
+          <div style={{
+            background: '#ffffff',
+            borderRadius: '16px',
+            width: '100%',
+            maxWidth: '390px',
+            padding: '1.5rem',
+            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.45)',
+            border: '1px solid var(--border-light)',
+            animation: 'scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.85rem'
+          }}>
+            {/* Header Icon */}
+            <div style={{
+              width: '52px',
+              height: '52px',
+              background: '#fef3c7',
+              color: '#d97706',
+              borderRadius: '50%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto'
+            }}>
+              <ShieldAlert size={28} />
+            </div>
+
+            <h3 style={{
+              fontWeight: 900,
+              color: '#0f172a',
+              fontSize: '1.15rem',
+              textTransform: 'uppercase',
+              letterSpacing: '0.3px',
+              margin: 0,
+              fontFamily: 'Oswald, sans-serif'
+            }}>
+              Setup Configuration Required
+            </h3>
+
+            <p style={{
+              fontSize: '0.86rem',
+              lineHeight: '1.45',
+              color: '#4b5563',
+              margin: '0'
+            }}>
+              Scanning is locked because your field session settings are incomplete. Please configure your <strong>Platoon Leader In Charge, Battalion, Company, and Platoon</strong> before recording cadet attendance.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setIsSetupRequiredModalOpen(false)}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid #d1d5db',
+                  background: '#f9fafb',
+                  color: '#374151',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Dismiss
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSetupRequiredModalOpen(false);
+                  if (onOpenSettings) onOpenSettings();
+                }}
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: 'var(--rotc-green-dark)',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(6, 78, 46, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px'
+                }}
+              >
+                <Settings size={15} />
+                <span>Go to Settings</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-export { QRScanner as FieldScannerView };
+export { QRScanner as FieldScannerView, QRScanner as MobileScannerView };

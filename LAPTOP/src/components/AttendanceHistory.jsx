@@ -507,7 +507,7 @@ export default function AttendanceHistory({
           <span>{exportNotice.text}</span>
         </div>
       )}
-      
+
       {/* ========================================================================= */}
       {/* Streamlined Header Banner & Restricted Formation Date Picker               */}
       {/* ========================================================================= */}
@@ -552,14 +552,7 @@ export default function AttendanceHistory({
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              onClick={onRefresh}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', borderRadius: '7px', padding: '0.45rem 0.8rem' }}
-              title="Refresh attendance records"
-            >
-              <RefreshCw size={13} /> Refresh
-            </button>
+
             <button
               type="button"
               className="btn btn-secondary btn-sm"
@@ -580,7 +573,7 @@ export default function AttendanceHistory({
               title="Configure official headquarters, letterhead text, and logos for Excel reports"
             >
               <Settings size={14} color="#64748b" />
-              <span>⚙️ Header & Footer Settings</span>
+              <span>Header & Footer Settings</span>
             </button>
             <button
               type="button"
@@ -1055,7 +1048,7 @@ export default function AttendanceHistory({
           {/* 5 Simplified Modern Stat Summary Cards (Clickable to Filter Table)         */}
           {/* ========================================================================= */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
-            
+
             {/* Stat Card 1: TOTAL ROSTER CADETS */}
             <div
               className="card"
@@ -1211,7 +1204,7 @@ export default function AttendanceHistory({
           {/* Combined Table & Filter Bar                                                */}
           {/* ========================================================================= */}
           <div className="card" style={{ border: '1px solid #e2e8f0', borderRadius: '12px', overflow: 'hidden', padding: 0 }}>
-            
+
             {/* Unified Search & Multi-Filter Toolbar */}
             <div
               style={{
@@ -1275,27 +1268,7 @@ export default function AttendanceHistory({
                 )}
               </div>
 
-              {/* Right Side: Reset Filters Button */}
-              {hasActiveFilters && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSearchQuery('');
-                      setStatusFilter('ALL');
-                      setSelectedBattalion(null);
-                      setSelectedCompany(null);
-                      setSelectedPlatoon(null);
-                    }}
-                    className="btn btn-secondary btn-sm"
-                    style={{ fontSize: '0.72rem', padding: '4px 10px', color: '#dc2626', borderColor: '#fca5a5', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                    title="Reset all search & echelon filters"
-                  >
-                    <RotateCcw size={11} />
-                    Reset Filters
-                  </button>
-                </div>
-              )}
+
             </div>
 
             {/* Attendance Records Table */}

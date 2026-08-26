@@ -10,6 +10,18 @@ import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
 import { getOfflineQueue, saveOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp } from './services/storage';
 
+const SESSION_SETUP_KEY = 'csu_rotc_mobile_session_setup';
+
+const DEFAULT_SESSION_SETUP = {
+  dutyOfficer: '',
+  sessionDate: new Date().toISOString().split('T')[0],
+  sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  battalion: '',
+  company: '',
+  platoon: '',
+  scanMode: '' // Completely blank unselected on load
+};
+
 export default function App() {
   const [adminIpState, setAdminIpState] = useState(getAdminIp());
   const [offlineQueue, setOfflineQueue] = useState([]);
@@ -24,19 +36,35 @@ export default function App() {
   // Custom Modal State
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
-  // Session Active state (pre-scanning prompt flow)
-  const [isSessionActive, setIsSessionActive] = useState(false);
-
-  // Session Setup parameters
-  const [sessionSetup, setSessionSetup] = useState({
-    dutyOfficer: 'C/LT COL MARIA L SANTOS (ROTC) 1CL',
-    sessionDate: new Date().toISOString().split('T')[0],
-    sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    battalion: '1st Battalion',
-    company: 'Alpha Company',
-    platoon: '1st Platoon',
-    scanMode: 'Time-In' // 'Time-In' | 'Time-Out'
+  // Session Setup parameters: loads saved configuration from localStorage or completely empty defaults
+  const [sessionSetup, setSessionSetup] = useState(() => {
+    try {
+      const saved = localStorage.getItem(SESSION_SETUP_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Purge mock dummy data if previously cached
+        const isMock = parsed.dutyOfficer?.includes('SANTOS') || parsed.dutyOfficer?.includes('MARIA');
+        if (isMock) {
+          localStorage.removeItem(SESSION_SETUP_KEY);
+          return DEFAULT_SESSION_SETUP;
+        }
+        return {
+          ...DEFAULT_SESSION_SETUP,
+          ...parsed,
+          sessionDate: parsed.sessionDate || new Date().toISOString().split('T')[0],
+          sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+      }
+    } catch (_) {}
+    return DEFAULT_SESSION_SETUP;
   });
+
+  // Automatically synchronize session setup to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(SESSION_SETUP_KEY, JSON.stringify(sessionSetup));
+    } catch (_) {}
+  }, [sessionSetup]);
 
   // Load Offline Queue on mount
   useEffect(() => {
@@ -68,10 +96,9 @@ export default function App() {
     return () => clearInterval(timer);
   }, [adminIpState]);
 
-  // Start Session Handler from SessionSetup component
+  // Start / Update Session Handler
   const handleStartSession = (setupData) => {
     setSessionSetup(setupData);
-    setIsSessionActive(true);
     setActiveTab('scanner');
   };
 
@@ -80,22 +107,22 @@ export default function App() {
     setSessionSetup(prev => ({ ...prev, scanMode: newMode }));
   };
 
-  // Reset Session Setup
+  // Reset / Edit Session Setup
   const handleEditSetup = () => {
-    setIsSessionActive(false);
+    setActiveTab('settings');
   };
 
   // Handle New QR Scan Success
   const handleScanSuccess = async (scanRecord) => {
     const enrichedRecord = {
       ...scanRecord,
-      sessionName: `${sessionSetup.battalion} - ${sessionSetup.company} (${sessionSetup.platoon})`,
+      sessionName: `${sessionSetup.battalion || '1st Battalion'} - ${sessionSetup.company || 'Alpha Company'} (${sessionSetup.platoon || '1st Platoon'})`,
       sessionDate: sessionSetup.sessionDate,
       sessionTime: sessionSetup.sessionTime,
-      dutyOfficer: sessionSetup.dutyOfficer,
-      battalion: sessionSetup.battalion,
-      company: sessionSetup.company,
-      platoon: sessionSetup.platoon,
+      dutyOfficer: sessionSetup.dutyOfficer || 'Field Duty Officer',
+      battalion: sessionSetup.battalion || '1st Battalion',
+      company: sessionSetup.company || 'Alpha Company',
+      platoon: sessionSetup.platoon || '1st Platoon',
       scanMode: sessionSetup.scanMode
     };
 
@@ -139,12 +166,12 @@ export default function App() {
   };
 
   return (
-    <div className={`mobile-container ${activeTab === 'settings' || activeTab === 'about' || !isSessionActive ? 'settings-theme-bg' : ''}`}>
+    <div className={`mobile-container ${activeTab === 'settings' || activeTab === 'about' ? 'settings-theme-bg' : ''}`}>
       <HeaderBar
         adminIp={adminIpState}
         setAdminIp={handleUpdateAdminIp}
         sessionSetup={sessionSetup}
-        isSessionActive={isSessionActive}
+        isSessionActive={true}
         onToggleScanMode={handleToggleScanMode}
         onEditSetup={handleEditSetup}
         serverConnected={serverConnected}
@@ -159,62 +186,47 @@ export default function App() {
       />
 
       <main style={{ flexGrow: 1, paddingBottom: activeTab === 'settings' || activeTab === 'scanner' || activeTab === 'about' ? '0' : '80px', display: 'flex', flexDirection: 'column' }}>
-        {!isSessionActive ? (
-          /* Pre-Scanning Session Setup Screen */
+        {/* Active 4-Tab Mobile Navigation Views */}
+        {activeTab === 'scanner' && (
+          <QRScanner
+            onScanSuccess={handleScanSuccess}
+            activeSessionScans={offlineQueue}
+            scanMode={sessionSetup.scanMode}
+            sessionSetup={sessionSetup}
+            facingMode={cameraFacingMode}
+            isTorchOn={isTorchOn}
+            onOpenSettings={() => setActiveTab('settings')}
+          />
+        )}
+
+        {activeTab === 'dashboard' && (
+          <MobileAnalytics
+            scanLogs={offlineQueue}
+            sessionSetup={sessionSetup}
+            onResetQueue={handleOpenResetModal}
+          />
+        )}
+
+        {(activeTab === 'about' || activeTab === 'idcards') && (
+          <AboutUs />
+        )}
+
+        {activeTab === 'settings' && (
           <SessionSetup
             initialSetup={sessionSetup}
             onStartSession={handleStartSession}
+            isEditing={true}
           />
-        ) : (
-          /* Active 4-Tab Mobile Navigation Views */
-          <>
-            {activeTab === 'scanner' && (
-              <QRScanner
-                onScanSuccess={handleScanSuccess}
-                activeSessionScans={offlineQueue}
-                scanMode={sessionSetup.scanMode}
-                sessionSetup={sessionSetup}
-                facingMode={cameraFacingMode}
-                isTorchOn={isTorchOn}
-              />
-            )}
-
-            {activeTab === 'dashboard' && (
-              <MobileAnalytics
-                scanLogs={offlineQueue}
-                sessionSetup={sessionSetup}
-                onResetQueue={handleOpenResetModal}
-              />
-            )}
-
-            {(activeTab === 'about' || activeTab === 'idcards') && (
-              <AboutUs />
-            )}
-
-            {activeTab === 'settings' && (
-              <SessionSetup
-                initialSetup={sessionSetup}
-                onStartSession={(updatedSetup) => {
-                  setSessionSetup(updatedSetup);
-                  setIsSessionActive(true);
-                  setActiveTab('scanner');
-                }}
-                isEditing={true}
-              />
-            )}
-          </>
         )}
       </main>
 
       {/* Fixed Bottom Navigation Bar with Raised Center Batch Sync FAB */}
-      {isSessionActive && (
-        <MobileBottomNav
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onPresentBatchSync={() => setIsBatchSyncOpen(true)}
-          queueCount={offlineQueue.length}
-        />
-      )}
+      <MobileBottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onPresentBatchSync={() => setIsBatchSyncOpen(true)}
+        queueCount={offlineQueue.length}
+      />
 
       {/* Duty Officer Batch Sync QR Presentation Modal */}
       <SyncControl
@@ -244,3 +256,5 @@ export default function App() {
     </div>
   );
 }
+
+export { App as MobileApp };

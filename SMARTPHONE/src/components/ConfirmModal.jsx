@@ -20,9 +20,9 @@ export default function ConfirmModal({
       left: 0,
       right: 0,
       bottom: 0,
-      background: 'rgba(0, 15, 8, 0.75)',
-      backdropFilter: 'blur(5px)',
-      WebkitBackdropFilter: 'blur(5px)',
+      background: 'rgba(0, 0, 0, 0.85)',
+      backdropFilter: 'blur(8px)',
+      WebkitBackdropFilter: 'blur(8px)',
       zIndex: 500,
       display: 'flex',
       alignItems: 'center',
@@ -31,23 +31,24 @@ export default function ConfirmModal({
       animation: 'fadeIn 0.2s ease-out'
     }}>
       <div style={{
-        background: '#ffffff',
-        borderRadius: '16px',
+        background: 'var(--bg-dark-card)',
+        borderRadius: '18px',
         width: '100%',
-        maxWidth: '380px',
+        maxWidth: '390px',
         padding: '1.5rem',
-        boxShadow: '0 20px 40px rgba(0, 0, 0, 0.35)',
-        border: '1px solid var(--border-light)',
+        boxShadow: '0 20px 45px rgba(0, 0, 0, 0.75)',
+        border: '1.5px solid var(--border-dark)',
         animation: 'scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
       }}>
         {/* Header Icon & Title */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem' }}>
           <div style={{
-            background: isDestructive ? '#fee2e2' : '#fef3c7',
-            color: isDestructive ? '#dc2626' : '#d97706',
-            width: '40px',
-            height: '40px',
-            borderRadius: '10px',
+            background: isDestructive ? 'rgba(239, 68, 68, 0.18)' : 'rgba(245, 158, 11, 0.18)',
+            color: isDestructive ? '#f87171' : 'var(--rotc-gold-bright)',
+            border: `1.5px solid ${isDestructive ? '#ef4444' : 'var(--rotc-gold-bright)'}`,
+            width: '42px',
+            height: '42px',
+            borderRadius: '12px',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -60,9 +61,9 @@ export default function ConfirmModal({
               margin: 0,
               fontSize: '1.15rem',
               fontWeight: 800,
-              color: 'var(--text-dark)',
+              color: '#ffffff',
               fontFamily: 'Oswald, sans-serif',
-              letterSpacing: '0.3px'
+              letterSpacing: '0.4px'
             }}>
               {title}
             </h3>
@@ -71,9 +72,9 @@ export default function ConfirmModal({
 
         {/* Body Text */}
         <p style={{
-          fontSize: '0.88rem',
-          lineHeight: '1.45',
-          color: '#4b5563',
+          fontSize: '0.86rem',
+          lineHeight: '1.5',
+          color: 'var(--text-subtle)',
           margin: '0 0 1.35rem 0'
         }}>
           {message}
@@ -89,11 +90,11 @@ export default function ConfirmModal({
             type="button"
             onClick={onCancel}
             style={{
-              padding: '0.72rem 1rem',
+              padding: '0.75rem 1rem',
               borderRadius: '10px',
-              border: '1.5px solid #d1d5db',
-              background: '#f9fafb',
-              color: '#374151',
+              border: '1.5px solid var(--border-dark)',
+              background: 'var(--bg-dark-input)',
+              color: 'var(--text-bright)',
               fontWeight: 700,
               fontSize: '0.88rem',
               cursor: 'pointer',
@@ -110,10 +111,10 @@ export default function ConfirmModal({
             type="button"
             onClick={onConfirm}
             style={{
-              padding: '0.72rem 1rem',
+              padding: '0.75rem 1rem',
               borderRadius: '10px',
               border: 'none',
-              background: isDestructive ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'var(--rotc-green)',
+              background: isDestructive ? 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)' : 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
               color: '#ffffff',
               fontWeight: 800,
               fontSize: '0.88rem',
@@ -122,7 +123,7 @@ export default function ConfirmModal({
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              boxShadow: isDestructive ? '0 4px 12px rgba(220, 38, 38, 0.35)' : 'var(--shadow-sm)',
+              boxShadow: isDestructive ? '0 4px 12px rgba(220, 38, 38, 0.4)' : '0 4px 12px rgba(16, 185, 129, 0.4)',
               transition: 'transform 0.15s ease'
             }}
           >

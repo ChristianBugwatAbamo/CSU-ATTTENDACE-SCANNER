@@ -698,7 +698,6 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     return acc + (bn.companies ? bn.companies.reduce((pAcc, co) => pAcc + (co.platoons ? co.platoons.length : 0), 0) : 0);
   }, 0);
   const totalBasicQuota = currentStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
-  const totalBrigadeQuota = totalBasicQuota + 60; // 60 Officer Corps quota
 
   // Open Modal to Add Echelon
   const handleOpenAddEchelon = (level, parentId = null) => {
@@ -1204,10 +1203,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               </div>
             </div>
 
-            {/* Quota Breakdown Chips */}
+            {/* Quota Breakdown Chips (4 Columns) */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
               gap: '0.75rem',
               marginTop: '1.25rem',
               paddingTop: '1rem',
@@ -1216,7 +1215,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
                 <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>Battalions</div>
                 <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1e3a8a' }}>{totalBattalionsCount}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{totalBasicQuota} Basic Quota</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{totalBasicQuota.toLocaleString()} Basic Quota</div>
               </div>
 
               <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
@@ -1231,16 +1230,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Fixed formation units</div>
               </div>
 
-              <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #a5b4fc' }}>
-                <div style={{ fontSize: '0.72rem', color: '#3730a3', fontWeight: 700, textTransform: 'uppercase' }}>Officer Corps</div>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#312e81' }}>60</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>5 Classes (1CL to ASP)</div>
-              </div>
-
               <div style={{ padding: '0.75rem', background: 'rgba(6, 78, 46, 0.08)', borderRadius: '8px', border: '1.5px solid var(--rotc-green-dark)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--rotc-green-dark)', fontWeight: 800, textTransform: 'uppercase' }}>Total Unit Target</div>
-                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{totalBrigadeQuota}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Full Brigade Capacity</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{totalBasicQuota.toLocaleString()}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Basic Cadets Quota</div>
               </div>
             </div>
           </div>

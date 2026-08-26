@@ -63,26 +63,26 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
   const [selectedScanDetail, setSelectedScanDetail] = React.useState(null);
 
   return (
-    <div>
+    <div style={{ padding: '1rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', paddingBottom: '90px' }}>
       {/* Active Platoon Attendance & Progress Card */}
-      <div className="mobile-card">
-        <div className="mobile-card-title">
+      <div className="setup-card-group">
+        <div className="setup-card-title">
           <Activity size={18} />
           <span>ACTIVE PLATOON ATTENDANCE</span>
         </div>
 
         {/* Selected Unit Echelon Banner */}
         <div style={{
-          background: 'linear-gradient(135deg, var(--rotc-green-dark) 0%, #005a36 100%)',
+          background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
           color: '#ffffff',
           borderRadius: '12px',
           padding: '0.9rem 1rem',
-          marginBottom: '1rem',
+          border: '1px solid var(--border-dark)',
           boxShadow: 'var(--shadow-sm)'
         }}>
           <div style={{
             fontSize: '0.72rem',
-            color: 'var(--rotc-yellow-gold)',
+            color: 'var(--rotc-gold-bright)',
             textTransform: 'uppercase',
             fontWeight: 800,
             letterSpacing: '0.8px',
@@ -92,11 +92,12 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
           </div>
 
           <div style={{
-            fontSize: '0.98rem',
+            fontSize: '1rem',
             fontWeight: 800,
             fontFamily: 'Oswald, sans-serif',
             letterSpacing: '0.5px',
-            lineHeight: 1.2
+            lineHeight: 1.2,
+            color: '#ffffff'
           }}>
             {formattedBn} • {formattedCoy} • {formattedPltn}
           </div>
@@ -105,29 +106,29 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            fontSize: '0.72rem',
-            opacity: 0.85,
+            fontSize: '0.74rem',
+            color: 'var(--text-muted)',
             marginTop: '4px'
           }}>
-            <span>Duty OIC: <strong>{sessionSetup?.dutyOfficer || 'Duty Officer'}</strong></span>
+            <span>Platoon Leader: <strong style={{ color: 'var(--text-bright)' }}>{sessionSetup?.dutyOfficer || 'Duty Officer'}</strong></span>
             <span>•</span>
-            <span>Mode: <strong>{activeMode}</strong></span>
+            <span>Mode: <strong style={{ color: 'var(--rotc-gold-bright)' }}>{activeMode}</strong></span>
           </div>
         </div>
 
-        {/* Platoon Progress Block (Fixed 37 Cadets Capacity strictly for active platoon) */}
+        {/* Platoon Progress Block */}
         <div style={{
-          background: '#f8fafc',
-          border: '1px solid var(--border-light)',
+          background: 'var(--bg-dark-input)',
+          border: '1px solid var(--border-dark)',
           borderRadius: '12px',
           padding: '0.9rem 1rem'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.5rem' }}>
             <div>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--rotc-green-dark)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--rotc-gold-bright)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Platoon Capacity ({PLATOON_CAPACITY} Cadets Fixed)
               </div>
-              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--text-dark)', lineHeight: 1.1, marginTop: '2px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', lineHeight: 1.1, marginTop: '2px' }}>
                 {activeScannedCount} <span style={{ fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: 600 }}>/ {PLATOON_CAPACITY} Scanned</span>
               </div>
             </div>
@@ -139,16 +140,15 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 padding: '3px 10px',
                 borderRadius: '9999px',
                 background: activeScannedCount > PLATOON_CAPACITY
-                  ? '#fee2e2'
-                  : (activeScannedCount === PLATOON_CAPACITY ? '#d1fae5' : '#fef3c7'),
+                  ? 'rgba(239, 68, 68, 0.2)'
+                  : (activeScannedCount === PLATOON_CAPACITY ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'),
                 color: activeScannedCount > PLATOON_CAPACITY
-                  ? '#b91c1c'
-                  : (activeScannedCount === PLATOON_CAPACITY ? '#065f46' : '#92400e'),
-                border: `1px solid ${
-                  activeScannedCount > PLATOON_CAPACITY
-                    ? '#f87171'
-                    : (activeScannedCount === PLATOON_CAPACITY ? '#6ee7b7' : '#fde68a')
-                }`,
+                  ? '#f87171'
+                  : (activeScannedCount === PLATOON_CAPACITY ? '#34d399' : 'var(--rotc-gold-bright)'),
+                border: `1px solid ${activeScannedCount > PLATOON_CAPACITY
+                    ? '#ef4444'
+                    : (activeScannedCount === PLATOON_CAPACITY ? '#10b981' : '#f59e0b')
+                  }`,
                 transition: 'all 0.4s ease'
               }}>
                 {activeScannedCount > PLATOON_CAPACITY
@@ -162,11 +162,12 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
           <div style={{
             width: '100%',
             height: '11px',
-            background: '#e2e8f0',
+            background: '#0b0f19',
             borderRadius: '9999px',
             overflow: 'hidden',
             marginTop: '0.4rem',
-            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.1)'
+            boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)',
+            border: '1px solid var(--border-dark)'
           }}>
             <div
               className="animated-progress-fill"
@@ -177,17 +178,17 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                   ? 'linear-gradient(90deg, #dc2626 0%, #ef4444 100%)'
                   : (activeScannedCount === PLATOON_CAPACITY
                     ? 'linear-gradient(90deg, #059669 0%, #10b981 100%)'
-                    : 'linear-gradient(90deg, #064e2e 0%, #059669 50%, var(--rotc-yellow-gold) 100%)'),
+                    : 'linear-gradient(90deg, #059669 0%, #10b981 50%, var(--rotc-gold-bright) 100%)'),
                 borderRadius: '9999px',
                 transition: 'width 0.8s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.5s ease'
               }}
             />
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '6px', fontWeight: 600 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '6px', fontWeight: 600 }}>
             <span>0 Cadets</span>
             <span style={{
-              color: activeScannedCount > PLATOON_CAPACITY ? '#dc2626' : (activeScannedCount === PLATOON_CAPACITY ? '#059669' : 'var(--rotc-green-dark)'),
+              color: activeScannedCount > PLATOON_CAPACITY ? '#f87171' : (activeScannedCount === PLATOON_CAPACITY ? '#34d399' : 'var(--rotc-gold-bright)'),
               fontWeight: 800
             }}>
               {activeScannedCount > PLATOON_CAPACITY
@@ -199,17 +200,17 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
         </div>
       </div>
 
-      {/* Recent Field Scans List View (Interactive tap-to-view items) */}
-      <div className="mobile-card">
+      {/* Recent Field Scans List View */}
+      <div className="setup-card-group">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <div className="mobile-card-title" style={{ margin: 0 }}>
+          <div className="setup-card-title" style={{ margin: 0 }}>
             <Clock size={18} />
             <span>RECENT FIELD SCANS ({activeScannedCount})</span>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             {totalAllScans > activeScannedCount && (
-              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'rgba(0,0,0,0.05)', padding: '2px 7px', borderRadius: '9999px', fontWeight: 600 }}>
+              <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', background: 'var(--bg-dark-input)', padding: '2px 7px', borderRadius: '9999px', fontWeight: 600, border: '1px solid var(--border-dark)' }}>
                 {totalAllScans} in queue
               </span>
             )}
@@ -219,9 +220,9 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 type="button"
                 onClick={onResetQueue}
                 style={{
-                  background: 'rgba(239, 68, 68, 0.08)',
-                  border: '1px solid rgba(239, 68, 68, 0.25)',
-                  color: '#dc2626',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid #ef4444',
+                  color: '#f87171',
                   borderRadius: '6px',
                   padding: '3px 8px',
                   fontSize: '0.68rem',
@@ -242,10 +243,10 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
         </div>
 
         {activeUnitScans.length === 0 ? (
-          <div style={{ textTransform: 'uppercase', padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', background: '#f8fafc', borderRadius: '10px', border: '1px dashed var(--border-light)' }}>
+          <div style={{ textTransform: 'uppercase', padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.8rem', background: 'var(--bg-dark-input)', borderRadius: '10px', border: '1px dashed var(--border-dark)' }}>
             No scans recorded for <strong>{activePltn}</strong> ({activeMode}) yet.
             {totalAllScans > 0 && (
-              <div style={{ fontSize: '0.72rem', color: 'var(--rotc-green-dark)', marginTop: '4px', fontWeight: 700 }}>
+              <div style={{ fontSize: '0.72rem', color: 'var(--rotc-gold-bright)', marginTop: '4px', fontWeight: 700 }}>
                 ({totalAllScans} cadet scan(s) recorded in other platoon sessions are safely queued for batch sync).
               </div>
             )}
@@ -265,9 +266,9 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   padding: '0.75rem 0.9rem',
-                  background: '#ffffff',
+                  background: 'var(--bg-dark-input)',
                   borderRadius: '12px',
-                  border: '1px solid var(--border-light)',
+                  border: '1px solid var(--border-dark)',
                   boxShadow: 'var(--shadow-sm)',
                   cursor: 'pointer',
                   transition: 'all 0.18s cubic-bezier(0.16, 1, 0.3, 1)'
@@ -275,14 +276,12 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               >
                 {/* Left Side: Top Line = Cadet Name/ID, Bottom Line = ID + Timestamp */}
                 <div>
-                  {/* Top Line: CADET SANTOS, MARIA L. */}
-                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--rotc-green-dark)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                  <div style={{ fontWeight: 800, fontSize: '0.92rem', color: 'var(--rotc-gold-bright)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
                     {getDisplayHeading(scan)}
                   </div>
 
-                  {/* Bottom Line: ID: 221-01001 • 09:05 AM */}
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                    <span style={{ fontWeight: 700, color: 'var(--text-dark)' }}>ID: {scan.cadetId}</span>
+                    <span style={{ fontWeight: 700, color: 'var(--text-bright)' }}>ID: {scan.cadetId}</span>
                     <span>•</span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
                       <Clock size={11} />
@@ -298,9 +297,9 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                     fontWeight: 850,
                     padding: '3px 9px',
                     borderRadius: '9999px',
-                    background: scan.scanMode === 'Time-Out' ? '#fef3c7' : '#d1fae5',
-                    color: scan.scanMode === 'Time-Out' ? '#92400e' : '#065f46',
-                    border: `1px solid ${scan.scanMode === 'Time-Out' ? '#fde68a' : '#6ee7b7'}`
+                    background: scan.scanMode === 'Time-Out' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)',
+                    color: scan.scanMode === 'Time-Out' ? 'var(--rotc-gold-bright)' : '#34d399',
+                    border: `1px solid ${scan.scanMode === 'Time-Out' ? '#f59e0b' : '#10b981'}`
                   }}>
                     {scan.scanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN'}
                   </span>
@@ -313,11 +312,33 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
 
       {/* Tap-to-View Cadet Detail Modal */}
       {selectedScanDetail && (
-        <div className="modal-overlay" onClick={() => setSelectedScanDetail(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '380px', padding: '1.25rem' }}>
+        <div className="modal-overlay" onClick={() => setSelectedScanDetail(null)} style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 600,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1rem'
+        }}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{
+            maxWidth: '380px',
+            padding: '1.25rem',
+            background: 'var(--bg-dark-card)',
+            border: '1.5px solid var(--border-dark)',
+            borderRadius: '18px',
+            boxShadow: '0 20px 45px rgba(0,0,0,0.75)',
+            width: '100%'
+          }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--rotc-green-dark)', fontWeight: 800, fontSize: '0.95rem' }}>
-                <CheckCircle2 size={20} color="var(--rotc-green-primary)" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--rotc-gold-bright)', fontWeight: 800, fontSize: '0.95rem' }}>
+                <CheckCircle2 size={20} color="var(--rotc-gold-bright)" />
                 <span>CADET SCAN DETAILS</span>
               </div>
               <button
@@ -330,21 +351,21 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               </button>
             </div>
 
-            <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '1rem', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+            <div style={{ background: 'var(--bg-dark-input)', borderRadius: '12px', padding: '1rem', border: '1px solid var(--border-dark)', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
               <div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Cadet Name</div>
-                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{getDisplayHeading(selectedScanDetail)}</div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#ffffff' }}>{getDisplayHeading(selectedScanDetail)}</div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
                 <div>
                   <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Cadet ID</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 800 }}>{selectedScanDetail.cadetId}</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--rotc-gold-bright)' }}>{selectedScanDetail.cadetId}</div>
                 </div>
 
                 <div>
                   <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Scan Mode</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: selectedScanDetail.scanMode === 'Time-Out' ? '#d97706' : '#059669' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: selectedScanDetail.scanMode === 'Time-Out' ? '#fbbf24' : '#34d399' }}>
                     {selectedScanDetail.scanMode || 'Time-In'}
                   </div>
                 </div>
@@ -352,14 +373,14 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
 
               <div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Unit Hierarchy</div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-subtle)' }}>
                   {selectedScanDetail.battalion || activeBn} • {selectedScanDetail.company || activeCoy} • {selectedScanDetail.platoon || activePltn}
                 </div>
               </div>
 
               <div>
                 <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 700 }}>Logged System Timestamp</div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-dark)' }}>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-subtle)' }}>
                   {selectedScanDetail.timestamp ? new Date(selectedScanDetail.timestamp).toLocaleString() : 'N/A'}
                 </div>
               </div>
@@ -367,7 +388,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
 
             <button
               type="button"
-              className="btn btn-primary"
+              className="setup-gold-btn"
               onClick={() => setSelectedScanDetail(null)}
               style={{ width: '100%', marginTop: '1rem', padding: '0.75rem', fontWeight: 800, borderRadius: '10px' }}
             >

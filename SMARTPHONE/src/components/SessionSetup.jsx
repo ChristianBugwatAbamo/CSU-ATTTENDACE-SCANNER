@@ -51,6 +51,15 @@ const OFFICER_CLASSES = [
 const OFFICER_RANKS = OFFICER_CLASSES.flatMap(c => c.ranks.map(r => r.value));
 
 const getClassBadgeStyle = (rankStr) => {
+  if (!rankStr) {
+    return {
+      classKey: 'RANK',
+      label: 'Select Rank',
+      badgeBg: 'rgba(255, 255, 255, 0.1)',
+      badgeColor: '#fbbf24',
+      badgeBorder: 'rgba(251, 191, 36, 0.3)'
+    };
+  }
   for (const group of OFFICER_CLASSES) {
     if (rankStr.includes(group.classKey)) {
       return group;
@@ -62,11 +71,13 @@ const getClassBadgeStyle = (rankStr) => {
 export default function SessionSetup({ initialSetup = {}, onStartSession, isEditing = false }) {
   const [isRankModalOpen, setIsRankModalOpen] = useState(false);
 
-  // Parse initial duty officer string if formatted: "C/LT COL MARIA L SANTOS (ROTC) 1CL" or legacy "C/LT COL (ROTC) 1CL SANTOS, MARIA L"
+  // Parse initial duty officer string if formatted
   const parseInitialDutyOfficer = (raw) => {
-    if (!raw) return { rank: 'C/COL (ROTC) 1CL', firstName: 'MARIA', middleInitial: 'L', lastName: 'SANTOS' };
+    if (!raw || !raw.trim() || raw.includes('SANTOS') || raw.includes('MARIA')) {
+      return { rank: '', firstName: '', middleInitial: '', lastName: '' };
+    }
 
-    let matchedRank = 'C/COL (ROTC) 1CL';
+    let matchedRank = '';
     let remaining = raw;
 
     // Check matching rank from sorted class hierarchy
@@ -95,13 +106,13 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
       const mi = parts.length > 1 ? parts[parts.length - 1].replace(/\./g, '') : '';
       return {
         rank: matchedRank,
-        lastName: (last || '').trim().toUpperCase() || 'SANTOS',
-        firstName: (first || '').trim().toUpperCase() || 'MARIA',
-        middleInitial: mi.slice(0, 2).toUpperCase() || 'L'
+        lastName: (last || '').trim().toUpperCase(),
+        firstName: (first || '').trim().toUpperCase(),
+        middleInitial: mi.slice(0, 2).toUpperCase()
       };
     }
 
-    // New format: FIRST [MI] LAST (e.g. "MARIA L SANTOS" or "MARIA SANTOS")
+    // New format: FIRST [MI] LAST
     const words = remaining.trim().split(/\s+/).filter(Boolean);
     if (words.length >= 3 && words[words.length - 2].length <= 2) {
       const last = words[words.length - 1];
@@ -124,49 +135,48 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
       return {
         rank: matchedRank,
         lastName: words[0].toUpperCase(),
-        firstName: 'MARIA',
-        middleInitial: 'L'
+        firstName: '',
+        middleInitial: ''
       };
     }
 
     return {
       rank: matchedRank,
-      lastName: 'SANTOS',
-      firstName: 'MARIA',
-      middleInitial: 'L'
+      lastName: '',
+      firstName: '',
+      middleInitial: ''
     };
   };
 
   const parsedOic = parseInitialDutyOfficer(initialSetup.dutyOfficer);
 
-  const [oicRank, setOicRank] = useState(parsedOic.rank);
-  const [oicFirstName, setOicFirstName] = useState(parsedOic.firstName);
-  const [oicMiddleInitial, setOicMiddleInitial] = useState(parsedOic.middleInitial);
-  const [oicLastName, setOicLastName] = useState(parsedOic.lastName);
+  const [oicRank, setOicRank] = useState(parsedOic.rank || '');
+  const [oicFirstName, setOicFirstName] = useState(parsedOic.firstName || '');
+  const [oicMiddleInitial, setOicMiddleInitial] = useState(parsedOic.middleInitial || '');
+  const [oicLastName, setOicLastName] = useState(parsedOic.lastName || '');
 
   const [sessionDate, setSessionDate] = useState(initialSetup.sessionDate || new Date().toISOString().split('T')[0]);
-  const [battalion, setBattalion] = useState(initialSetup.battalion || '1st Battalion');
-  const [company, setCompany] = useState(initialSetup.company || 'Alpha Company');
-  const [platoon, setPlatoon] = useState(initialSetup.platoon || '1st Platoon');
-  const [scanMode, setScanMode] = useState(initialSetup.scanMode || 'Time-In');
+  const [battalion, setBattalion] = useState(initialSetup.battalion || '');
+  const [company, setCompany] = useState(initialSetup.company || '');
+  const [platoon, setPlatoon] = useState(initialSetup.platoon || '');
+  const [scanMode, setScanMode] = useState(initialSetup.scanMode || '');
 
   useEffect(() => {
     if (initialSetup && initialSetup.dutyOfficer) {
       const p = parseInitialDutyOfficer(initialSetup.dutyOfficer);
-      setOicRank(p.rank);
-      setOicFirstName(p.firstName);
-      setOicMiddleInitial(p.middleInitial);
-      setOicLastName(p.lastName);
-      setSessionDate(initialSetup.sessionDate || new Date().toISOString().split('T')[0]);
-      setBattalion(initialSetup.battalion || '1st Battalion');
-      setCompany(initialSetup.company || 'Alpha Company');
-      setPlatoon(initialSetup.platoon || '1st Platoon');
-      setScanMode(initialSetup.scanMode || 'Time-In');
+      setOicRank(p.rank || '');
+      setOicFirstName(p.firstName || '');
+      setOicMiddleInitial(p.middleInitial || '');
+      setOicLastName(p.lastName || '');
     }
+    if (initialSetup.battalion !== undefined) setBattalion(initialSetup.battalion);
+    if (initialSetup.company !== undefined) setCompany(initialSetup.company);
+    if (initialSetup.platoon !== undefined) setPlatoon(initialSetup.platoon);
+    if (initialSetup.scanMode !== undefined) setScanMode(initialSetup.scanMode);
+    if (initialSetup.sessionDate !== undefined) setSessionDate(initialSetup.sessionDate);
   }, [initialSetup]);
 
   // Format: [Rank Prefix] [First Name] [MI] [Last Name] [Branch/Class Suffix]
-  // e.g. "C/LT COL MARIA L SANTOS (ROTC) 1CL"
   const getFormattedDutyOfficer = () => {
     const l = oicLastName.trim().toUpperCase();
     const f = oicFirstName.trim().toUpperCase();
@@ -183,8 +193,16 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
 
     const nameParts = [f, mi, l].filter(Boolean).join(' ');
 
+    if (!nameParts && !oicRank) {
+      return '(Not Configured)';
+    }
+
     if (!nameParts) {
-      return rankSuffix ? `${rankPrefix} SANTOS ${rankSuffix}` : `${rankPrefix} SANTOS`;
+      return oicRank;
+    }
+
+    if (!oicRank) {
+      return nameParts;
     }
 
     return rankSuffix
@@ -197,10 +215,21 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
     setOicMiddleInitial(cleaned);
   };
 
+  // Form Validation Check: All fields must be explicitly selected/filled
+  const isFormValid = Boolean(
+    oicRank.trim() &&
+    oicLastName.trim() &&
+    oicFirstName.trim() &&
+    scanMode.trim() &&
+    battalion.trim() &&
+    company.trim() &&
+    platoon.trim()
+  );
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!oicLastName.trim() && !oicFirstName.trim()) {
-      alert("Please enter Platoon Leader Last Name and First Name.");
+    if (!isFormValid) {
+      alert("Please fill in and select all required fields (Platoon Leader Rank, Last Name, First Name, Scan Mode, Battalion, Company, and Platoon).");
       return;
     }
     const fullOfficerName = getFormattedDutyOfficer();
@@ -222,54 +251,54 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
     <div className="settings-edge-to-edge-view">
       {/* Clean Header */}
       <div style={{ marginBottom: '1.25rem' }}>
-        <div style={{ color: 'var(--rotc-yellow-gold)', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase', marginBottom: '2px' }}>
+        <div style={{ color: 'var(--rotc-gold-bright)', fontSize: '0.72rem', fontWeight: 800, letterSpacing: '1.2px', textTransform: 'uppercase', marginBottom: '3px' }}>
           SCANNER CONFIGURATION
         </div>
-        <h1 style={{ color: '#ffffff', fontSize: '1.4rem', fontWeight: 800, margin: 0, fontFamily: 'Oswald, sans-serif' }}>
+        <h1 style={{ color: '#ffffff', fontSize: '1.45rem', fontWeight: 800, margin: 0, fontFamily: 'Oswald, sans-serif', letterSpacing: '0.4px' }}>
           Field Session Settings
         </h1>
-        <p style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.78rem', margin: '2px 0 0 0' }}>
-          Configure active platoon leader, echelon hierarchy, and scan mode
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '3px 0 0 0' }}>
+          Configure officer on duty, echelon hierarchy, and active scan mode
         </p>
       </div>
 
-      {/* Setup Form */}
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {/* Setup Form Grouped in High-Contrast Modern Visual Cards */}
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
 
-        {/* Platoon Leader In Charge Section */}
-        <div style={{ background: 'rgba(0, 0, 0, 0.22)', padding: '0.9rem', borderRadius: '14px', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', fontWeight: 800, color: 'var(--rotc-yellow-gold)', marginBottom: '0.65rem' }}>
-            <UserCheck size={16} /> Platoon Leader In Charge *
-          </label>
+        {/* Visual Card 1: Platoon Leader In Charge Section */}
+        <div className="setup-card-group">
+          <div className="setup-card-title">
+            <UserCheck size={16} />
+            <span>Platoon Leader In Charge </span>
+          </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-            {/* Rank / Class Dropdown with Class Badge Highlights */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {/* Rank / Class Selector Button with Class Badge */}
             <div>
-              <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(255, 255, 255, 0.85)', display: 'block', marginBottom: '4px' }}>
-                Rank & Class*
+              <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-subtle)', display: 'block', marginBottom: '5px' }}>
+                Rank & Class
               </label>
 
-              {/* Interactive Custom Rank Selector Trigger */}
               <button
                 type="button"
                 onClick={() => setIsRankModalOpen(true)}
                 style={{
                   width: '100%',
-                  background: 'rgba(0, 0, 0, 0.45)',
-                  border: '1.5px solid rgba(255, 255, 255, 0.22)',
-                  borderRadius: '10px',
-                  padding: '0.65rem 0.85rem',
+                  background: 'var(--bg-dark-input)',
+                  border: oicRank ? '1.5px solid var(--border-dark)' : '1.5px dashed var(--rotc-gold-bright)',
+                  borderRadius: '12px',
+                  padding: '0.75rem 0.85rem',
                   color: '#ffffff',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   cursor: 'pointer',
                   textAlign: 'left',
-                  boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.2)'
+                  boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                  transition: 'border-color 0.15s ease'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                  {/* Class Badge Highlight */}
                   <span style={{
                     fontSize: '0.7rem',
                     fontWeight: 800,
@@ -284,52 +313,52 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                     {currentClassInfo.classKey}
                   </span>
 
-                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {oicRank}
+                  <span style={{ fontSize: '0.88rem', fontWeight: 700, color: oicRank ? '#ffffff' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {oicRank || '-- Tap to Select Officer Rank & Class * --'}
                   </span>
                 </div>
 
-                <ChevronDown size={18} style={{ color: 'var(--rotc-yellow-gold)', flexShrink: 0 }} />
+                <ChevronDown size={18} style={{ color: 'var(--rotc-gold-bright)', flexShrink: 0 }} />
               </button>
             </div>
 
-            {/* Split Name Fields: Last Name, First Name, Middle Initial (No Period) */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 65px', gap: '0.5rem' }}>
+            {/* Split Name Fields: Last Name, First Name, Middle Initial */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 68px', gap: '0.55rem' }}>
               <div>
-                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(255, 255, 255, 0.85)', display: 'block', marginBottom: '3px' }}>
-                  Last Name *
+                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-subtle)', display: 'block', marginBottom: '4px' }}>
+                  Last Name
                 </label>
                 <input
                   type="text"
                   className="setup-input"
-                  placeholder="SANTOS"
+                  placeholder="e.g., DELA CRUZ"
                   value={oicLastName}
                   onChange={(e) => setOicLastName(e.target.value.toUpperCase())}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(255, 255, 255, 0.85)', display: 'block', marginBottom: '3px' }}>
-                  First Name *
+                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-subtle)', display: 'block', marginBottom: '4px' }}>
+                  First Name
                 </label>
                 <input
                   type="text"
                   className="setup-input"
-                  placeholder="MARIA"
+                  placeholder="e.g., JUAN"
                   value={oicFirstName}
                   onChange={(e) => setOicFirstName(e.target.value.toUpperCase())}
                 />
               </div>
 
               <div>
-                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'rgba(255, 255, 255, 0.85)', display: 'block', marginBottom: '3px' }} title="Middle initial without period">
+                <label style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-subtle)', display: 'block', marginBottom: '4px' }} title="Middle initial without period">
                   M.I.
                 </label>
                 <input
                   type="text"
                   className="setup-input"
-                  placeholder="L"
-                  maxLength={2}
+                  placeholder="A"
+                  maxLength={1}
                   value={oicMiddleInitial}
                   onChange={(e) => handleMiddleInitialChange(e.target.value)}
                   style={{ textAlign: 'center' }}
@@ -338,17 +367,33 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
             </div>
 
             {/* Live Name Preview */}
-            <div style={{ fontSize: '0.72rem', color: 'rgba(255, 255, 255, 0.65)', marginTop: '2px' }}>
-              Platoon Leader : <strong style={{ color: '#ffffff' }}>{getFormattedDutyOfficer()}</strong>
+            <div style={{
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)',
+              background: 'var(--bg-dark-input)',
+              padding: '0.5rem 0.75rem',
+              borderRadius: '8px',
+              border: '1px solid var(--border-dark)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '6px'
+            }}>
+              <span>Officer Name:</span>
+              <strong style={{ color: oicLastName || oicFirstName ? 'var(--rotc-gold-bright)' : 'var(--text-muted)', textAlign: 'right' }}>
+                {getFormattedDutyOfficer()}
+              </strong>
             </div>
           </div>
         </div>
 
-        {/* Scan Mode Toggle (Time-In vs Time-Out Interactive Segmented Control) */}
-        <div>
-          <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, color: 'var(--rotc-yellow-gold)', marginBottom: '6px' }}>
-            Scan Mode *
-          </label>
+        {/* Visual Card 2: Bright Pill-Toggle Scan Mode Selection */}
+        <div className="setup-card-group">
+          <div className="setup-card-title">
+            <Shield size={16} />
+            <span>Active Scan Mode </span>
+          </div>
+
           <div className="segmented-mode-track">
             <button
               type="button"
@@ -370,102 +415,83 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
           </div>
         </div>
 
-        {/* Battalion Selector */}
-        <div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-            <Layers size={14} /> Battalion / Unit *
-          </label>
-          <select
-            className="setup-select"
-            value={battalion}
-            onChange={(e) => {
-              const newBn = e.target.value;
-              setBattalion(newBn);
-              if (newBn === 'CADET OFFICERS') {
-                if (!['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
-                  setCompany('1CL');
-                }
-                setPlatoon('Officer Corps');
-              } else if (['1CL', '2CL', '3CL', '4CL', 'ASPIRANT'].includes(company)) {
-                setCompany('Alpha Company');
-                setPlatoon('1st Platoon');
-              }
-            }}
-          >
-            <option value="1st Battalion">1st Battalion</option>
-            <option value="2nd Battalion">2nd Battalion</option>
-            <option value="CADET OFFICERS">CADET OFFICERS</option>
-            <option value="All Battalions">All Units / Battalions</option>
-          </select>
-        </div>
+        {/* Visual Card 3: Unit Echelon Hierarchy */}
+        <div className="setup-card-group">
+          <div className="setup-card-title">
+            <Layers size={16} />
+            <span>Unit Echelon Hierarchy</span>
+          </div>
 
-        {/* Company & Platoon Dropdowns */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-              <Building size={14} /> {battalion === 'CADET OFFICERS' ? 'Officer Class *' : 'Company *'}
-            </label>
-            <select
-              className="setup-select"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-            >
-              {battalion === 'CADET OFFICERS' ? (
-                <>
-                  <option value="1CL">1CL (First Class Officers)</option>
-                  <option value="2CL">2CL (Second Class Officers)</option>
-                  <option value="3CL">3CL (Third Class Officers)</option>
-                  <option value="4CL">4CL (Fourth Class Officers)</option>
-                  <option value="ASPIRANT">ASPIRANT (Officer Candidates)</option>
-                  <option value="All Officer Classes">All Officer Classes</option>
-                </>
-              ) : (
-                <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {/* Battalion */}
+            <div>
+              <label style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-subtle)', display: 'block', marginBottom: '4px' }}>
+                Battalion
+              </label>
+              <select
+                className="setup-select"
+                value={battalion}
+                onChange={(e) => {
+                  const newBn = e.target.value;
+                  setBattalion(newBn);
+                  setCompany('');
+                  setPlatoon('');
+                }}
+              >
+                <option value="" disabled>-- Select Battalion --</option>
+                <option value="1st Battalion">1st Battalion</option>
+                <option value="2nd Battalion">2nd Battalion</option>
+              </select>
+            </div>
+
+            {/* Company & Platoon Dropdowns */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-subtle)', marginBottom: '4px' }}>
+                  <Building size={13} /> Company
+                </label>
+                <select
+                  className="setup-select"
+                  value={company}
+                  disabled={!battalion}
+                  onChange={(e) => setCompany(e.target.value)}
+                >
+                  <option value="" disabled>-- Select Coy --</option>
                   <option value="Alpha Company">Alpha Company</option>
                   <option value="Bravo Company">Bravo Company</option>
                   <option value="Charlie Company">Charlie Company</option>
                   <option value="Delta Company">Delta Company</option>
-                  <option value="Headquarters">Headquarters (HQ)</option>
-                  <option value="All Companies">All Companies</option>
-                </>
-              )}
-            </select>
-          </div>
+                </select>
+              </div>
 
-          <div>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-              <Users size={14} /> {battalion === 'CADET OFFICERS' ? 'Formation / Staff *' : 'Platoon *'}
-            </label>
-            <select
-              className="setup-select"
-              value={platoon}
-              onChange={(e) => setPlatoon(e.target.value)}
-            >
-              {battalion === 'CADET OFFICERS' ? (
-                <>
-                  <option value="Officer Corps">Officer Corps</option>
-                  <option value="Command Staff">Command Staff</option>
-                  <option value="Special Staff">Special Staff</option>
-                  <option value="All Officers">All Officers</option>
-                </>
-              ) : (
-                <>
+              <div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-subtle)', marginBottom: '4px' }}>
+                  <Users size={13} /> Platoon
+                </label>
+                <select
+                  className="setup-select"
+                  value={platoon}
+                  disabled={!battalion}
+                  onChange={(e) => setPlatoon(e.target.value)}
+                >
+                  <option value="" disabled>-- Select PL --</option>
                   <option value="1st Platoon">1st Platoon</option>
                   <option value="2nd Platoon">2nd Platoon</option>
                   <option value="3rd Platoon">3rd Platoon</option>
                   <option value="4th Platoon">4th Platoon</option>
-                  <option value="All Platoons">All Platoons</option>
-                </>
-              )}
-            </select>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Session Date & System Clock */}
-        <div>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.78rem', fontWeight: 700, color: 'var(--rotc-yellow-gold)', marginBottom: '4px' }}>
-            <Calendar size={14} /> Session Date & System Clock
-          </label>
+        {/* Visual Card 4: Session Date & System Clock */}
+        <div className="setup-card-group">
+          <div className="setup-card-title">
+            <Calendar size={16} />
+            <span>Session Date & Time</span>
+          </div>
+
           <div style={{ display: 'flex', gap: '0.65rem', alignItems: 'center' }}>
             <input
               type="date"
@@ -475,13 +501,13 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
               style={{ flex: 1 }}
             />
             <div style={{
-              background: 'rgba(0, 0, 0, 0.28)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
+              background: 'var(--bg-dark-input)',
+              border: '1px solid var(--border-dark)',
               borderRadius: '12px',
               padding: '0.75rem 0.85rem',
               fontSize: '0.82rem',
-              fontWeight: 700,
-              color: 'var(--rotc-yellow-gold)',
+              fontWeight: 800,
+              color: 'var(--rotc-gold-bright)',
               whiteSpace: 'nowrap',
               display: 'flex',
               alignItems: 'center',
@@ -491,23 +517,24 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
               <span>LIVE CLOCK</span>
             </div>
           </div>
-          <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.65)', marginTop: '4px' }}>
-            ⚡ Scans automatically log exact smartphone system time in real-time.
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            ⚡ Real-time smartphone timestamp is automatically attached to each scanned attendance record.
           </div>
         </div>
 
-        {/* Save & Apply Yellow Portal Button */}
+        {/* Save & Apply Portal Button */}
         <button
           type="submit"
           className="setup-gold-btn"
-          style={{ marginTop: '0.5rem' }}
+          disabled={!isFormValid}
+          style={{ marginTop: '0.35rem' }}
         >
           <Play size={18} />
-          <span>Save & Apply Scanner Setup</span>
+          <span>{isFormValid ? 'Save & Launch Scanner' : 'Complete Required Setup to Continue'}</span>
         </button>
       </form>
 
-      {/* Grouped Rank & Class Selection Modal with Full Vertical Scrolling */}
+      {/* Grouped Rank & Class Selection Modal in High-Contrast Dark Slate */}
       {isRankModalOpen && (
         <div
           onClick={(e) => {
@@ -519,9 +546,9 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
             left: 0,
             right: 0,
             bottom: 0,
-            background: 'rgba(0, 15, 8, 0.82)',
-            backdropFilter: 'blur(6px)',
-            WebkitBackdropFilter: 'blur(6px)',
+            background: 'rgba(0, 0, 0, 0.85)',
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
             zIndex: 600,
             display: 'flex',
             alignItems: 'center',
@@ -531,8 +558,8 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
           }}
         >
           <div style={{
-            background: '#ffffff',
-            borderRadius: '16px',
+            background: 'var(--bg-dark-card)',
+            borderRadius: '18px',
             width: '100%',
             maxWidth: '430px',
             maxHeight: '82vh',
@@ -540,35 +567,35 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            boxShadow: '0 20px 40px rgba(0, 0, 0, 0.45)',
-            border: '1px solid var(--border-light)',
+            boxShadow: '0 20px 45px rgba(0, 0, 0, 0.75)',
+            border: '1.5px solid var(--border-dark)',
             overflow: 'hidden'
           }}>
             {/* Modal Header */}
             <div style={{
               padding: '1rem 1.25rem',
-              borderBottom: '1px solid #e2e8f0',
+              borderBottom: '1px solid var(--border-dark)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              background: '#064e2e',
+              background: '#0f172a',
               color: '#ffffff',
               flexShrink: 0
             }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 800, fontFamily: 'Oswald, sans-serif', fontSize: '1.05rem', letterSpacing: '0.5px' }}>
-                <Award size={20} color="var(--rotc-yellow-gold)" />
+                <Award size={20} color="var(--rotc-gold-bright)" />
                 <span>SELECT OFFICER RANK & CLASS</span>
               </div>
               <button
                 type="button"
                 onClick={() => setIsRankModalOpen(false)}
-                style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '4px' }}
               >
                 <X size={20} />
               </button>
             </div>
 
-            {/* Scrollable Grouped List with explicit touch and overflow settings */}
+            {/* Scrollable Grouped List */}
             <div style={{
               padding: '1rem',
               overflowY: 'auto',
@@ -579,13 +606,14 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
               minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.9rem'
+              gap: '0.9rem',
+              background: 'var(--bg-dark-base)'
             }}>
               {OFFICER_CLASSES.map((classGroup) => (
-                <div key={classGroup.classKey} style={{ background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', overflow: 'hidden', flexShrink: 0 }}>
-                  {/* Class Group Header Badge Banner */}
+                <div key={classGroup.classKey} style={{ background: 'var(--bg-dark-card)', borderRadius: '12px', border: '1px solid var(--border-dark)', overflow: 'hidden', flexShrink: 0 }}>
+                  {/* Class Group Header Banner */}
                   <div style={{
-                    padding: '0.45rem 0.85rem',
+                    padding: '0.5rem 0.85rem',
                     background: classGroup.badgeBg,
                     borderBottom: `1px solid ${classGroup.badgeBorder}`,
                     display: 'flex',
@@ -599,7 +627,7 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                       fontSize: '0.68rem',
                       fontWeight: 800,
                       color: classGroup.badgeColor,
-                      background: 'rgba(255, 255, 255, 0.75)',
+                      background: 'rgba(255, 255, 255, 0.85)',
                       padding: '1px 6px',
                       borderRadius: '4px',
                       border: `1px solid ${classGroup.badgeBorder}`
@@ -609,7 +637,7 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                   </div>
 
                   {/* Ranks inside Class Group */}
-                  <div style={{ padding: '0.4rem 0.5rem' }}>
+                  <div style={{ padding: '0.5rem' }}>
                     {classGroup.ranks.map((r) => {
                       const isSelected = oicRank === r.value;
                       return (
@@ -625,22 +653,22 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'space-between',
-                            padding: '0.7rem 0.8rem',
-                            borderRadius: '8px',
-                            border: isSelected ? '1.5px solid var(--rotc-green-dark)' : '1px solid #e2e8f0',
-                            background: isSelected ? '#ecfdf5' : '#ffffff',
+                            padding: '0.75rem 0.85rem',
+                            borderRadius: '10px',
+                            border: isSelected ? '1.5px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
+                            background: isSelected ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-dark-input)',
                             marginBottom: '6px',
                             cursor: 'pointer',
                             textAlign: 'left',
-                            boxShadow: isSelected ? '0 2px 6px rgba(6, 78, 46, 0.15)' : 'none',
+                            boxShadow: isSelected ? '0 2px 8px rgba(245, 158, 11, 0.25)' : 'none',
                             transition: 'all 0.15s ease'
                           }}
                         >
                           <div>
-                            <div style={{ fontSize: '0.88rem', fontWeight: 800, color: isSelected ? 'var(--rotc-green-dark)' : 'var(--text-dark)' }}>
+                            <div style={{ fontSize: '0.88rem', fontWeight: 800, color: isSelected ? 'var(--rotc-gold-bright)' : '#ffffff' }}>
                               {r.label}
                             </div>
-                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                               {r.title}
                             </div>
                           </div>
@@ -650,14 +678,14 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                               width: '24px',
                               height: '24px',
                               borderRadius: '50%',
-                              background: 'var(--rotc-green-dark)',
-                              color: '#ffffff',
+                              background: 'var(--rotc-gold-bright)',
+                              color: '#0b0f19',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               flexShrink: 0
                             }}>
-                              <Check size={15} />
+                              <Check size={15} strokeWidth={3} />
                             </div>
                           )}
                         </button>
@@ -669,12 +697,20 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
             </div>
 
             {/* Modal Footer */}
-            <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid #e2e8f0', background: '#f8fafc', textAlign: 'right', flexShrink: 0 }}>
+            <div style={{ padding: '0.85rem 1rem', borderTop: '1px solid var(--border-dark)', background: '#0f172a', textAlign: 'right', flexShrink: 0 }}>
               <button
                 type="button"
-                className="btn btn-secondary"
                 onClick={() => setIsRankModalOpen(false)}
-                style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', fontWeight: 700 }}
+                style={{
+                  padding: '0.55rem 1.35rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  borderRadius: '10px',
+                  background: 'var(--bg-dark-card)',
+                  color: '#ffffff',
+                  border: '1px solid var(--border-dark)',
+                  cursor: 'pointer'
+                }}
               >
                 Close
               </button>
@@ -683,9 +719,8 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
         </div>
       )}
 
-
     </div>
   );
 }
 
-export { SessionSetup as SettingsView };
+export { SessionSetup as SettingsView, SessionSetup as MobileSettingsView };

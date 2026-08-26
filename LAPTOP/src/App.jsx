@@ -432,31 +432,7 @@ export default function App() {
       return updated;
     });
 
-    // Auto-Expansion: Register new cadets dynamically into master roster
-    setCadets((prevCadets) => {
-      const existingCids = new Set(prevCadets.map(c => String(c.id || c.cadetId || '').trim().toUpperCase()));
-      let newlyAdded = [];
-      enrichedRecords.forEach((rec) => {
-        const cid = String(rec.cadetId || rec.i || '').trim().toUpperCase();
-        if (cid && !existingCids.has(cid)) {
-          existingCids.add(cid);
-          const inferred = inferCadetFromId(cid, rec);
-          newlyAdded.push(inferred);
-        }
-      });
-
-      if (newlyAdded.length > 0) {
-        const updatedCadets = [...prevCadets, ...newlyAdded];
-        try {
-          localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
-          window.dispatchEvent(new Event('storage'));
-        } catch (_) { }
-        return updatedCadets;
-      }
-      return prevCadets;
-    });
-
-    // Push enriched records to Supabase Cloud with auto-provisioning of Cadets and Sessions
+    // Push enriched records strictly to Supabase Cloud attendance_logs
     if (Array.isArray(enrichedRecords) && enrichedRecords.length > 0) {
       bulkUpsertAttendanceToSupabase(enrichedRecords)
         .then(async () => {

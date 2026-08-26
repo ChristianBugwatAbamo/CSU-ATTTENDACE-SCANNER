@@ -35,12 +35,22 @@ ChartJS.register(
 const attendanceChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  layout: {
+    padding: {
+      top: 24, // Generous top padding prevents data labels (e.g. 92%, 100%) from clipping past top boundary
+      right: 12,
+      left: 4,
+      bottom: 4,
+    },
+  },
   plugins: {
     legend: { display: false },
     datalabels: {
       display: true,
       align: 'top',
       anchor: 'end',
+      offset: 4,
+      clip: false,
       color: '#1e293b',
       font: { weight: 'bold', size: 11 },
       formatter: (value) => `${value}%`, // Adds % above points (e.g., 58%, 100%)
@@ -65,12 +75,22 @@ const attendanceChartOptions = {
 const growthChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  layout: {
+    padding: {
+      top: 24,
+      right: 12,
+      left: 4,
+      bottom: 4,
+    },
+  },
   plugins: {
     legend: { display: false },
     datalabels: {
       display: true,
       align: 'top',
       anchor: 'end',
+      offset: 4,
+      clip: false,
       color: '#1e293b',
       font: { weight: 'bold', size: 11 },
       formatter: (value) => `${value}`, // Raw count above point (e.g., 12)
@@ -142,6 +162,22 @@ import {
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, getSupabaseClient } from '../utils/supabaseClient';
 
+function toDateKey(dateInput) {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
+    return dateInput.slice(0, 10);
+  }
+  let d = new Date(dateInput);
+  if (isNaN(d.getTime()) && typeof dateInput === 'string') {
+    d = new Date(`${dateInput} ${new Date().getFullYear()}`);
+  }
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 // Standalone Hook to fetch attendance trend counting both Present & Late cadets
 export function useAttendanceTrendData() {
   const [trendData, setTrendData] = useState({ labels: [], datasets: [] });
@@ -166,25 +202,31 @@ export function useAttendanceTrendData() {
 
       if (error || !logs) return;
 
-      // 3. Aggregate count by unique date string (e.g., "Aug 22")
-      const dailyAttended = logs.reduce((acc, curr) => {
+      // 3. Aggregate count by unique date key (YYYY-MM-DD) for chronological ordering
+      const dailyAttendedMap = new Map();
+      logs.forEach((curr) => {
         const rawDate = curr.created_at || curr.date || curr.timestamp;
-        const d = rawDate ? new Date(rawDate) : new Date();
-        const dateKey = !isNaN(d.getTime())
-          ? d.toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-          })
-          : (curr.date || 'Today');
-        acc[dateKey] = (acc[dateKey] || 0) + 1;
-        return acc;
-      }, {});
+        const dateKey = toDateKey(rawDate) || toDateKey(new Date());
+        if (dateKey) {
+          dailyAttendedMap.set(dateKey, (dailyAttendedMap.get(dateKey) || 0) + 1);
+        }
+      });
 
-      // 4. Calculate percentage rates per date
-      const labels = Object.keys(dailyAttended);
-      const percentageRates = Object.values(dailyAttended).map((attendedCount) => {
+      // 4. Sort dates chronologically (YYYY-MM-DD ascending)
+      const sortedDateKeys = Array.from(dailyAttendedMap.keys()).sort();
+
+      const labels = sortedDateKeys.map((key) => {
+        const [y, m, d] = key.split('-').map(Number);
+        const dateObj = new Date(y, (m || 1) - 1, d || 1);
+        return !isNaN(dateObj.getTime())
+          ? dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          : key;
+      });
+
+      const percentageRates = sortedDateKeys.map((key) => {
+        const attendedCount = dailyAttendedMap.get(key) || 0;
         const rate = Math.round((attendedCount / unitCapacity) * 100);
-        return rate > 100 ? 100 : rate;
+        return rate > 100 ? 100 : (rate < 0 ? 0 : rate);
       });
 
       setTrendData({
@@ -266,26 +308,33 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
 
           if (cadets && cadets.length > 0) {
             if (!exactCadetCount) totalCount = cadets.length;
-            // Group cadets by month created
+            // Group cadets by month created in YYYY-MM format for proper chronological ordering
             cadets.forEach(c => {
               const d = c.created_at ? new Date(c.created_at) : new Date();
-              const monthLabel = isNaN(d.getTime())
-                ? 'Aug 2026'
-                : d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-              monthlyGrowthMap.set(monthLabel, (monthlyGrowthMap.get(monthLabel) || 0) + 1);
+              const monthKey = !isNaN(d.getTime())
+                ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+                : '2026-08';
+              monthlyGrowthMap.set(monthKey, (monthlyGrowthMap.get(monthKey) || 0) + 1);
             });
           }
         }
 
         if (isMounted) {
-          const growthLabels = monthlyGrowthMap.size > 0
-            ? Array.from(monthlyGrowthMap.keys())
+          const sortedMonthKeys = Array.from(monthlyGrowthMap.keys()).sort();
+          const growthLabels = sortedMonthKeys.length > 0
+            ? sortedMonthKeys.map(k => {
+              const [y, m] = k.split('-').map(Number);
+              const dateObj = new Date(y, (m || 1) - 1, 1);
+              return !isNaN(dateObj.getTime())
+                ? dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                : k;
+            })
             : ['Aug 2026'];
 
           let runningTotal = 0;
-          const growthCounts = monthlyGrowthMap.size > 0
-            ? Array.from(monthlyGrowthMap.values()).map(count => {
-              runningTotal += count;
+          const growthCounts = sortedMonthKeys.length > 0
+            ? sortedMonthKeys.map(k => {
+              runningTotal += (monthlyGrowthMap.get(k) || 0);
               return runningTotal;
             })
             : [totalCount];
@@ -305,8 +354,8 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
           });
         }
 
-        // --- 2. Attendance Trend (Aggregated by Date, Counting Both Present & Late) ---
-        let dailyTotals = {};
+        // --- 2. Attendance Trend (Aggregated by Date, Counting Both Present & Late, Sorted Chronologically) ---
+        const dailyDateMap = new Map();
 
         if (client) {
           // Query attendance logs for Present or Late statuses
@@ -316,18 +365,13 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
             .in('status', ['PRESENT', 'LATE', 'Present', 'Late']);
 
           if (!logsError && Array.isArray(logs) && logs.length > 0) {
-            dailyTotals = logs.reduce((acc, curr) => {
+            logs.forEach(curr => {
               const rawDate = curr.created_at || curr.date || curr.timestamp;
-              const d = rawDate ? new Date(rawDate) : new Date();
-              const dateKey = !isNaN(d.getTime())
-                ? d.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                })
-                : (curr.date || 'Today');
-              acc[dateKey] = (acc[dateKey] || 0) + 1;
-              return acc;
-            }, {});
+              const dateKey = toDateKey(rawDate) || toDateKey(new Date());
+              if (dateKey) {
+                dailyDateMap.set(dateKey, (dailyDateMap.get(dateKey) || 0) + 1);
+              }
+            });
           } else {
             // Fallback to attendance_sessions (summing present_count + late_count)
             const { data: sessions } = await client
@@ -336,25 +380,22 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
               .order('session_date', { ascending: true });
 
             if (sessions && sessions.length > 0) {
-              dailyTotals = sessions.reduce((acc, curr) => {
-                const d = new Date(curr.session_date);
-                const dateStr = isNaN(d.getTime())
-                  ? String(curr.session_date)
-                  : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              sessions.forEach(curr => {
+                const dateKey = toDateKey(curr.session_date);
+                if (dateKey) {
+                  const scanned = (curr.present_count !== undefined || curr.late_count !== undefined)
+                    ? ((curr.present_count || 0) + (curr.late_count || 0))
+                    : ((curr.total_scanned !== undefined && curr.total_scanned !== null) ? curr.total_scanned : 0);
 
-                const scanned = (curr.present_count !== undefined || curr.late_count !== undefined)
-                  ? ((curr.present_count || 0) + (curr.late_count || 0))
-                  : ((curr.total_scanned !== undefined && curr.total_scanned !== null) ? curr.total_scanned : 0);
-
-                acc[dateStr] = (acc[dateStr] || 0) + (scanned || 0);
-                return acc;
-              }, {});
+                  dailyDateMap.set(dateKey, (dailyDateMap.get(dateKey) || 0) + (scanned || 0));
+                }
+              });
             }
           }
         }
 
         // Fallback / supplement with raw attendance_logs if sessions/logs empty
-        if (Object.keys(dailyTotals).length === 0 && Array.isArray(rawLogs) && rawLogs.length > 0) {
+        if (dailyDateMap.size === 0 && Array.isArray(rawLogs) && rawLogs.length > 0) {
           const logsByDate = new Map();
           rawLogs.forEach(l => {
             const rawStatus = String(l.status || l.timeInStatus || l.finalDailyStatus || '').toUpperCase();
@@ -370,20 +411,26 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
             }
           });
 
-          const sortedDates = Array.from(logsByDate.keys()).sort();
-          sortedDates.forEach(dateKey => {
-            const [y, m, d] = dateKey.split('-').map(Number);
-            const dateObj = new Date(y, m - 1, d);
-            const dateStr = isNaN(dateObj.getTime())
-              ? dateKey
-              : dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-            dailyTotals[dateStr] = logsByDate.get(dateKey).size;
+          logsByDate.forEach((cadetSet, dateKey) => {
+            dailyDateMap.set(dateKey, cadetSet.size);
           });
         }
 
         const unitCapacity = totalCount > 0 ? totalCount : (totalCapacity || 12);
-        const labels = Object.keys(dailyTotals);
-        const percentageRates = Object.values(dailyTotals).map((attendedCount) => {
+        
+        // Sort chronologically (YYYY-MM-DD ascending)
+        const sortedDateKeys = Array.from(dailyDateMap.keys()).sort();
+
+        const labels = sortedDateKeys.map(key => {
+          const [y, m, d] = key.split('-').map(Number);
+          const dateObj = new Date(y, (m || 1) - 1, d || 1);
+          return !isNaN(dateObj.getTime())
+            ? dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            : key;
+        });
+
+        const percentageRates = sortedDateKeys.map(key => {
+          const attendedCount = dailyDateMap.get(key) || 0;
           const rate = Math.round(((attendedCount || 0) / unitCapacity) * 100);
           return rate > 100 ? 100 : (rate < 0 ? 0 : rate);
         });
@@ -416,19 +463,6 @@ export function useDashboardAnalyticsData(rawLogs = [], totalCapacity = 12) {
   }, [rawLogs, totalCapacity]);
 
   return { growthData, trendData };
-}
-
-function toDateKey(dateInput) {
-  if (!dateInput) return '';
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-    return dateInput.slice(0, 10);
-  }
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
 }
 
 // Default 1,184 Standard CSU ROTC Structure Template

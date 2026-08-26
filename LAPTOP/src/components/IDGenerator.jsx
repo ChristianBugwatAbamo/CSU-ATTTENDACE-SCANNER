@@ -238,15 +238,6 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     return 'None';
   });
 
-  // Print Mode state: 'single' | 'batch'
-  const [printMode, setPrintMode] = useState(() => {
-    try {
-      const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).printMode || 'single';
-    } catch (_) {}
-    return 'single';
-  });
-
   // Batch Cards Queue with LocalStorage Persistence
   const [batchQueue, setBatchQueue] = useState(() => {
     try {
@@ -272,11 +263,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         battalion,
         company,
         platoon,
-        designation,
-        printMode
+        designation
       }));
     } catch (_) {}
-  }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation, printMode]);
+  }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation]);
 
   // Synchronize Batch Print Queue to LocalStorage
   useEffect(() => {
@@ -338,7 +328,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     setCadetId(formatted);
   };
 
-  const handleAddToBatch = () => {
+  const handleAddToBatch = async () => {
     if (!lastName.trim() || !firstName.trim() || !cadetId.trim()) {
       alert("Please fill in Last Name, First Name, and Cadet ID.");
       return;
@@ -359,12 +349,47 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       company: category === 'basic' ? normalizeCompany(company) : officerClass,
       platoon: category === 'basic' ? platoon : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
       designation: category === 'basic' ? 'None' : designation,
-      type: normalizeCadetType(category, rank)
+      type: normalizeCadetType(category, rank),
+      is_active: true
     };
-    setBatchQueue(prev => [...prev, newCard]);
+
+    // Immediately upsert into Supabase `cadets` table
+    try {
+      setIsSaving(true);
+      const client = getSupabaseClient();
+      if (client) {
+        const { error } = await client
+          .from('cadets')
+          .upsert([newCard], { onConflict: 'id' });
+
+        if (error) {
+          console.error("Supabase upsert error:", error);
+          alert("Warning: Could not save cadet to database: " + error.message);
+        } else {
+          setToastMessage({
+            type: 'SUCCESS',
+            message: `Cadet ${cadetId} (${fullName}) saved to Supabase & added to queue!`,
+          });
+          setTimeout(() => setToastMessage(null), 3500);
+        }
+      }
+
+      if (typeof refreshCadetsRoster === 'function') refreshCadetsRoster();
+      if (typeof onRefresh === 'function') onRefresh();
+      window.dispatchEvent(new Event('local-attendance-update'));
+
+      // Add to batch queue for printing
+      setBatchQueue(prev => {
+        const exists = prev.some(c => (c.id || c.cadet_id) === cadetId);
+        return exists ? prev.map(c => (c.id || c.cadet_id) === cadetId ? newCard : c) : [...prev, newCard];
+      });
+
+    } catch (err) {
+      console.error("Error saving cadet:", err);
+    } finally {
+      setIsSaving(false);
+    }
   };
-
-
 
   const handleRemoveFromBatch = (index) => {
     setBatchQueue(prev => prev.filter((_, idx) => idx !== index));
@@ -373,28 +398,13 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   // Supabase Sync + Print Execution Handler
   const handlePrintAndSaveCadets = async () => {
     try {
-      // 1. Gather all cadets to save (Single card or Batch queue)
-      const isBatchMode = printMode === 'batch';
-      const currentFormData = {
-        id: cadetId || '221-11101',
-        name: fullName || 'SANTOS, MARIA L',
-        rank: category === 'basic' ? 'Cadet' : rank,
-        battalion: category === 'basic' ? (battalion || '1st Battalion') : 'CADET OFFICERS',
-        company: category === 'basic' ? normalizeCompany(company || 'Alpha') : singleOfficerClass,
-        platoon: category === 'basic' ? (platoon || '1st Platoon') : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
-        designation: category === 'basic' ? 'None' : designation,
-        type: normalizeCadetType(category, rank)
-      };
-
-      const cadetsToSave = isBatchMode ? batchQueue : [currentFormData];
-
-      if (!cadetsToSave || cadetsToSave.length === 0) {
-        alert("No cadet cards available to print.");
+      if (!batchQueue || batchQueue.length === 0) {
+        alert("Batch queue is empty. Please add cadet cards to the batch before printing.");
         return;
       }
 
-      // 2. Format cadet objects for Supabase cadets table
-      const formattedCadets = cadetsToSave.map((c) => ({
+      // Format cadet objects for Supabase cadets table
+      const formattedCadets = batchQueue.map((c) => ({
         id: c.id || c.cadet_id || c.cadetId,
         name: c.name || `${c.last_name || ''}, ${c.first_name || ''} ${c.middle_initial || ''}`.trim(),
         rank: c.rank || (normalizeCadetType(c.type, c.rank) === 'Cadet Officer' ? 'Cadet Officer' : 'Cadet'),
@@ -406,7 +416,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         is_active: true
       }));
 
-      // 3. Upsert records into Supabase `cadets` table
+      // Upsert records into Supabase `cadets` table
       const client = getSupabaseClient();
       if (client) {
         const { error } = await client
@@ -420,7 +430,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         }
       }
 
-      // 4. Trigger local state refresh so it reflects on Cadets Roster immediately
+      // Trigger local state refresh so it reflects on Cadets Roster immediately
       if (typeof refreshCadetsRoster === 'function') {
         refreshCadetsRoster();
       }
@@ -429,7 +439,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       }
       window.dispatchEvent(new Event('local-attendance-update'));
 
-      // 5. Trigger Browser Print Dialog after successful database save
+      // Trigger Browser Print Dialog after successful database save
       window.print();
 
     } catch (err) {
@@ -497,25 +507,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     }
   };
 
-  let singleOfficerClass = '1CL';
-  if (rank.includes('1CL')) singleOfficerClass = '1CL';
-  else if (rank.includes('2CL')) singleOfficerClass = '2CL';
-  else if (rank.includes('3CL')) singleOfficerClass = '3CL';
-  else if (rank.includes('4CL')) singleOfficerClass = '4CL';
-  else if (rank.includes('ASPIRANT') || rank.includes('COCC')) singleOfficerClass = 'ASPIRANT';
-
-  const cardsToPrint = printMode === 'single' ? [
-    {
-      id: cadetId || '221-11101',
-      name: fullName || 'SANTOS, MARIA L',
-      rank: category === 'basic' ? 'Cadet' : rank,
-      battalion: category === 'basic' ? (battalion || '1st Battalion') : 'CADET OFFICERS',
-      company: category === 'basic' ? (company || 'Alpha') : singleOfficerClass,
-      platoon: category === 'basic' ? (platoon || '1st Platoon') : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
-      designation: category === 'basic' ? 'None' : designation,
-      type: category
-    }
-  ] : batchQueue;
+  const cardsToPrint = batchQueue;
 
   return (
     <div className="id-generator-container">
@@ -526,23 +518,8 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
           <p className="page-subheading">Official CSU ROTC CR80 Double-Sided ID Cards with Echelon Badges & Scannable QR Codes</p>
         </div>
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <div className="print-mode-toggle">
-            <button
-              className={`mode-btn ${printMode === 'single' ? 'active' : ''}`}
-              onClick={() => setPrintMode('single')}
-            >
-              Single Card
-            </button>
-            <button
-              className={`mode-btn ${printMode === 'batch' ? 'active' : ''}`}
-              onClick={() => setPrintMode('batch')}
-            >
-              Batch Mode ({batchQueue.length} Cards)
-            </button>
-          </div>
-
           <button className="btn-print-action" onClick={handlePrintAndSaveCadets}>
-            <Printer size={18} /> Print {printMode === 'single' ? 'ID Card' : `Batch (${batchQueue.length} Cards)`}
+            <Printer size={18} /> Print Batch ({batchQueue.length} {batchQueue.length === 1 ? 'Card' : 'Cards'})
           </button>
         </div>
       </div>
@@ -720,130 +697,124 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
               </div>
             )}
 
-            {/* Add to Batch Queue Button (Batch Mode Only) */}
-            {printMode === 'batch' && (
-              <button
-                type="button"
-                onClick={handleAddToBatch}
-                style={{
-                  marginTop: '0.65rem',
-                  width: '100%',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  background: '#E5A900',
-                  color: '#0A192F',
-                  fontWeight: 700,
-                  fontSize: '0.88rem',
-                  padding: '0.65rem 1.25rem',
-                  borderRadius: '10px',
-                  border: 'none',
-                  boxShadow: '0px 4px 6px rgba(0, 0, 0, 0.1)',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease-in-out'
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#C68C00';
-                  e.currentTarget.style.boxShadow = '0px 6px 10px rgba(0, 0, 0, 0.15)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#E5A900';
-                  e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
-                }}
-              >
-                <Plus size={18} style={{ strokeWidth: 2.5 }} /> Add Form Cadet to Batch Queue
-              </button>
-            )}
-
-
+            {/* Add to Batch Queue Button */}
+            <button
+              type="button"
+              onClick={handleAddToBatch}
+              style={{
+                marginTop: '0.65rem',
+                width: '100%',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px',
+                background: '#E5A900',
+                color: '#0A192F',
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                padding: '0.65rem 1.25rem',
+                borderRadius: '10px',
+                border: 'none',
+                boxShadow: '0px 4px 6px rgba(0, 0, 0, 0.1)',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease-in-out'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = '#C68C00';
+                e.currentTarget.style.boxShadow = '0px 6px 10px rgba(0, 0, 0, 0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = '#E5A900';
+                e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
+              }}
+            >
+              <Plus size={18} style={{ strokeWidth: 2.5 }} /> Save to Supabase & Add to Queue
+            </button>
 
             {/* Batch Queue Manager */}
-            {printMode === 'batch' && (
-              <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-light)', paddingTop: '0.85rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', paddingBottom: '0.4rem', borderBottom: '1px solid #f1f5f9' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '0.88rem', color: 'var(--rotc-green-dark)' }}>
-                    <Layers size={17} />
-                    <span>Batch Print Queue ({batchQueue.length})</span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>4 Cards / A4 Sheet</span>
-
-                    {/* Save to Database Button */}
-                    <button
-                      type="button"
-                      onClick={handleSaveBatchToDatabase}
-                      disabled={batchQueue.length === 0 || isSaving}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '5px',
-                        background: '#065f46',
-                        color: '#ffffff',
-                        fontWeight: 700,
-                        fontSize: '0.75rem',
-                        padding: '0.35rem 0.75rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        cursor: batchQueue.length === 0 || isSaving ? 'not-allowed' : 'pointer',
-                        opacity: batchQueue.length === 0 || isSaving ? 0.55 : 1,
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
-                        transition: 'all 0.15s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#044e3a';
-                      }}
-                      onMouseLeave={(e) => {
-                        if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#065f46';
-                      }}
-                    >
-                      <Database size={13} />
-                      <span>{isSaving ? 'Saving...' : 'Save to Database'}</span>
-                    </button>
-                  </div>
+            <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-light)', paddingTop: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', paddingBottom: '0.4rem', borderBottom: '1px solid #f1f5f9' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 800, fontSize: '0.88rem', color: 'var(--rotc-green-dark)' }}>
+                  <Layers size={17} />
+                  <span>Batch Print Queue ({batchQueue.length})</span>
                 </div>
 
-                {/* Success Alert Notification */}
-                {toastMessage && (
-                  <div style={{
-                    marginBottom: '0.6rem',
-                    padding: '0.45rem 0.75rem',
-                    borderRadius: '8px',
-                    background: '#ecfdf5',
-                    border: '1px solid #10b981',
-                    color: '#065f46',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}>
-                    <CheckCircle2 size={15} color="#059669" />
-                    <span>{toastMessage.message}</span>
-                  </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>4 Cards / A4 Sheet</span>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '160px', overflowY: 'auto' }}>
-                  {batchQueue.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '0.85rem', color: '#94a3b8', fontSize: '0.75rem' }}>
-                      Batch queue is empty. Add cadet cards using the form above.
-                    </div>
-                  ) : (
-                    batchQueue.map((item, idx) => (
-                      <div key={`${item.id}-${idx}`} className="queue-item-anim" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '0.4rem 0.65rem', borderRadius: '6px', fontSize: '0.78rem' }}>
-                        <div>
-                          <strong>{item.id}</strong> - {item.name} <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 600 }}>({item.company} Coy • {item.platoon})</span>
-                        </div>
-                        <button onClick={() => handleRemoveFromBatch(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }} title="Remove from batch queue">
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))
-                  )}
+                  {/* Save to Database Button */}
+                  <button
+                    type="button"
+                    onClick={handleSaveBatchToDatabase}
+                    disabled={batchQueue.length === 0 || isSaving}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      background: '#065f46',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      fontSize: '0.75rem',
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      cursor: batchQueue.length === 0 || isSaving ? 'not-allowed' : 'pointer',
+                      opacity: batchQueue.length === 0 || isSaving ? 0.55 : 1,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#044e3a';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#065f46';
+                    }}
+                  >
+                    <Database size={13} />
+                    <span>{isSaving ? 'Saving...' : 'Save to Database'}</span>
+                  </button>
                 </div>
               </div>
-            )}
+
+              {/* Success Alert Notification */}
+              {toastMessage && (
+                <div style={{
+                  marginBottom: '0.6rem',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  background: '#ecfdf5',
+                  border: '1px solid #10b981',
+                  color: '#065f46',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <CheckCircle2 size={15} color="#059669" />
+                  <span>{toastMessage.message}</span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', maxHeight: '160px', overflowY: 'auto' }}>
+                {batchQueue.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '0.85rem', color: '#94a3b8', fontSize: '0.75rem' }}>
+                    Batch queue is empty. Add cadet cards using the form above.
+                  </div>
+                ) : (
+                  batchQueue.map((item, idx) => (
+                    <div key={`${item.id}-${idx}`} className="queue-item-anim" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--bg-main)', padding: '0.4rem 0.65rem', borderRadius: '6px', fontSize: '0.78rem' }}>
+                      <div>
+                        <strong>{item.id}</strong> - {item.name} <span style={{ color: 'var(--rotc-green-dark)', fontWeight: 600 }}>({item.company} Coy • {item.platoon})</span>
+                      </div>
+                      <button onClick={() => handleRemoveFromBatch(idx)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '2px' }} title="Remove from batch queue">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -851,20 +822,28 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         <div className="preview-card-container">
           <div className="preview-card-header no-print">
             <Sparkles size={16} style={{ color: 'var(--rotc-green-dark)' }} />
-            <span>LIVE ID CARD PREVIEW ({printMode === 'single' ? 'Single Front & Back' : `Batch ${batchQueue.length} Cards`})</span>
+            <span>LIVE ID CARD PREVIEW (Batch {batchQueue.length} {batchQueue.length === 1 ? 'Card' : 'Cards'})</span>
           </div>
 
           <div className="preview-display-wrapper">
-            <div className="batch-print-grid">
-              {cardsToPrint.map((card, idx) => (
-                <IDCardPreview key={`${card.id}-${card.type}-${idx}`} card={card} />
-              ))}
-            </div>
+            {cardsToPrint.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#94a3b8', fontSize: '0.88rem' }}>
+                <Layers size={36} style={{ margin: '0 auto 0.75rem', display: 'block', opacity: 0.4 }} />
+                <p style={{ fontWeight: 700, color: '#64748b', marginBottom: '0.25rem' }}>No cards in batch queue</p>
+                <span style={{ fontSize: '0.78rem' }}>Fill in cadet details and click "Add Form Cadet to Batch Queue" to preview cards.</span>
+              </div>
+            ) : (
+              <div className="batch-print-grid">
+                {cardsToPrint.map((card, idx) => (
+                  <IDCardPreview key={`${card.id}-${card.type}-${idx}`} card={card} />
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="preview-footer-note no-print">
             <Printer size={14} />
-            <span>Tapping <strong>Print ID Card</strong> formats 4 double-sided cards per A4 page.</span>
+            <span>Tapping <strong>Print Batch</strong> formats 4 double-sided cards per A4 page.</span>
           </div>
         </div>
 
@@ -872,3 +851,5 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     </div>
   );
 }
+
+export { IDGenerator as IdCardGenerator };

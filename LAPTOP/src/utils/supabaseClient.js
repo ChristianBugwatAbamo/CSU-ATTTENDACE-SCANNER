@@ -481,16 +481,6 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     }
   });
 
-  // Provision newly discovered cadets without modifying or overwriting existing cadet profiles
-  const cadetRows = Array.from(uniqueCadetsMap.values());
-  const CADET_CHUNK_SIZE = 400;
-  for (let i = 0; i < cadetRows.length; i += CADET_CHUNK_SIZE) {
-    const chunk = cadetRows.slice(i, i + CADET_CHUNK_SIZE);
-    try {
-      await client.from('cadets').upsert(chunk, { onConflict: 'id', ignoreDuplicates: true });
-    } catch (_) {}
-  }
-
   // Provision distinct session rows per Duty Officer + Date
   const sessionIdMap = new Map();
   for (const [groupKey, group] of sessionGroupsMap.entries()) {

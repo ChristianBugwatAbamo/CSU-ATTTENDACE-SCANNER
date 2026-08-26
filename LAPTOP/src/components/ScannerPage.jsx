@@ -10,10 +10,16 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  AlertCircle,
   Users,
-  Sparkles
+  Sparkles,
+  UserCheck,
+  UserX,
+  Database,
+  X
 } from 'lucide-react';
 import BatchScannerModal from './BatchScannerModal';
+import { getSupabaseClient, inferCadetFromId } from '../utils/supabaseClient';
 
 export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncComplete }) {
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
@@ -31,6 +37,18 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
   const [expandedBatchIds, setExpandedBatchIds] = useState(new Set());
   const recentApprovedSignaturesRef = useRef(new Set());
   const [toastMessage, setToastMessage] = useState(null);
+
+  // Set of registered cadet IDs for real-time validation during batch ingestion
+  const registeredCadetIdSet = React.useMemo(() => {
+    const set = new Set();
+    if (Array.isArray(cadets)) {
+      cadets.forEach((c) => {
+        const id = c.id || c.cadet_id || c.cadetId;
+        if (id) set.add(String(id).trim().toUpperCase());
+      });
+    }
+    return set;
+  }, [cadets]);
 
   // Sync Pending Batches to localStorage
   useEffect(() => {
@@ -58,12 +76,8 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
   useEffect(() => {
     const handleLogsCleared = () => {
       try {
-        const saved = localStorage.getItem('csu_rotc_master_attendance');
-        const logs = saved ? JSON.parse(saved) : [];
-        if (logs.length === 0) {
-          recentApprovedSignaturesRef.current.clear();
-          localStorage.removeItem('csu_rotc_recent_approved_signatures');
-        }
+        recentApprovedSignaturesRef.current = new Set();
+        localStorage.removeItem('csu_rotc_recent_approved_signatures');
       } catch (_) { }
     };
 
@@ -84,37 +98,34 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     } catch (_) { }
   };
 
-  // Audio synthesizer chime for approval
   const playSuccessBeep = () => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const now = ctx.currentTime;
-
       const osc1 = ctx.createOscillator();
-      const osc2 = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc1.type = 'triangle';
-      osc2.type = 'sine';
-
-      osc1.frequency.setValueAtTime(587.33, now); // D5
-      osc1.frequency.exponentialRampToValueAtTime(880, now + 0.15); // A5
-
-      osc2.frequency.setValueAtTime(880, now);
-      osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.15); // D6
-
-      gain.gain.setValueAtTime(0.25, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-
-      osc1.connect(gain);
-      osc2.connect(gain);
-      gain.connect(ctx.destination);
-
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(523.25, now);
+      osc1.frequency.exponentialRampToValueAtTime(659.25, now + 0.15);
+      gain1.gain.setValueAtTime(0.25, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
       osc1.start(now);
-      osc2.start(now);
-      osc1.stop(now + 0.4);
+      osc1.stop(now + 0.2);
+
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(783.99, now + 0.12);
+      osc2.frequency.exponentialRampToValueAtTime(1046.5, now + 0.35);
+      gain2.gain.setValueAtTime(0.28, now + 0.12);
+      gain2.gain.exponentialRampToValueAtTime(0.005, now + 0.4);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.12);
       osc2.stop(now + 0.4);
     } catch (_) { }
   };
@@ -130,14 +141,37 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     });
   };
 
-  // In-Page Batch Approval
+  // Automatic Partial Batch Approval: Ingest only registered cadets, keep unregistered pending
   const handleApproveBatch = (batchId) => {
     const batch = pendingBatches.find((b) => b.id === batchId);
     if (!batch) return;
 
+    const allRecords = batch.records || [];
+    const registeredRecords = [];
+    const unregisteredRecords = [];
+
+    allRecords.forEach((r) => {
+      const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
+      if (registeredCadetIdSet.has(cid)) {
+        registeredRecords.push(r);
+      } else {
+        unregisteredRecords.push(r);
+      }
+    });
+
+    // If no registered cadets found in the batch
+    if (registeredRecords.length === 0) {
+      setToastMessage({
+        type: 'warning',
+        text: `⚠️ No registered cadets found in this batch. (0 records processed; ${unregisteredRecords.length} unregistered cadets remain pending).`
+      });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
     playSuccessBeep();
 
-    const batchRecords = (batch.records || []).map((r) => {
+    const batchRecords = registeredRecords.map((r) => {
       const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
       const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
       return {
@@ -153,7 +187,7 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
       };
     });
 
-    // Commit to master attendance logs
+    // Ingest strictly into master attendance logs
     if (onSyncComplete) {
       onSyncComplete(batchRecords);
     }
@@ -172,22 +206,41 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
       }).catch(() => { });
     } catch (_) { }
 
-    if (batch.signature) {
+    if (batch.signature && unregisteredRecords.length === 0) {
       recentApprovedSignaturesRef.current.add(batch.signature);
       saveApprovedSignatures();
     }
 
-    setPendingBatches((prev) => prev.filter((b) => b.id !== batchId));
-    setExpandedBatchIds((prev) => {
-      const next = new Set(prev);
-      next.delete(batchId);
-      return next;
-    });
+    if (unregisteredRecords.length > 0) {
+      // Keep unregistered cadets in the pending batch queue
+      setPendingBatches((prev) =>
+        prev.map((b) => (b.id === batchId ? { ...b, records: unregisteredRecords } : b))
+      );
+      setExpandedBatchIds((prev) => {
+        const next = new Set(prev);
+        next.add(batchId);
+        return next;
+      });
 
-    setToastMessage({
-      type: 'success',
-      text: `Approved batch from ${batch.dutyOfficer} (${batchRecords.length} Cadets Ingested).`
-    });
+      setToastMessage({
+        type: 'success',
+        text: `✅ Ingested ${registeredRecords.length} registered cadets. ${unregisteredRecords.length} unregistered cadet(s) kept in pending queue for review.`
+      });
+    } else {
+      // Remove fully processed batch
+      setPendingBatches((prev) => prev.filter((b) => b.id !== batchId));
+      setExpandedBatchIds((prev) => {
+        const next = new Set(prev);
+        next.delete(batchId);
+        return next;
+      });
+
+      setToastMessage({
+        type: 'success',
+        text: `✅ Approved batch from ${batch.dutyOfficer} (${registeredRecords.length} Cadets Ingested).`
+      });
+    }
+
     setTimeout(() => setToastMessage(null), 3500);
   };
 
@@ -208,65 +261,100 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Approve All Batches in Queue
+  // Approve All Batches in Queue (Ingests only registered records, preserves remaining unregistered batches)
   const handleApproveAll = () => {
     if (pendingBatches.length === 0) return;
 
-    playSuccessBeep();
+    let allRegisteredRecords = [];
+    let updatedPendingBatches = [];
+    let totalUnregistered = 0;
 
-    let allEnrichedRecords = [];
     pendingBatches.forEach((batch) => {
-      const batchRecords = (batch.records || []).map((r) => {
+      const allRecords = batch.records || [];
+      const reg = [];
+      const unreg = [];
+
+      allRecords.forEach((r) => {
         const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
-        const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
-        return {
-          ...r,
-          cadetId: cid,
-          cadet_id: cid,
-          dutyOfficer: officer,
-          duty_officer: officer,
-          sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
-          battalion: r.battalion || batch.battalion || '1st Battalion',
-          company: r.company || batch.company || 'Alpha Company',
-          platoon: r.platoon || batch.platoon || '1st Platoon'
-        };
+        if (registeredCadetIdSet.has(cid)) {
+          reg.push(r);
+        } else {
+          unreg.push(r);
+        }
       });
 
-      allEnrichedRecords = allEnrichedRecords.concat(batchRecords);
-      if (batch.signature) {
+      if (reg.length > 0) {
+        const batchRecords = reg.map((r) => {
+          const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
+          const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
+          return {
+            ...r,
+            cadetId: cid,
+            cadet_id: cid,
+            dutyOfficer: officer,
+            duty_officer: officer,
+            sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
+            battalion: r.battalion || batch.battalion || '1st Battalion',
+            company: r.company || batch.company || 'Alpha Company',
+            platoon: r.platoon || batch.platoon || '1st Platoon'
+          };
+        });
+
+        allRegisteredRecords = allRegisteredRecords.concat(batchRecords);
+
+        try {
+          fetch('/api/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              dutyOfficer: batch.dutyOfficer || 'Duty Officer',
+              sessionName: batch.sessionName || 'Field Session',
+              records: batchRecords
+            })
+          }).catch(() => { });
+        } catch (_) { }
+      }
+
+      if (unreg.length > 0) {
+        totalUnregistered += unreg.length;
+        updatedPendingBatches.push({ ...batch, records: unreg });
+      } else if (batch.signature) {
         recentApprovedSignaturesRef.current.add(batch.signature);
       }
-      try {
-        fetch('/api/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            dutyOfficer: batch.dutyOfficer || 'Duty Officer',
-            sessionName: batch.sessionName || 'Field Session',
-            records: batchRecords
-          })
-        }).catch(() => { });
-      } catch (_) { }
     });
 
+    if (allRegisteredRecords.length === 0) {
+      setToastMessage({
+        type: 'warning',
+        text: `⚠️ No registered cadets found across queued batches. (0 records processed; ${totalUnregistered} unregistered remain pending).`
+      });
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
+    playSuccessBeep();
     saveApprovedSignatures();
 
     if (onSyncComplete) {
-      onSyncComplete(allEnrichedRecords);
+      onSyncComplete(allRegisteredRecords);
     }
     window.dispatchEvent(new Event('local-attendance-update'));
 
-    const count = pendingBatches.length;
-    const totalRecords = allEnrichedRecords.length;
-
-    setPendingBatches([]);
-    setExpandedBatchIds(new Set());
-
-    setToastMessage({
-      type: 'success',
-      text: `All ${count} pending batches approved (${totalRecords} Cadets Ingested).`
-    });
-    setTimeout(() => setToastMessage(null), 4000);
+    setPendingBatches(updatedPendingBatches);
+    if (updatedPendingBatches.length > 0) {
+      setExpandedBatchIds(new Set(updatedPendingBatches.map((b) => b.id)));
+      setToastMessage({
+        type: 'success',
+        text: `✅ Ingested ${allRegisteredRecords.length} registered cadets. ${totalUnregistered} unregistered cadet(s) remain in pending queue.`
+      });
+    } else {
+      setExpandedBatchIds(new Set());
+      setToastMessage({
+        type: 'success',
+        text: `✅ Approved all batches (${allRegisteredRecords.length} Cadets Ingested).`
+      });
+    }
+    setTimeout(() => setToastMessage(null), 3500);
   };
 
   // Reject All Batches in Queue
@@ -496,12 +584,18 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
                 const timeInCount = batch.records.filter((r) => r.scanMode !== 'Time-Out').length;
                 const timeOutCount = batch.records.filter((r) => r.scanMode === 'Time-Out').length;
 
+                // Check for any unregistered cadet IDs in the batch
+                const unregisteredCount = batch.records.filter((r) => {
+                  const rawId = String(r.cadetId || r.id || '').trim().toUpperCase();
+                  return !registeredCadetIdSet.has(rawId);
+                }).length;
+
                 return (
                   <div
                     key={batch.id}
                     style={{
                       background: '#ffffff',
-                      border: '1.5px solid #fde68a',
+                      border: unregisteredCount > 0 ? '1.5px solid #f87171' : '1.5px solid #fde68a',
                       borderRadius: '12px',
                       boxShadow: 'var(--shadow-sm)',
                       overflow: 'hidden',
@@ -512,8 +606,10 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
                     <div
                       style={{
                         padding: '1rem 1.25rem',
-                        background: 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
-                        borderBottom: '1px solid #fde68a',
+                        background: unregisteredCount > 0
+                          ? 'linear-gradient(135deg, #fff1f2 0%, #fee2e2 100%)'
+                          : 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)',
+                        borderBottom: unregisteredCount > 0 ? '1px solid #fca5a5' : '1px solid #fde68a',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
@@ -522,10 +618,10 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
                       }}
                     >
                       <div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                           <span
                             style={{
-                              background: '#d97706',
+                              background: unregisteredCount > 0 ? '#dc2626' : '#d97706',
                               color: '#ffffff',
                               fontSize: '0.72rem',
                               fontWeight: 800,
@@ -535,12 +631,33 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
                           >
                             PENDING APPROVAL
                           </span>
+
+                          {unregisteredCount > 0 && (
+                            <span
+                              style={{
+                                background: '#fee2e2',
+                                color: '#b91c1c',
+                                border: '1px solid #f87171',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <AlertTriangle size={12} />
+                              <span>{unregisteredCount} Unregistered Cadet ID(s)</span>
+                            </span>
+                          )}
+
                           <span style={{ fontWeight: 800, color: 'var(--rotc-green-dark)', fontSize: '0.98rem' }}>
                             {batch.battalion} • {batch.company} • {batch.platoon}
                           </span>
                         </div>
 
-                        <div style={{ fontSize: '0.82rem', color: '#92400e', marginTop: '3px', fontWeight: 600 }}>
+                        <div style={{ fontSize: '0.82rem', color: unregisteredCount > 0 ? '#991b1b' : '#92400e', marginTop: '3px', fontWeight: 600 }}>
                           Duty Officer: <strong>{batch.dutyOfficer}</strong> • Scanned at{' '}
                           {new Date(batch.scannedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                         </div>
@@ -681,28 +798,62 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
                               </tr>
                             </thead>
                             <tbody>
-                              {batch.records.map((rec, idx) => (
-                                <tr key={idx}>
-                                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{idx + 1}</td>
-                                  <td style={{ padding: '6px 10px', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{rec.cadetId}</td>
-                                  <td style={{ padding: '6px 10px', fontWeight: 600 }}>{rec.name}</td>
-                                  <td style={{ padding: '6px 10px' }}>{rec.rank || 'Cadet'}</td>
-                                  <td style={{ padding: '6px 10px' }}>
-                                    {rec.scanMode === 'Time-Out' ? (
-                                      <span className="badge" style={{ background: '#e0e7ff', color: '#3730a3', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px' }}>
-                                        TIME-OUT
-                                      </span>
-                                    ) : (
-                                      <span className="badge badge-present" style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px' }}>
-                                        TIME-IN
-                                      </span>
-                                    )}
-                                  </td>
-                                  <td style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                    {rec.timestamp ? new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
-                                  </td>
-                                </tr>
-                              ))}
+                              {batch.records.map((rec, idx) => {
+                                const rawId = String(rec.cadetId || rec.id || '').trim().toUpperCase();
+                                const isRegistered = registeredCadetIdSet.has(rawId);
+
+                                return (
+                                  <tr
+                                    key={idx}
+                                    style={{
+                                      background: !isRegistered ? '#fff1f2' : 'transparent'
+                                    }}
+                                  >
+                                    <td style={{ padding: '6px 10px', color: 'var(--text-muted)' }}>{idx + 1}</td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                        <span>{rec.cadetId}</span>
+                                        {!isRegistered && (
+                                          <span
+                                            style={{
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '3px',
+                                              background: '#fee2e2',
+                                              color: '#b91c1c',
+                                              border: '1px solid #fca5a5',
+                                              padding: '1px 5px',
+                                              borderRadius: '4px',
+                                              fontSize: '0.65rem',
+                                              fontWeight: 800,
+                                              width: 'fit-content'
+                                            }}
+                                          >
+                                            <AlertTriangle size={10} />
+                                            <span>UNREGISTERED CADET ID</span>
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td style={{ padding: '6px 10px', fontWeight: 600 }}>{rec.name}</td>
+                                    <td style={{ padding: '6px 10px' }}>{rec.rank || 'Cadet'}</td>
+                                    <td style={{ padding: '6px 10px' }}>
+                                      {rec.scanMode === 'Time-Out' ? (
+                                        <span className="badge" style={{ background: '#e0e7ff', color: '#3730a3', fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px' }}>
+                                          TIME-OUT
+                                        </span>
+                                      ) : (
+                                        <span className="badge badge-present" style={{ fontSize: '0.7rem', fontWeight: 700, padding: '2px 6px' }}>
+                                          TIME-IN
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                                      {rec.timestamp ? new Date(rec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
