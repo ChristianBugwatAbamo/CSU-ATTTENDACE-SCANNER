@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import MobileBottomNav from './components/MobileBottomNav';
-import AnalyticsDashboard from './components/AnalyticsDashboard';
+import DashboardView from './components/DashboardView';
+import AnalyticsView from './components/AnalyticsView';
 import AttendanceHistory from './components/AttendanceHistory';
 import IDGenerator from './components/IDGenerator';
 import ScannerPage from './components/ScannerPage';
@@ -31,7 +32,7 @@ import {
 import { LogOut, ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'cadets', 'history', 'idcards', 'scanner', 'settings'];
+  const VALID_TABS = ['dashboard', 'analytics', 'cadets', 'history', 'idcards', 'scanner', 'settings'];
 
   // Authentication Session State
   const [currentUser, setCurrentUser] = useState(() => {
@@ -538,7 +539,16 @@ export default function App() {
 
         <div className="content-body">
           {activeTab === 'dashboard' && (
-            <AnalyticsDashboard
+            <DashboardView
+              cadets={cadets}
+              attendanceLogs={attendanceLogs}
+              onRefresh={fetchData}
+              onNavigateToHistory={() => setActiveTab('history')}
+            />
+          )}
+
+          {activeTab === 'analytics' && (
+            <AnalyticsView
               cadets={cadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}

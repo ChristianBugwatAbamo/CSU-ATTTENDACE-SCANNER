@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, History, Users, QrCode, FileSpreadsheet, Camera, Settings, Database, Cloud, LogOut, ShieldCheck, User } from 'lucide-react';
+import { LayoutDashboard, TrendingUp, BarChart3, History, Users, QrCode, FileSpreadsheet, Camera, Settings, Database, Cloud, LogOut, ShieldCheck, User } from 'lucide-react';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { getSupabaseConfig } from '../utils/supabaseClient';
 
@@ -16,7 +16,8 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
   }, []);
 
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard & Analytics', icon: LayoutDashboard },
+    { id: 'dashboard', label: 'Command Dashboard', icon: LayoutDashboard },
+    { id: 'analytics', label: 'Analytics & Reports', icon: BarChart3 },
     { id: 'cadets', label: 'Cadets Roster', icon: Users },
     { id: 'history', label: 'Attendance History', icon: History },
     { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
