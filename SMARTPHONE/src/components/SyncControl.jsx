@@ -97,22 +97,20 @@ export default function SyncControl({
     const pl = sessionSetup?.platoon || slice[0]?.platoon || '1st Platoon';
     const officer = sessionSetup?.dutyOfficer || dutyOfficer || 'Duty Officer';
 
+    // Extract active mode ('OUT' for Time-Out, 'IN' for Time-In)
+    const rawMode = sessionSetup?.scanMode || slice[0]?.scanMode || 'Time-In';
+    const modeKey = String(rawMode).toLowerCase().includes('out') ? 'OUT' : 'IN';
+
     return JSON.stringify({
       T: 'RBS',                      // ROTC Batch Sync
       d: officer,                    // Duty Officer (Full string, e.g. "C/LT COL CHARIS S JALIQUE (ROTC) 1CL")
+      m: modeKey,                    // Active Scan Mode ('IN' or 'OUT')
       bn: bn,                        // Battalion
       co: co,                        // Company
       pl: pl,                        // Platoon
       p: chunkIndex + 1,             // Current Page (1-indexed)
       n: totalChunks,                // Total Pages
-      r: slice.map(item => ({
-        i: item.cadetId,             // "221-00003"
-        n: item.name || '',          // "AUREA, REYMARK"
-        m: (item.scanMode || 'Time-In') === 'Time-In' ? 1 : 0,
-        t: item.timestamp
-          ? Math.floor(new Date(item.timestamp).getTime() / 1000)
-          : Math.floor(Date.now() / 1000)
-      }))
+      r: slice.map(item => String(item.cadetId || item.id || item.i || '').trim())
     });
   };
 

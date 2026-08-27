@@ -5,11 +5,20 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
   // Filter cadets missing any essential detail
   const incompleteCadets = cadets.filter((cadet) => {
     const isMissingDept = !cadet.department;
-    const isMissingProgram = !cadet.program && !cadet.course;
+    const isMissingProgram = !cadet.program && !cadet.course && !cadet.degree;
     const isMissingContact = !cadet.contact_number && !cadet.contactNumber;
     const isMissingGender = !cadet.gender;
+    const isMissingAddress = !cadet.province && !cadet.city && !cadet.barangay && !cadet.address;
+    const isMissingReligion = !cadet.religion;
 
-    return isMissingDept || isMissingProgram || isMissingContact || isMissingGender;
+    return (
+      isMissingDept ||
+      isMissingProgram ||
+      isMissingContact ||
+      isMissingGender ||
+      isMissingAddress ||
+      isMissingReligion
+    );
   });
 
   if (incompleteCadets.length === 0) return null;
@@ -95,8 +104,10 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
           const missing = [];
           if (!cadet.gender) missing.push('Gender');
           if (!cadet.department) missing.push('Department');
-          if (!cadet.program && !cadet.course) missing.push('Program');
+          if (!cadet.program && !cadet.course && !cadet.degree) missing.push('Program');
           if (!cadet.contact_number && !cadet.contactNumber) missing.push('Contact #');
+          if (!cadet.province && !cadet.city && !cadet.barangay && !cadet.address) missing.push('Address');
+          if (!cadet.religion) missing.push('Religion');
 
           return (
             <button

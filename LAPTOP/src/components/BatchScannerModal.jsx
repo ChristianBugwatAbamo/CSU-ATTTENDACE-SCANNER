@@ -18,6 +18,7 @@ export default function BatchScannerModal({
   const collectedRecordsRef = useRef([]);
   const totalPagesRef = useRef(null);
   const activeBatchKeyRef = useRef(null);
+  const lastScannedQrRef = useRef({ text: '', timestamp: 0 });
 
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -51,7 +52,7 @@ export default function BatchScannerModal({
 
       osc.start(now);
       osc.stop(now + 0.25);
-    } catch (_) {}
+    } catch (_) { }
   };
 
   // Expand minified payload keys back to full names
@@ -62,6 +63,8 @@ export default function BatchScannerModal({
       const pl = raw.pl || '1st Platoon';
       const dutyOfficer = raw.d || 'Duty Officer';
       const sessionName = raw.s || `${bn} - ${co} (${pl})`;
+      const rawMode = String(raw.m || '').toUpperCase();
+      const resolvedScanMode = rawMode.includes('OUT') ? 'Time-Out' : 'Time-In';
 
       return {
         type: 'ROTC_BATCH_SYNC',
@@ -70,18 +73,47 @@ export default function BatchScannerModal({
         battalion: bn,
         company: co,
         platoon: pl,
+        scanMode: resolvedScanMode,
+        mode: resolvedScanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN',
         page: raw.p || 1,
         totalPages: raw.n || 1,
-        records: (raw.r || []).map((rec) => ({
-          cadetId: rec.i,
-          name: rec.n || rec.name || '',
-          battalion: rec.bn || bn,
-          company: rec.co || co,
-          platoon: rec.pl || pl,
-          rank: rec.rk || 'Cadet',
-          scanMode: rec.m === 1 ? 'Time-In' : 'Time-Out',
-          timestamp: rec.t ? new Date(rec.t * 1000).toISOString() : new Date().toISOString()
-        }))
+        records: (raw.r || []).map((rec) => {
+          if (typeof rec === 'string') {
+            return {
+              cadetId: rec.trim(),
+              name: '',
+              battalion: bn,
+              company: co,
+              platoon: pl,
+              rank: 'Cadet',
+              scanMode: resolvedScanMode,
+              timestamp: new Date().toISOString()
+            };
+          }
+          if (Array.isArray(rec)) {
+            return {
+              cadetId: String(rec[0] || '').trim(),
+              name: '',
+              battalion: bn,
+              company: co,
+              platoon: pl,
+              rank: 'Cadet',
+              scanMode: rec[1] === 0 || String(rec[1]).toUpperCase().includes('OUT') ? 'Time-Out' : resolvedScanMode,
+              timestamp: rec[2] ? new Date(rec[2] * 1000).toISOString() : new Date().toISOString()
+            };
+          }
+          const itemMode = rec.m !== undefined ? (rec.m === 0 || String(rec.m).toUpperCase().includes('OUT') ? 'Time-Out' : 'Time-In') : resolvedScanMode;
+          return {
+            cadetId: rec.i || rec.cadetId || rec.id,
+            name: rec.n || rec.name || '',
+            battalion: rec.bn || bn,
+            company: rec.co || co,
+            platoon: rec.pl || pl,
+            rank: rec.rk || 'Cadet',
+            scanMode: itemMode,
+            timestamp: rec.t ? new Date(rec.t * 1000).toISOString() : rec.timestamp || new Date().toISOString()
+          };
+        })
       };
     }
 
@@ -92,16 +124,30 @@ export default function BatchScannerModal({
         sessionName: raw.sessionName || raw.s || 'Field Session',
         page: raw.page || raw.p || 1,
         totalPages: raw.totalPages || raw.n || 1,
-        records: (raw.records || raw.r || []).map((rec) => ({
-          cadetId: rec.cadetId || rec.i || rec.id,
-          name: rec.name || rec.n || '',
-          battalion: rec.battalion || rec.bn || '1st Battalion',
-          company: rec.company || rec.co || 'Alpha Company',
-          platoon: rec.platoon || rec.pl || '1st Platoon',
-          rank: rec.rank || rec.rk || 'Cadet',
-          scanMode: rec.scanMode || (rec.m === 1 ? 'Time-In' : rec.m === 0 ? 'Time-Out' : 'Time-In'),
-          timestamp: rec.timestamp || (rec.t ? new Date(rec.t * 1000).toISOString() : new Date().toISOString())
-        }))
+        records: (raw.records || raw.r || []).map((rec) => {
+          if (typeof rec === 'string') {
+            return {
+              cadetId: rec.trim(),
+              name: '',
+              battalion: raw.battalion || raw.bn || '1st Battalion',
+              company: raw.company || raw.co || 'Alpha Company',
+              platoon: raw.platoon || raw.pl || '1st Platoon',
+              rank: 'Cadet',
+              scanMode: 'Time-In',
+              timestamp: new Date().toISOString()
+            };
+          }
+          return {
+            cadetId: rec.cadetId || rec.i || rec.id,
+            name: rec.name || rec.n || '',
+            battalion: rec.battalion || rec.bn || '1st Battalion',
+            company: rec.company || rec.co || 'Alpha Company',
+            platoon: rec.platoon || rec.pl || '1st Platoon',
+            rank: rec.rank || rec.rk || 'Cadet',
+            scanMode: rec.scanMode || (rec.m === 0 ? 'Time-Out' : 'Time-In'),
+            timestamp: rec.timestamp || (rec.t ? new Date(rec.t * 1000).toISOString() : new Date().toISOString())
+          };
+        })
       };
     }
 
@@ -216,6 +262,15 @@ export default function BatchScannerModal({
   const handleBatchScanned = async (decodedText) => {
     if (isProcessingRef.current) return;
 
+    // 3-second cooldown buffer per identical QR payload to prevent rapid 30fps camera loop
+    const now = Date.now();
+    if (
+      lastScannedQrRef.current.text === decodedText &&
+      now - lastScannedQrRef.current.timestamp < 3000
+    ) {
+      return;
+    }
+
     try {
       let raw;
       try {
@@ -249,7 +304,7 @@ export default function BatchScannerModal({
         });
         setTimeout(() => {
           isProcessingRef.current = false;
-        }, 1200);
+        }, 1000);
         return;
       }
 
@@ -268,6 +323,9 @@ export default function BatchScannerModal({
       setTotalPages(total);
 
       if (updatedPages.length >= total) {
+        // Record timestamp for 3-second cooldown buffer
+        lastScannedQrRef.current = { text: decodedText, timestamp: Date.now() };
+
         const enriched = enrichRecords(updatedRecords, payload.dutyOfficer, payload.sessionName);
         const signature = generateBatchSignature(
           enriched,
@@ -277,54 +335,7 @@ export default function BatchScannerModal({
           payload.platoon
         );
 
-        // Duplicate Safeguard: Check if batch is already in pending queue
-        const alreadyQueued = pendingBatches.some((b) => b.signature === signature);
-
-        // Check if all records from this batch are already present in Master Attendance logs
-        const alreadyInMasterLogs =
-          enriched.length > 0 &&
-          attendanceLogs.length > 0 &&
-          enriched.every((rec) => {
-            const scanDateStr = rec.timestamp ? new Date(rec.timestamp).toDateString() : new Date().toDateString();
-            const cid = String(rec.cadetId || '').trim().toUpperCase();
-            const mode = rec.scanMode || (String(rec.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
-
-            return attendanceLogs.some((l) => {
-              const dStr = l.timestamp ? new Date(l.timestamp).toDateString() : (l.date ? new Date(l.date).toDateString() : '');
-              const lCid = String(l.cadetId || '').trim().toUpperCase();
-              if (lCid !== cid || dStr !== scanDateStr) return false;
-              if (mode === 'Time-Out') {
-                return !!(l.timeOut || (l.scanMode === 'Time-Out' && l.timestamp));
-              } else {
-                return !!(l.timeIn || (l.scanMode !== 'Time-Out' && l.timestamp));
-              }
-            });
-          });
-
-        const recentlyApproved = recentApprovedSignatures.has(signature) && (attendanceLogs.length > 0 && alreadyInMasterLogs);
-
-        if (alreadyQueued || alreadyInMasterLogs || recentlyApproved) {
-          setFeedbackMessage({
-            type: 'warning',
-            text: `Duplicate Batch: ${payload.dutyOfficer}'s batch is already ${alreadyQueued ? 'in queue' : 'ingested'}.`
-          });
-
-          pagesScannedRef.current = [];
-          collectedRecordsRef.current = [];
-          totalPagesRef.current = null;
-          activeBatchKeyRef.current = null;
-          setPagesScanned([]);
-          setCollectedRecords([]);
-          setTotalPages(null);
-
-          setTimeout(() => {
-            isProcessingRef.current = false;
-            setIsProcessingChunk(false);
-          }, 1800);
-          return;
-        }
-
-        // New Batch: Push to Pending Queue
+        // New Batch: Push to Pending Queue smoothly (allows multiple separate batches per duty officer)
         const newBatchId = `batch_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
         const newBatchItem = {
           id: newBatchId,
@@ -336,6 +347,8 @@ export default function BatchScannerModal({
           battalion: payload.battalion || enriched[0]?.battalion || '1st Battalion',
           company: payload.company || enriched[0]?.company || 'Alpha Company',
           platoon: payload.platoon || enriched[0]?.platoon || '1st Platoon',
+          mode: payload.mode || (payload.scanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN'),
+          scanMode: payload.scanMode || 'Time-In',
           totalPages: total,
           pagesScanned: updatedPages.length,
           scannedAt: new Date().toISOString()
@@ -393,10 +406,10 @@ export default function BatchScannerModal({
       if (scannerRef.current) {
         try {
           if (scannerRef.current.isScanning) {
-            scannerRef.current.stop().catch(() => {});
+            scannerRef.current.stop().catch(() => { });
           }
           scannerRef.current.clear();
-        } catch (_) {}
+        } catch (_) { }
         scannerRef.current = null;
       }
 
@@ -425,7 +438,7 @@ export default function BatchScannerModal({
           hdConstraints,
           config,
           (decodedText) => handleBatchScanned(decodedText),
-          () => {}
+          () => { }
         )
         .then(() => {
           setIsScanning(true);
@@ -437,7 +450,7 @@ export default function BatchScannerModal({
               { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
               config,
               (decodedText) => handleBatchScanned(decodedText),
-              () => {}
+              () => { }
             )
             .then(() => {
               setIsScanning(true);
@@ -449,7 +462,7 @@ export default function BatchScannerModal({
                   { facingMode: 'user' },
                   { fps: 15, qrbox: { width: 280, height: 280 }, formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE] },
                   (decodedText) => handleBatchScanned(decodedText),
-                  () => {}
+                  () => { }
                 )
                 .then(() => {
                   setIsScanning(true);
@@ -488,10 +501,10 @@ export default function BatchScannerModal({
       if (scannerRef.current) {
         try {
           if (scannerRef.current.isScanning) {
-            scannerRef.current.stop().catch(() => {});
+            scannerRef.current.stop().catch(() => { });
           }
           scannerRef.current.clear();
-        } catch (_) {}
+        } catch (_) { }
         scannerRef.current = null;
       }
     };
@@ -501,10 +514,10 @@ export default function BatchScannerModal({
     if (scannerRef.current) {
       try {
         if (scannerRef.current.isScanning) {
-          scannerRef.current.stop().catch(() => {});
+          scannerRef.current.stop().catch(() => { });
         }
         scannerRef.current.clear();
-      } catch (_) {}
+      } catch (_) { }
       scannerRef.current = null;
     }
     onClose();
