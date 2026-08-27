@@ -142,6 +142,10 @@ export async function addCadetToSupabase(cadet) {
       program: cadet.program || null,
       contact_number: cadet.contactNumber || cadet.contact_number || '',
       emergency_contact: cadet.emergencyContact || cadet.emergency_contact || '',
+      province: cadet.province || null,
+      city: cadet.city || null,
+      barangay: cadet.barangay || null,
+      religion: cadet.religion || null,
       is_active: true
     };
 
@@ -393,6 +397,10 @@ export function inferCadetFromId(cadetId, partial = {}) {
   if (partial.program) inferred.program = partial.program;
   if (partial.contact_number || partial.contactNumber) inferred.contact_number = partial.contact_number || partial.contactNumber;
   if (partial.emergency_contact || partial.emergencyContact) inferred.emergency_contact = partial.emergency_contact || partial.emergencyContact;
+  if (partial.province) inferred.province = partial.province;
+  if (partial.city) inferred.city = partial.city;
+  if (partial.barangay) inferred.barangay = partial.barangay;
+  if (partial.religion) inferred.religion = partial.religion;
 
   return inferred;
 }
