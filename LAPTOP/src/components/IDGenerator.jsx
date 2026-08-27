@@ -97,7 +97,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         const parsed = JSON.parse(saved);
         if (parsed.category) return parsed.category;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'basic';
   });
 
@@ -109,7 +109,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         const parsed = JSON.parse(local);
         if (parsed.officerRanks && parsed.officerRanks.length > 0) return parsed.officerRanks;
       }
-    } catch (e) {}
+    } catch (e) { }
     return DEFAULT_OFFICER_RANKS;
   });
 
@@ -120,7 +120,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         const parsed = JSON.parse(local);
         if (parsed.officerDesignations && parsed.officerDesignations.length > 0) return parsed.officerDesignations;
       }
-    } catch (e) {}
+    } catch (e) { }
     return DEFAULT_OFFICER_DESIGNATIONS;
   });
 
@@ -137,7 +137,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
             setOfficerDesignations(parsed.officerDesignations);
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     const fetchSettings = async () => {
@@ -152,7 +152,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
             setOfficerDesignations(data.officerDesignations);
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     };
 
     fetchSettings();
@@ -169,7 +169,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).lastName || '';
-    } catch (_) {}
+    } catch (_) { }
     return '';
   });
 
@@ -177,7 +177,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).firstName || '';
-    } catch (_) {}
+    } catch (_) { }
     return '';
   });
 
@@ -185,7 +185,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).middleInitial || '';
-    } catch (_) {}
+    } catch (_) { }
     return '';
   });
 
@@ -194,7 +194,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).cadetId || '';
-    } catch (_) {}
+    } catch (_) { }
     return '';
   });
 
@@ -202,7 +202,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).rank || 'Cadet';
-    } catch (_) {}
+    } catch (_) { }
     return 'Cadet';
   });
 
@@ -210,7 +210,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).battalion || '1st Battalion';
-    } catch (_) {}
+    } catch (_) { }
     return '1st Battalion';
   });
 
@@ -218,7 +218,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).company || 'Alpha';
-    } catch (_) {}
+    } catch (_) { }
     return 'Alpha';
   });
 
@@ -226,7 +226,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).platoon || '1st Platoon';
-    } catch (_) {}
+    } catch (_) { }
     return '1st Platoon';
   });
 
@@ -234,18 +234,24 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
       if (saved) return JSON.parse(saved).designation || 'None';
-    } catch (_) {}
+    } catch (_) { }
     return 'None';
   });
 
   // Batch Cards Queue with LocalStorage Persistence
-  const [batchQueue, setBatchQueue] = useState(() => {
+  const [printQueue, setPrintQueue] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_batch_queue');
       if (saved) return JSON.parse(saved);
-    } catch (_) {}
+    } catch (_) { }
     return [];
   });
+  const batchQueue = printQueue;
+  const setBatchQueue = setPrintQueue;
+
+  const [hasPrintedCurrentBatch, setHasPrintedCurrentBatch] = useState(false);
+  const hasPrinted = hasPrintedCurrentBatch;
+  const setHasPrinted = setHasPrintedCurrentBatch;
 
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
@@ -265,15 +271,19 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         platoon,
         designation
       }));
-    } catch (_) {}
+    } catch (_) { }
   }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation]);
 
   // Synchronize Batch Print Queue to LocalStorage
   useEffect(() => {
     try {
-      localStorage.setItem('csu_rotc_id_gen_batch_queue', JSON.stringify(batchQueue));
-    } catch (_) {}
-  }, [batchQueue]);
+      if (printQueue.length === 0) {
+        localStorage.removeItem('csu_rotc_id_gen_batch_queue');
+      } else {
+        localStorage.setItem('csu_rotc_id_gen_batch_queue', JSON.stringify(printQueue));
+      }
+    } catch (_) { }
+  }, [printQueue]);
 
   // Helper: Format combined Full Name: LAST NAME, FIRST NAME MIDDLE INITIAL
   const getFormattedFullName = () => {
@@ -328,7 +338,12 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     setCadetId(formatted);
   };
 
-  const handleAddToBatch = async () => {
+  // 1. Add New Card to Queue (Resets Print Lock for New Items - Zero Supabase Calls)
+  const handleAddToQueue = (e) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+
     if (!lastName.trim() || !firstName.trim() || !cadetId.trim()) {
       alert("Please fill in Last Name, First Name, and Cadet ID.");
       return;
@@ -341,8 +356,11 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     else if (rank.includes('4CL')) officerClass = '4CL';
     else if (rank.includes('ASPIRANT') || rank.includes('COCC')) officerClass = 'ASPIRANT';
 
-    const newCard = {
-      id: cadetId,
+    const newCadet = {
+      id: cadetId.trim(),
+      lastName: lastName.trim().toUpperCase(),
+      firstName: firstName.trim().toUpperCase(),
+      middleInitial: middleInitial.trim().toUpperCase(),
       name: fullName,
       rank: category === 'basic' ? 'Cadet' : rank,
       battalion: category === 'basic' ? battalion : 'CADET OFFICERS',
@@ -350,117 +368,74 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       platoon: category === 'basic' ? platoon : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
       designation: category === 'basic' ? 'None' : designation,
       type: normalizeCadetType(category, rank),
-      is_active: true
+      is_active: true,
+      queueId: Date.now()
     };
 
-    // Immediately upsert into Supabase `cadets` table
-    try {
-      setIsSaving(true);
-      const client = getSupabaseClient();
-      if (client) {
-        const { error } = await client
-          .from('cadets')
-          .upsert([newCard], { onConflict: 'id' });
+    // Add new card and require a new print trigger for this new batch
+    setPrintQueue(prev => {
+      const exists = prev.some(c => (c.id || c.cadet_id) === newCadet.id);
+      return exists ? prev.map(c => (c.id || c.cadet_id) === newCadet.id ? newCadet : c) : [...prev, newCadet];
+    });
 
-        if (error) {
-          console.error("Supabase upsert error:", error);
-          alert("Warning: Could not save cadet to database: " + error.message);
-        } else {
-          setToastMessage({
-            type: 'SUCCESS',
-            message: `Cadet ${cadetId} (${fullName}) saved to Supabase & added to queue!`,
-          });
-          setTimeout(() => setToastMessage(null), 3500);
-        }
+    // Reset printed state so new/modified batch must be printed before saving to DB
+    setHasPrintedCurrentBatch(false);
+
+    // Clear inputs after adding to local queue
+    setLastName('');
+    setFirstName('');
+    setMiddleInitial('');
+    setCadetId('');
+
+    setToastMessage({
+      type: 'SUCCESS',
+      message: `Added ${newCadet.lastName || newCadet.name} to local print queue.`,
+    });
+    setTimeout(() => setToastMessage(null), 3000);
+  };
+
+  const handleAddToBatch = handleAddToQueue;
+
+  const handleRemoveFromQueue = (index) => {
+    setPrintQueue(prev => {
+      const updated = prev.filter((_, idx) => idx !== index);
+      if (updated.length === 0) {
+        setHasPrintedCurrentBatch(false);
       }
+      return updated;
+    });
+  };
 
-      if (typeof refreshCadetsRoster === 'function') refreshCadetsRoster();
-      if (typeof onRefresh === 'function') onRefresh();
-      window.dispatchEvent(new Event('local-attendance-update'));
+  const handleRemoveFromBatch = handleRemoveFromQueue;
 
-      // Add to batch queue for printing
-      setBatchQueue(prev => {
-        const exists = prev.some(c => (c.id || c.cadet_id) === cadetId);
-        return exists ? prev.map(c => (c.id || c.cadet_id) === cadetId ? newCard : c) : [...prev, newCard];
-      });
-
-    } catch (err) {
-      console.error("Error saving cadet:", err);
-    } finally {
-      setIsSaving(false);
+  // 2. Print Execution Handler: Opens print view and unlocks Save to Database for current batch
+  const handlePrintBatch = () => {
+    if (!printQueue || printQueue.length === 0) {
+      alert("Batch queue is empty. Please add cadet cards to the batch before printing.");
+      return;
     }
+
+    // Unlock Save to Database button for current batch
+    setHasPrintedCurrentBatch(true);
+
+    // Trigger Browser Print Dialog
+    window.print();
   };
 
-  const handleRemoveFromBatch = (index) => {
-    setBatchQueue(prev => prev.filter((_, idx) => idx !== index));
-  };
-
-  // Supabase Sync + Print Execution Handler
-  const handlePrintAndSaveCadets = async () => {
-    try {
-      if (!batchQueue || batchQueue.length === 0) {
-        alert("Batch queue is empty. Please add cadet cards to the batch before printing.");
-        return;
-      }
-
-      // Format cadet objects for Supabase cadets table
-      const formattedCadets = batchQueue.map((c) => ({
-        id: c.id || c.cadet_id || c.cadetId,
-        name: c.name || `${c.last_name || ''}, ${c.first_name || ''} ${c.middle_initial || ''}`.trim(),
-        rank: c.rank || (normalizeCadetType(c.type, c.rank) === 'Cadet Officer' ? 'Cadet Officer' : 'Cadet'),
-        battalion: c.battalion || '1st Battalion',
-        company: normalizeCompany(c.company),
-        platoon: c.platoon || '1st Platoon',
-        type: normalizeCadetType(c.type, c.rank),
-        designation: c.designation || 'N/A',
-        is_active: true
-      }));
-
-      // Upsert records into Supabase `cadets` table
-      const client = getSupabaseClient();
-      if (client) {
-        const { error } = await client
-          .from('cadets')
-          .upsert(formattedCadets, { onConflict: 'id' });
-
-        if (error) {
-          console.error("Failed to sync cadets to Supabase:", error);
-          alert("Warning: Could not save cadet records to database before printing.");
-          return;
-        }
-      }
-
-      // Trigger local state refresh so it reflects on Cadets Roster immediately
-      if (typeof refreshCadetsRoster === 'function') {
-        refreshCadetsRoster();
-      }
-      if (typeof onRefresh === 'function') {
-        onRefresh();
-      }
-      window.dispatchEvent(new Event('local-attendance-update'));
-
-      // Trigger Browser Print Dialog after successful database save
-      window.print();
-
-    } catch (err) {
-      console.error("Print and save execution error:", err);
-    }
-  };
-
-  // Function to save batch queue to Supabase and reset queue
-  const handleSaveBatchToDatabase = async () => {
-    if (!batchQueue || batchQueue.length === 0) {
-      alert("Batch print queue is empty.");
+  // 3. Save Printed Cards to Database & Clear Them From Queue (Explicit User Action Only)
+  const handleSaveToDatabase = async () => {
+    if (!hasPrintedCurrentBatch || printQueue.length === 0) {
+      alert("You must print the ID cards first before saving to Supabase!");
       return;
     }
 
     try {
       setIsSaving(true);
 
-      // Format cadet records for Supabase `cadets` table
-      const formattedCadets = batchQueue.map((cadet) => ({
+      // Format queue items for Supabase cadets schema
+      const recordsToInsert = printQueue.map((cadet) => ({
         id: cadet.id || cadet.cadet_id || cadet.cadetId,
-        name: cadet.name || `${cadet.last_name || ''}, ${cadet.first_name || ''} ${cadet.middle_initial || ''}`.trim(),
+        name: cadet.name || `${cadet.lastName || cadet.last_name || ''}, ${cadet.firstName || cadet.first_name || ''} ${cadet.middleInitial || cadet.middle_initial || ''}`.trim(),
         rank: cadet.rank || (normalizeCadetType(cadet.type, cadet.rank) === 'Cadet Officer' ? 'Cadet Officer' : 'Cadet'),
         battalion: cadet.battalion || '1st Battalion',
         company: normalizeCompany(cadet.company),
@@ -470,20 +445,20 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         is_active: true
       }));
 
-      // Upsert into Supabase (insert or update existing profiles)
+      // Explicit DB Insert Call via Supabase
       const client = getSupabaseClient();
       if (client) {
         const { error } = await client
           .from('cadets')
-          .upsert(formattedCadets, { onConflict: 'id' });
+          .upsert(recordsToInsert, { onConflict: 'id' });
 
         if (error) throw error;
       }
 
-      // Show Success Alert Notification
+      // Success Notification
       setToastMessage({
         type: 'SUCCESS',
-        message: `Successfully saved ${batchQueue.length} cadets to Database!`,
+        message: `Successfully saved ${recordsToInsert.length} cadet(s) to Supabase database!`,
       });
       setTimeout(() => setToastMessage(null), 3500);
 
@@ -496,16 +471,22 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       }
       window.dispatchEvent(new Event('local-attendance-update'));
 
-      // AUTOMATICALLY CLEAR THE BATCH PRINT QUEUE AFTER SAVING
-      setBatchQueue([]);
+      // CRITICAL FIX: CLEAR THE QUEUE SO SAVED CARDS DON'T STICK AROUND
+      setPrintQueue([]);
+      setHasPrintedCurrentBatch(false);
+      try {
+        localStorage.removeItem('csu_rotc_id_gen_batch_queue');
+      } catch (_) { }
 
     } catch (err) {
-      console.error("Error saving batch queue to Supabase:", err);
-      alert("Failed to save batch to database. Please check connection.");
+      console.error("Error saving to database:", err);
+      alert(`Database save failed: ${err.message || "Please check connection."}`);
     } finally {
       setIsSaving(false);
     }
   };
+
+  const handleSaveBatchToDatabase = handleSaveToDatabase;
 
   const cardsToPrint = batchQueue;
 
@@ -515,12 +496,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       <div className="id-generator-header no-print">
         <div>
           <h1 className="page-heading">ROTC ID Card Generator</h1>
-          <p className="page-subheading">Official CSU ROTC CR80 Double-Sided ID Cards with Echelon Badges & Scannable QR Codes</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          <button className="btn-print-action" onClick={handlePrintAndSaveCadets}>
-            <Printer size={18} /> Print Batch ({batchQueue.length} {batchQueue.length === 1 ? 'Card' : 'Cards'})
-          </button>
+          <p className="page-subheading">Official CSU ROTC Double-Sided ID Cards with Scannable QR Codes</p>
         </div>
       </div>
 
@@ -531,7 +507,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         <div className="form-card-container no-print">
           <div className="form-card-header">
             <User size={18} />
-            <span>Cadet & Echelon Information</span>
+            <span>Cadet Information</span>
           </div>
 
           <div className="form-card-body">
@@ -559,7 +535,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
             {/* Split Name Fields */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px', gap: '0.75rem' }}>
               <div className="form-field-group">
-                <label>Last Name *</label>
+                <label>Last Name </label>
                 <input
                   type="text"
                   className="custom-input"
@@ -570,7 +546,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
               </div>
 
               <div className="form-field-group">
-                <label>First Name *</label>
+                <label>First Name </label>
                 <input
                   type="text"
                   className="custom-input"
@@ -597,7 +573,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
             {/* Cadet ID & Rank */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-field-group">
-                <label>Cadet ID (221-XXXXX) *</label>
+                <label>Cadet ID</label>
                 <input
                   type="text"
                   className="custom-input"
@@ -606,7 +582,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                   value={cadetId}
                   onChange={(e) => handleIdChange(e.target.value)}
                 />
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Format: 221-XXXXX (Used for QR code rendering)</span>
+                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Used for QR code rendering</span>
               </div>
 
               <div className="form-field-group">
@@ -663,7 +639,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 </div>
 
                 <div className="form-field-group">
-                  <label>Platoon (37)</label>
+                  <label>Platoon</label>
                   <select
                     className="custom-select"
                     value={platoon}
@@ -728,7 +704,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
               }}
             >
-              <Plus size={18} style={{ strokeWidth: 2.5 }} /> Save to Supabase & Add to Queue
+              <Plus size={18} style={{ strokeWidth: 2.5 }} /> Add to Batch Print Queue
             </button>
 
             {/* Batch Queue Manager */}
@@ -742,36 +718,53 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-muted)' }}>4 Cards / A4 Sheet</span>
 
-                  {/* Save to Database Button */}
+                  {/* Save to Database Button - Gated until Print Batch is clicked */}
                   <button
                     type="button"
                     onClick={handleSaveBatchToDatabase}
-                    disabled={batchQueue.length === 0 || isSaving}
+                    disabled={batchQueue.length === 0 || !hasPrinted || isSaving}
+                    title={
+                      batchQueue.length === 0
+                        ? "Batch print queue is empty"
+                        : !hasPrinted
+                          ? "⚠️ Print batch first before saving to Supabase database"
+                          : "Save all queued cadets to Supabase database"
+                    }
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '5px',
-                      background: '#065f46',
+                      background: !hasPrinted || batchQueue.length === 0 ? '#64748b' : '#065f46',
                       color: '#ffffff',
                       fontWeight: 700,
                       fontSize: '0.75rem',
                       padding: '0.35rem 0.75rem',
                       borderRadius: '8px',
                       border: 'none',
-                      cursor: batchQueue.length === 0 || isSaving ? 'not-allowed' : 'pointer',
-                      opacity: batchQueue.length === 0 || isSaving ? 0.55 : 1,
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
+                      cursor: batchQueue.length === 0 || !hasPrinted || isSaving ? 'not-allowed' : 'pointer',
+                      opacity: batchQueue.length === 0 || !hasPrinted || isSaving ? 0.6 : 1,
+                      boxShadow: hasPrinted && batchQueue.length > 0 ? '0 2px 6px rgba(6, 95, 70, 0.35)' : '0 1px 3px rgba(0,0,0,0.12)',
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={(e) => {
-                      if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#044e3a';
+                      if (batchQueue.length > 0 && hasPrinted && !isSaving) {
+                        e.currentTarget.style.background = '#044e3a';
+                      }
                     }}
                     onMouseLeave={(e) => {
-                      if (batchQueue.length > 0 && !isSaving) e.currentTarget.style.background = '#065f46';
+                      if (batchQueue.length > 0 && hasPrinted && !isSaving) {
+                        e.currentTarget.style.background = '#065f46';
+                      }
                     }}
                   >
                     <Database size={13} />
-                    <span>{isSaving ? 'Saving...' : 'Save to Database'}</span>
+                    <span>
+                      {isSaving
+                        ? 'Saving...'
+                        : !hasPrinted && batchQueue.length > 0
+                          ? 'Save to Database (Print First)'
+                          : 'Save to Database'}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -820,9 +813,26 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
         {/* Right Column: Live CR80 ID Card Preview */}
         <div className="preview-card-container">
-          <div className="preview-card-header no-print">
-            <Sparkles size={16} style={{ color: 'var(--rotc-green-dark)' }} />
-            <span>LIVE ID CARD PREVIEW (Batch {batchQueue.length} {batchQueue.length === 1 ? 'Card' : 'Cards'})</span>
+          <div className="preview-card-header no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: '1.25rem', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Sparkles size={16} style={{ color: 'var(--rotc-green-dark)' }} />
+              <span>LIVE ID CARD PREVIEW (Batch {printQueue.length} {printQueue.length === 1 ? 'Card' : 'Cards'})</span>
+            </div>
+            <button
+              type="button"
+              className="btn-print-action"
+              onClick={handlePrintBatch}
+              disabled={printQueue.length === 0}
+              title={printQueue.length === 0 ? "Add cadet cards to print batch" : "Print batch cards (4 per A4 sheet)"}
+              style={{
+                fontSize: '0.82rem',
+                padding: '0.45rem 0.95rem',
+                opacity: printQueue.length === 0 ? 0.6 : 1,
+                cursor: printQueue.length === 0 ? 'not-allowed' : 'pointer'
+              }}
+            >
+              <Printer size={16} /> Print Batch ({printQueue.length} {printQueue.length === 1 ? 'Card' : 'Cards'})
+            </button>
           </div>
 
           <div className="preview-display-wrapper">
