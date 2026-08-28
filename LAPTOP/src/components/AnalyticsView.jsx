@@ -19,7 +19,16 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   Building,
-  UserCheck
+  UserCheck,
+  AlertTriangle,
+  AlertOctagon,
+  Info,
+  ShieldAlert,
+  Phone,
+  Eye,
+  X,
+  FileText,
+  User
 } from 'lucide-react';
 import {
   Chart as ChartJS,
@@ -37,6 +46,7 @@ import {
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import { getSupabaseClient } from '../utils/supabaseClient';
+import { evaluateCadetAttendance, ACTIVE_FORMATION_DATES, toDateKey as normalizeDateKey } from '../utils/attendanceRules';
 
 // Register Chart.js components + DataLabels plugin
 ChartJS.register(
@@ -331,6 +341,8 @@ export default function AnalyticsView({
   const [selectedSemester, setSelectedSemester] = useState('1ST_SEM_2025_2026');
   const [isCollegeChartStacked, setIsCollegeChartStacked] = useState(false);
   const [currentCalendarDate, setCurrentCalendarDate] = useState(() => new Date());
+  const [flaggedCadets, setFlaggedCadets] = useState([]);
+  const [evidenceCadet, setEvidenceCadet] = useState(null);
 
   const [liveCadets, setLiveCadets] = useState(() => {
     if (Array.isArray(propsCadets) && propsCadets.length > 0) return propsCadets;
@@ -346,6 +358,94 @@ export default function AnalyticsView({
       setLiveCadets(propsCadets);
     }
   }, [propsCadets]);
+
+  // Active Recorded Training Formation Dates (Aug 22, 24, 25, 26, 27, 28, 2026)
+  const ACTIVE_FORMATION_DATES = [
+    '2026-08-22',
+    '2026-08-24',
+    '2026-08-25',
+    '2026-08-26',
+    '2026-08-27',
+    '2026-08-28'
+  ];
+
+  // Fetch and Evaluate Cadet Attendance against ROTC attendance rules across active formation days
+  const fetchAndEvaluateAttendance = async () => {
+    try {
+      const client = getSupabaseClient();
+      let cadetsData = [];
+      let sessionsData = [];
+
+      // 1. Fetch cadets with their attendance logs & recorded sessions from Supabase
+      if (client) {
+        const { data: cData, error: cErr } = await client
+          .from('cadets')
+          .select('id, name, battalion, company, platoon, contact_number, phone, emergency_contact, attendance_logs(date, status, session_date, timestamp, timeIn, timeOut, hasTimeIn, hasTimeOut)');
+        if (!cErr && Array.isArray(cData) && cData.length > 0) {
+          cadetsData = cData;
+        }
+
+        const { data: sData } = await client
+          .from('attendance_sessions')
+          .select('session_date, date');
+        if (Array.isArray(sData)) {
+          sessionsData = sData;
+        }
+      }
+
+      // Fallback to props / local master roster + logs if Supabase query is unavailable or empty
+      if (cadetsData.length === 0) {
+        const sourceCadets = (propsCadets && propsCadets.length > 0) ? propsCadets : liveCadets;
+        cadetsData = (sourceCadets || []).map(cadet => {
+          const cId = String(cadet.id || cadet.cadet_id || '').trim().toUpperCase();
+          const logs = (propsLogs || []).filter(l => String(l.cadet_id || l.cadetId || '').trim().toUpperCase() === cId);
+          return {
+            id: cadet.id || cadet.cadet_id || '',
+            name: cadet.name || `${cadet.last_name || cadet.lastName || ''}, ${cadet.first_name || cadet.firstName || ''}`.trim(),
+            battalion: cadet.battalion || '1st Battalion',
+            company: cadet.company || 'Alpha Company',
+            platoon: cadet.platoon || '1st Platoon',
+            contact_number: cadet.contact_number || cadet.contactNumber || cadet.phone || '',
+            attendance_logs: logs
+          };
+        });
+      }
+
+      // Build consolidated set of distinct formation dates: Combine default 6 active formation dates + any session/log dates
+      const formationDatesSet = new Set(ACTIVE_FORMATION_DATES);
+      sessionsData.forEach(s => {
+        const dk = normalizeDateKey(s.session_date || s.date);
+        if (dk) formationDatesSet.add(dk);
+      });
+      (propsLogs || []).forEach(l => {
+        const dk = normalizeDateKey(l.date || l.session_date || l.timestamp);
+        if (dk) formationDatesSet.add(dk);
+      });
+      cadetsData.forEach(c => {
+        (c.attendance_logs || []).forEach(l => {
+          const dk = normalizeDateKey(l.date || l.session_date || l.timestamp);
+          if (dk) formationDatesSet.add(dk);
+        });
+      });
+
+      // Sort formation dates chronologically
+      const sortedFormationDates = Array.from(formationDatesSet).sort();
+
+      // 2. Evaluate each cadet against ROTC attendance rules across every active formation date
+      const evaluatedList = (cadetsData || []).map((cadet) => {
+        return evaluateCadetAttendance(cadet, sortedFormationDates);
+      });
+
+      // Filter only cadets needing admin action
+      setFlaggedCadets(evaluatedList.filter((c) => c.status !== 'GOOD'));
+    } catch (err) {
+      console.error('Error evaluating attendance:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchAndEvaluateAttendance();
+  }, [propsCadets, propsLogs]);
 
   const [growthData, setGrowthData] = useState({
     labels: ['Aug 22', 'Aug 23', 'Aug 24', 'Aug 25'],
@@ -1263,6 +1363,742 @@ export default function AnalyticsView({
         </div>
 
       </div>
+
+      {/* ========================================================================= */}
+      {/* SECTION 4: CADET ATTENDANCE PERFORMANCE & DROP TRACKER                    */}
+      {/* ========================================================================= */}
+      <section
+        style={{
+          backgroundColor: '#ffffff',
+          borderRadius: '1rem',
+          border: '1px solid #e2e8f0',
+          padding: '1.5rem',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.25rem'
+        }}
+      >
+        {/* HEADER */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+            <div style={{
+              width: '38px',
+              height: '38px',
+              borderRadius: '10px',
+              backgroundColor: '#fff1f2',
+              border: '1px solid #fecdd3',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#e11d48'
+            }}>
+              <ShieldAlert size={20} />
+            </div>
+            <div>
+              <h3 style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
+                Cadet Attendance Performance & Drop Alerts
+              </h3>
+              <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '2px 0 0 0' }}>
+                Automated monitoring for dropped cadets and threshold warnings.
+              </p>
+            </div>
+          </div>
+          <span style={{
+            fontSize: '0.74rem',
+            fontWeight: 800,
+            backgroundColor: flaggedCadets.length > 0 ? '#ffe4e6' : '#ecfdf5',
+            color: flaggedCadets.length > 0 ? '#9f1239' : '#065f46',
+            border: `1px solid ${flaggedCadets.length > 0 ? '#fecdd3' : '#a7f3d0'}`,
+            padding: '4px 12px',
+            borderRadius: '9999px'
+          }}>
+            {flaggedCadets.length} Action Required
+          </span>
+        </div>
+
+        {/* CADETS TABLE SCROLL CONTAINER (MAX 10 ROWS VISIBLE WITH STICKY HEADER) */}
+        <div style={{
+          maxHeight: '480px',
+          overflowY: 'auto',
+          overflowX: 'auto',
+          border: '1px solid #e2e8f0',
+          borderRadius: '10px',
+          backgroundColor: '#ffffff',
+          position: 'relative',
+          scrollbarWidth: 'thin',
+          scrollbarColor: '#cbd5e1 #f8fafc'
+        }}>
+          <table style={{ width: '100%', textAlign: 'left', fontSize: '0.78rem', borderCollapse: 'separate', borderSpacing: 0 }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+              <tr style={{ backgroundColor: '#f8fafc', color: '#475569', fontWeight: 800, textTransform: 'uppercase', fontSize: '0.72rem', letterSpacing: '0.03em' }}>
+                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Cadet ID & Name</th>
+                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Platoon Unit</th>
+                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Contact Number</th>
+                <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Calculated Absences</th>
+                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Rule Evaluation</th>
+                <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Status Badge</th>
+              </tr>
+            </thead>
+            <tbody>
+              {flaggedCadets.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: '2.5rem 1rem', textAlign: 'center', color: '#94a3b8', fontWeight: 500 }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
+                      <CheckCircle2 size={24} color="#10b981" />
+                      <span>No attendance warnings or drops recorded. All active cadets are in good standing.</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                flaggedCadets.map((cadet) => (
+                  <tr key={cadet.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background-color 0.15s ease' }}>
+                    <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
+                      <div style={{ fontWeight: 800, color: '#0f172a' }}>{cadet.name}</div>
+                      <div style={{ fontSize: '0.68rem', color: '#64748b', fontFamily: 'monospace' }}>{cadet.id}</div>
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#475569', borderBottom: '1px solid #f1f5f9' }}>
+                      {cadet.battalion} • {cadet.company} • {cadet.platoon}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                      {cadet.contact_number || cadet.contactNumber || cadet.phone ? (
+                        <a
+                          href={`tel:${cadet.contact_number || cadet.contactNumber || cadet.phone}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            color: '#047857',
+                            textDecoration: 'none',
+                            fontWeight: 700,
+                            fontSize: '0.74rem'
+                          }}
+                        >
+                          <Phone size={12} />
+                          <span>{cadet.contact_number || cadet.contactNumber || cadet.phone}</span>
+                        </a>
+                      ) : (
+                        <span style={{ color: '#94a3b8', fontSize: '0.72rem' }}>—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', textAlign: 'center', fontWeight: 800, color: '#1e293b', fontSize: '0.85rem', borderBottom: '1px solid #f1f5f9' }}>
+                      {cadet.totalAbsences}
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
+                      <button
+                        type="button"
+                        onClick={() => setEvidenceCadet(cadet)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          color: '#0369a1',
+                          backgroundColor: '#f0f9ff',
+                          border: '1px solid #bae6fd',
+                          padding: '4px 9px',
+                          borderRadius: '6px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          fontSize: '0.74rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#e0f2fe';
+                          e.currentTarget.style.borderColor = '#7dd3fc';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#f0f9ff';
+                          e.currentTarget.style.borderColor = '#bae6fd';
+                        }}
+                        title="Click to inspect full attendance breakdown & evidence logs"
+                      >
+                        <span>{cadet.reason}</span>
+                        <Eye size={13} />
+                      </button>
+                    </td>
+                    <td style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '1px solid #f1f5f9' }}>
+                      {cadet.status === 'DROPPED' ? (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: '#e11d48',
+                          color: '#ffffff',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          textTransform: 'uppercase',
+                          boxShadow: '0 1px 3px rgba(225, 29, 72, 0.3)'
+                        }}>
+                          <AlertOctagon size={12} /> DROPPED
+                        </span>
+                      ) : (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: '#f59e0b',
+                          color: '#0f172a',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          textTransform: 'uppercase',
+                          boxShadow: '0 1px 3px rgba(245, 158, 11, 0.3)'
+                        }}>
+                          <AlertTriangle size={12} /> WARNING
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* POLICY REFERENCE FOOTER NOTE - STRUCTURED GRID CARD FORMAT */}
+        <div style={{
+          backgroundColor: '#f8fafc',
+          border: '1px solid #e2e8f0',
+          borderRadius: '14px',
+          padding: '1.25rem',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.85rem'
+        }}>
+          {/* Section Title Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{
+                width: '26px',
+                height: '26px',
+                borderRadius: '6px',
+                backgroundColor: '#ecfdf5',
+                border: '1px solid #a7f3d0',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#047857'
+              }}>
+                <Info size={15} />
+              </div>
+              <span style={{ fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em', fontSize: '0.78rem' }}>
+                Attendance Performance Policy Rules Reference
+              </span>
+            </div>
+            <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#64748b' }}>
+              Official ROTC Training Manual Guidelines
+            </span>
+          </div>
+
+          {/* 3-Column Policy Grid Cards */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: '0.75rem'
+          }}>
+            {/* Card 1: Official Drop Policy (Crimson) */}
+            <div style={{
+              backgroundColor: '#ffffff',
+              border: '1px solid #fecdd3',
+              borderRadius: '10px',
+              padding: '0.85rem 1rem',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#9f1239',
+                  backgroundColor: '#ffe4e6',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  textTransform: 'uppercase'
+                }}>
+                  <AlertOctagon size={11} /> Official Drop (Discharge)
+                </span>
+                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 1 & 2</span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#334155', lineHeight: '1.5' }}>
+                <li><strong>3 Consecutive Absences:</strong> Triggers immediate official drop status.</li>
+                <li><strong>&gt; 3 Interval Absences:</strong> More than 3 total accumulated unexcused absences results in drop.</li>
+              </ul>
+            </div>
+
+            {/* Card 2: Warning Threshold Policy (Amber) */}
+            <div style={{
+              backgroundColor: '#ffffff',
+              border: '1px solid #fde68a',
+              borderRadius: '10px',
+              padding: '0.85rem 1rem',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#92400e',
+                  backgroundColor: '#fef3c7',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  textTransform: 'uppercase'
+                }}>
+                  <AlertTriangle size={11} /> Warning Threshold
+                </span>
+                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 3 & 4</span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#334155', lineHeight: '1.5' }}>
+                <li><strong>3 Interval Absences:</strong> First official warning issued for impending drop.</li>
+                <li><strong>2 Absences:</strong> Early notification advisory for unit commander intervention.</li>
+              </ul>
+            </div>
+
+            {/* Card 3: Tardiness & Missing Scans Conversions (Emerald / Teal) */}
+            <div style={{
+              backgroundColor: '#ffffff',
+              border: '1px solid #cbd5e1',
+              borderRadius: '10px',
+              padding: '0.85rem 1rem',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#0f766e',
+                  backgroundColor: '#ccfbf1',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  textTransform: 'uppercase'
+                }}>
+                  <Clock size={11} /> Tardiness & Missing Scans
+                </span>
+                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 5, 6 & 7</span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#334155', lineHeight: '1.5' }}>
+                <li><strong>3 Consecutive Lates:</strong> Automatically penalized and converted to <strong>1 Absent</strong>.</li>
+                <li><strong>4 Interval Lates:</strong> Every 4 cumulative late scans converts to <strong>1 Absent</strong>.</li>
+                <li><strong>4 Interval No Time-In/Out:</strong> Every 4 missing scans converts to <strong>1 Absent</strong>.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      {/* ========================================================================= */}
+      {/* ATTENDANCE BREAKDOWN & EVIDENCE MODAL                                     */}
+      {/* ========================================================================= */}
+      {evidenceCadet && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.7)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem'
+          }}
+          onClick={() => setEvidenceCadet(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#ffffff',
+              borderRadius: '16px',
+              maxWidth: '820px',
+              width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+              border: '1px solid #e2e8f0',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1.25rem',
+              padding: '1.5rem'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* MODAL HEADER */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
+                  backgroundColor: evidenceCadet.status === 'DROPPED' ? '#fff1f2' : '#fef3c7',
+                  border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : '#fde68a'}`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : '#d97706'
+                }}>
+                  {evidenceCadet.status === 'DROPPED' ? <AlertOctagon size={24} /> : <AlertTriangle size={24} />}
+                </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                      {evidenceCadet.name}
+                    </h2>
+                    <span style={{
+                      fontFamily: 'monospace',
+                      fontSize: '0.74rem',
+                      fontWeight: 700,
+                      backgroundColor: '#f1f5f9',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      color: '#475569'
+                    }}>
+                      {evidenceCadet.id}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '4px 0 0 0', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <span><strong>Unit:</strong> {evidenceCadet.battalion} • {evidenceCadet.company} • {evidenceCadet.platoon}</span>
+                    {evidenceCadet.contact_number && (
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: '#047857', fontWeight: 600 }}>
+                        <Phone size={12} /> {evidenceCadet.contact_number}
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEvidenceCadet(null)}
+                style={{
+                  backgroundColor: '#f1f5f9',
+                  border: 'none',
+                  borderRadius: '8px',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#64748b',
+                  cursor: 'pointer'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* SUMMARY METRICS BAR - STANDARDIZED GRID & ALIGNMENT */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))',
+              gap: '0.65rem'
+            }}>
+              {/* Card 1: Total Absences */}
+              <div style={{
+                backgroundColor: '#fff1f2',
+                border: '1px solid #fecdd3',
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#9f1239',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Total Absences
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.35rem',
+                  fontWeight: 900,
+                  color: '#e11d48',
+                  lineHeight: 1
+                }}>
+                  {evidenceCadet.totalAbsences}
+                </div>
+              </div>
+
+              {/* Card 2: Consecutive Absences */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#475569',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Consecutive Absences
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.35rem',
+                  fontWeight: 900,
+                  color: '#0f172a',
+                  lineHeight: 1
+                }}>
+                  {evidenceCadet.maxConsecutiveAbsences}
+                </div>
+              </div>
+
+              {/* Card 3: Total Lates */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#475569',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Total Lates
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  lineHeight: 1
+                }}>
+                  <span style={{ fontSize: '1.35rem', fontWeight: 900, color: '#0f172a' }}>
+                    {evidenceCadet.totalIntervalLates || 0}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b' }}>
+                    (+{evidenceCadet.lateConversions || 0} Abs)
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 4: Missing Scans */}
+              <div style={{
+                backgroundColor: '#f8fafc',
+                border: '1px solid #e2e8f0',
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#475569',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Missing Scans
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  lineHeight: 1
+                }}>
+                  <span style={{ fontSize: '1.35rem', fontWeight: 900, color: '#0f172a' }}>
+                    {evidenceCadet.totalIntervalMissingScans || 0}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b' }}>
+                    (+{evidenceCadet.missingScanConversions || 0} Abs)
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 5: Rule Status */}
+              <div style={{
+                backgroundColor: evidenceCadet.status === 'DROPPED' ? '#ffe4e6' : '#fef3c7',
+                border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : '#fde68a'}`,
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: evidenceCadet.status === 'DROPPED' ? '#9f1239' : '#92400e',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Rule Status
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.85rem',
+                  fontWeight: 900,
+                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : '#d97706',
+                  textTransform: 'uppercase',
+                  lineHeight: 1
+                }}>
+                  {evidenceCadet.status}
+                </div>
+              </div>
+            </div>
+
+            {/* CHRONOLOGICAL EVIDENCE LOG TABLE */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '0.6rem' }}>
+                <FileText size={16} color="#0284c7" />
+                <h4 style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.03em', margin: 0 }}>
+                  Active Formation Schedule Evidence Breakdown
+                </h4>
+              </div>
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: '10px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', textAlign: 'left', fontSize: '0.76rem', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#f8fafc', borderBottom: '1px solid #e2e8f0', color: '#475569', fontWeight: 800, textTransform: 'uppercase', fontSize: '0.7rem' }}>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>Formation Date</th>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>Scan Record</th>
+                      <th style={{ padding: '0.65rem 0.85rem', textAlign: 'center' }}>Day State</th>
+                      <th style={{ padding: '0.65rem 0.85rem' }}>Policy Impact & Penalty</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(evidenceCadet.dailyBreakdown || []).map((row, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f1f5f9', backgroundColor: row.dayType === 'ABSENT' || row.dayType === 'UNRECORDED' ? '#fffbfa' : '#ffffff' }}>
+                        <td style={{ padding: '0.65rem 0.85rem', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                          {row.date}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem', color: '#475569', fontSize: '0.72rem' }}>
+                          {row.timeIn || row.timeOut ? (
+                            <div>
+                              {row.timeIn && <div><strong>Time-In:</strong> {new Date(row.timeIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || row.timeIn}</div>}
+                              {row.timeOut && <div><strong>Time-Out:</strong> {new Date(row.timeOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || row.timeOut}</div>}
+                            </div>
+                          ) : (
+                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>No scan recorded</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem', textAlign: 'center' }}>
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            fontWeight: 800,
+                            fontSize: '0.65rem',
+                            textTransform: 'uppercase',
+                            backgroundColor:
+                              row.dayType === 'PRESENT' ? '#ecfdf5' :
+                              row.dayType === 'LATE' ? '#fef3c7' :
+                              row.dayType === 'EXCUSED' ? '#f0fdf4' : '#ffe4e6',
+                            color:
+                              row.dayType === 'PRESENT' ? '#065f46' :
+                              row.dayType === 'LATE' ? '#92400e' :
+                              row.dayType === 'EXCUSED' ? '#15803d' : '#9f1239'
+                          }}>
+                            {row.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.65rem 0.85rem', fontWeight: 600, color: '#334155' }}>
+                          {row.penaltyLabel}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* MODAL FOOTER */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '0.5rem', borderTop: '1px solid #f1f5f9' }}>
+              <button
+                type="button"
+                onClick={() => setEvidenceCadet(null)}
+                style={{
+                  backgroundColor: '#0f172a',
+                  color: '#ffffff',
+                  border: 'none',
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Close Evidence Breakdown
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
