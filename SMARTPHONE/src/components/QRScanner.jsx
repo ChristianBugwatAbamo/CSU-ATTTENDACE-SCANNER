@@ -3,7 +3,6 @@ import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus, Info, Settings, Lock, ShieldAlert } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
 import scannerAudio from '../services/scannerAudio';
-import ConfirmModal from './ConfirmModal';
 
 const PLATOON_QUOTA = 37;
 
@@ -78,8 +77,8 @@ export default function QRScanner({
     sessionSetup?.platoon.trim()
   );
 
-  // Manual override candidate for scanning beyond quota
-  const [overrideCandidate, setOverrideCandidate] = useState(null);
+  // Hard-Stop Capacity Error Modal State (Strict 37 Cadets Max - Zero Override)
+  const [capacityFullModal, setCapacityFullModal] = useState(null);
 
   // Echelon Mismatch Alert state
   const [echelonMismatchAlert, setEchelonMismatchAlert] = useState(null);
@@ -416,7 +415,7 @@ const companyNameMap = {
       return;
     }
 
-    // 4. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED)
+    // 4. HARD SCAN GUARD: CHECK PLATOON QUOTA CAPACITY (37 CADETS FIXED - NO OVERRIDE)
     if (scannedIdsSetRef.current.size >= PLATOON_QUOTA) {
       scannerAudio.playQuotaLimitAlert();
       setAlertState({
@@ -425,11 +424,11 @@ const companyNameMap = {
         message: `Maximum quota of ${PLATOON_QUOTA} cadets reached for ${sessionSetup?.platoon || '1st Platoon'}! Scan blocked.`
       });
 
-      // Offer manual override option modal
-      setOverrideCandidate({
-        scanRecord,
+      // Trigger Hard-Stop Capacity Error Modal (No Override Option)
+      setCapacityFullModal({
         headingName,
-        rawId: cadetId
+        cadetId,
+        platoon: sessionSetup?.platoon || decodedPlatoon || '1st Platoon'
       });
       return;
     }
@@ -457,38 +456,6 @@ const companyNameMap = {
     });
 
     setTimeout(() => setLastScanToast(null), 3000);
-  };
-
-  // Handle Manual Override confirmation when capacity is full
-  const handleConfirmOverride = () => {
-    if (!overrideCandidate) return;
-    const { scanRecord, rawId, headingName } = overrideCandidate;
-
-    const extraRecord = {
-      ...scanRecord,
-      designation: 'Extra / Visitor Cadet'
-    };
-
-    scannedIdsSetRef.current.add(rawId);
-    scannerAudio.playTimeInSuccess();
-    setAlertState({ active: false, type: '', message: '' });
-    setScanErrorModal({ visible: false, title: '', message: '' });
-
-    onScanSuccess(extraRecord);
-
-    setLastScanToast({
-      type: 'success',
-      title: 'EXTRA CADET RECORDED',
-      cadetId: headingName,
-      message: `Cadet ${rawId} recorded as Extra / Visitor Cadet.`
-    });
-    setTimeout(() => setLastScanToast(null), 3500);
-
-    setOverrideCandidate(null);
-  };
-
-  const handleCancelOverride = () => {
-    setOverrideCandidate(null);
   };
 
   // Formatted active unit echelon banner text
@@ -822,17 +789,121 @@ const companyNameMap = {
         )}
       </div>
 
-      {/* Manual Override Confirmation Modal for Extra / Visitor Cadet */}
-      <ConfirmModal
-        isOpen={!!overrideCandidate}
-        title="⚠️ Platoon Quota Full (37/37)"
-        message={`The maximum quota of 37 cadets has already been scanned for ${sessionSetup?.platoon || '1st Platoon'}. Do you want to record ${overrideCandidate?.headingName || overrideCandidate?.rawId} as an Extra / Visitor Cadet?`}
-        confirmLabel="Allow Extra Cadet"
-        cancelLabel="Cancel / Block"
-        onConfirm={handleConfirmOverride}
-        onCancel={handleCancelOverride}
-        isDestructive={false}
-      />
+      {/* Hard-Stop Platoon Capacity Error Modal (Strict 37 Max, No Override) */}
+      {capacityFullModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '1.25rem',
+          animation: 'fadeIn 0.2s ease-out'
+        }}>
+          <div style={{
+            background: 'var(--bg-dark-card, #0f172a)',
+            borderRadius: '18px',
+            width: '100%',
+            maxWidth: '390px',
+            padding: '1.5rem',
+            boxShadow: '0 20px 45px rgba(0, 0, 0, 0.85), 0 0 25px rgba(220, 38, 38, 0.35)',
+            border: '2px solid #ef4444',
+            color: '#ffffff',
+            animation: 'scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1)'
+          }}>
+            {/* Header Icon & Title */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.85rem' }}>
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.18)',
+                color: '#f87171',
+                border: '1.5px solid #ef4444',
+                width: '44px',
+                height: '44px',
+                borderRadius: '12px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <ShieldAlert size={24} />
+              </div>
+              <div>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: '#f87171' }}>
+                  HARD CAPACITY LIMIT (37/37)
+                </span>
+                <h3 style={{
+                  margin: 0,
+                  fontSize: '1.15rem',
+                  fontWeight: 800,
+                  color: '#ffffff',
+                  fontFamily: 'Oswald, sans-serif',
+                  letterSpacing: '0.4px'
+                }}>
+                  Platoon Capacity Full
+                </h3>
+              </div>
+            </div>
+
+            {/* Body Text */}
+            <p style={{
+              fontSize: '0.86rem',
+              lineHeight: '1.5',
+              color: 'var(--text-subtle, #cbd5e1)',
+              margin: '0 0 1rem 0'
+            }}>
+              The strict maximum quota of <strong>37 cadets</strong> has already been scanned for <strong>{capacityFullModal.platoon}</strong>. Scanning a 38th cadet is strictly prohibited with zero override.
+            </p>
+
+            {/* Rejected Cadet Details */}
+            <div style={{
+              backgroundColor: 'rgba(15, 23, 42, 0.7)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '10px',
+              padding: '0.75rem 0.9rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.8rem'
+            }}>
+              <div style={{ color: '#f87171', fontWeight: 800, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <Lock size={13} /> Scan Hard-Blocked:
+              </div>
+              <div style={{ color: '#ffffff', fontWeight: 700 }}>
+                {capacityFullModal.headingName} ({capacityFullModal.cadetId})
+              </div>
+              <div style={{ marginTop: '0.35rem', fontSize: '0.75rem', color: 'var(--rotc-gold-bright, #e5a900)', fontWeight: 600 }}>
+                • Platoon Strength: 37 / 37 Cadets (0 slots remaining)
+              </div>
+            </div>
+
+            {/* Hard Stop Dismissal Button (Zero Override) */}
+            <button
+              type="button"
+              onClick={() => setCapacityFullModal(null)}
+              style={{
+                width: '100%',
+                padding: '0.8rem 1rem',
+                borderRadius: '10px',
+                border: 'none',
+                background: '#dc2626',
+                color: '#ffffff',
+                fontWeight: 800,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+                boxShadow: '0 4px 12px rgba(220, 38, 38, 0.4)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              UNDERSTOOD / CLOSE
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Echelon Mismatch Alert Modal */}
       {echelonMismatchAlert?.show && (
