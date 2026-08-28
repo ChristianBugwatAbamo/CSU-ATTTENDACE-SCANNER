@@ -119,14 +119,129 @@ export async function fetchCadetCountFromSupabase() {
   }
 }
 
+// ------------------------------------------------------------------------------
+// PLATOON CAPACITY GUARDRAILS (37 Cadets Max per Platoon)
+// ------------------------------------------------------------------------------
+export const MAX_PLATOON_CAPACITY = 37;
+
 /**
- * Adds a new cadet to Supabase
+ * Normalizes battalion, company, and platoon to standardized query parts.
+ */
+export function normalizePlatoonParts(battalion, company, platoon) {
+  const bn = String(battalion || '').toLowerCase().includes('2') ? '2nd Battalion' : '1st Battalion';
+  const bnCode = String(battalion || '').toLowerCase().includes('2') ? '2' : '1';
+
+  let co = 'Alpha Company';
+  const coStr = String(company || '').trim().toUpperCase();
+  if (coStr.includes('BRAVO') || coStr === '2') co = 'Bravo Company';
+  else if (coStr.includes('CHARLIE') || coStr === '3') co = 'Charlie Company';
+  else if (coStr.includes('DELTA') || coStr === '4') co = 'Delta Company';
+  else if (coStr.includes('ALPHA') || coStr === '1') co = 'Alpha Company';
+  else co = coStr.endsWith('COMPANY') ? coStr : `${coStr} Company`;
+  const coClean = co.replace(/ COY| COMPANY/i, '').trim();
+
+  let pl = '1st Platoon';
+  const plStr = String(platoon || '').toLowerCase();
+  if (plStr.includes('4')) pl = '4th Platoon';
+  else if (plStr.includes('3')) pl = '3rd Platoon';
+  else if (plStr.includes('2')) pl = '2nd Platoon';
+  else if (plStr.includes('1')) pl = '1st Platoon';
+  else if (platoon) pl = String(platoon).trim();
+  const plCode = plStr.includes('2') ? '2' : (plStr.includes('3') ? '3' : (plStr.includes('4') ? '4' : '1'));
+
+  const key = `${bn} | ${co} | ${pl}`;
+  const label = `${bn} - ${co} - ${pl}`;
+
+  return { bn, bnCode, co, coClean, pl, plCode, key, label };
+}
+
+/**
+ * Validates that inserting or updating cadets will not exceed the 37-cadet capacity per platoon.
+ * Returns { valid: true } or { valid: false, error: string, platoon: string, currentCount: number, incomingCount: number, projectedCount: number }
+ */
+export async function validatePlatoonCapacity(cadetOrList, client = null) {
+  const activeClient = client || getSupabaseClient();
+  if (!activeClient) return { valid: true };
+
+  const list = Array.isArray(cadetOrList) ? cadetOrList : [cadetOrList];
+  
+  // Group basic cadets by platoon
+  const platoonGroups = new Map();
+  for (const c of list) {
+    const isOfficer = (
+      c.type === 'Cadet Officer' ||
+      String(c.rank || '').includes('1CL') ||
+      String(c.rank || '').includes('2CL') ||
+      String(c.rank || '').includes('3CL') ||
+      String(c.rank || '').includes('4CL') ||
+      String(c.rank || '').includes('COL') ||
+      String(c.rank || '').includes('MAJ') ||
+      String(c.rank || '').includes('CPT') ||
+      String(c.rank || '').includes('LT')
+    );
+    if (isOfficer) continue;
+
+    const parts = normalizePlatoonParts(c.battalion, c.company, c.platoon);
+    if (!platoonGroups.has(parts.key)) {
+      platoonGroups.set(parts.key, { parts, cadets: [] });
+    }
+    platoonGroups.get(parts.key).cadets.push(c);
+  }
+
+  // Check each platoon against current database count
+  for (const group of platoonGroups.values()) {
+    const { parts, cadets: incomingCadets } = group;
+    
+    // Query existing cadets in DB for this platoon
+    const { data: dbCadets, error } = await activeClient
+      .from('cadets')
+      .select('id, battalion, company, platoon, type')
+      .ilike('battalion', `%${parts.bnCode}%`)
+      .ilike('company', `%${parts.coClean}%`)
+      .ilike('platoon', `%${parts.plCode}%`);
+
+    if (error) {
+      console.warn('Could not query DB platoon count for capacity check:', error);
+      continue;
+    }
+
+    const existingRows = Array.isArray(dbCadets) ? dbCadets.filter(c => c.type !== 'Cadet Officer') : [];
+    const incomingIds = new Set(incomingCadets.map(c => String(c.id || c.cadetId || '').toUpperCase()));
+
+    // Exclude existing DB cadets that are just being updated with the same ID
+    const dbCadetsNotOverwritten = existingRows.filter(c => !incomingIds.has(String(c.id || '').toUpperCase()));
+    const finalProjectedCount = dbCadetsNotOverwritten.length + incomingCadets.length;
+
+    if (finalProjectedCount > MAX_PLATOON_CAPACITY) {
+      const errorMsg = `Platoon capacity limit exceeded: "${parts.label}" already has ${existingRows.length} registered cadets in Supabase. Adding ${incomingCadets.length} cadet(s) would exceed the maximum capacity limit of ${MAX_PLATOON_CAPACITY} (Total would be ${finalProjectedCount}).`;
+      return {
+        valid: false,
+        error: errorMsg,
+        platoon: parts.label,
+        currentCount: existingRows.length,
+        incomingCount: incomingCadets.length,
+        projectedCount: finalProjectedCount
+      };
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Adds a new cadet to Supabase with Platoon Capacity Guardrail (37 max)
  */
 export async function addCadetToSupabase(cadet) {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
+    // 37 Cadets Max Platoon Capacity Guardrail
+    const validation = await validatePlatoonCapacity(cadet, client);
+    if (!validation.valid) {
+      throw new Error(validation.error);
+    }
+
     const payload = {
       id: cadet.id || cadet.cadetId,
       name: cadet.name,
@@ -295,11 +410,18 @@ function toDateKey(dateInput) {
 }
 
 /**
- * Bulk upserts cadets to Supabase
+ * Bulk upserts cadets to Supabase with Platoon Capacity Guardrail (37 max)
  */
 export async function bulkUpsertCadetsToSupabase(cadetsList) {
   const client = getSupabaseClient();
   if (!client || !Array.isArray(cadetsList) || cadetsList.length === 0) return null;
+
+  // 37 Cadets Max Platoon Capacity Guardrail
+  const validation = await validatePlatoonCapacity(cadetsList, client);
+  if (!validation.valid) {
+    console.error('Platoon Capacity Guardrail Violation:', validation.error);
+    throw new Error(validation.error);
+  }
 
   const cadetRows = cadetsList.map(c => ({
     id: c.id || c.cadetId,

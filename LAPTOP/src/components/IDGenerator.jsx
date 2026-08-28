@@ -1,10 +1,174 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2 } from 'lucide-react';
+import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2, AlertTriangle, Users, X, Info } from 'lucide-react';
 import IDCardPreview from './IDCardPreview';
 import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
-import { getSupabaseClient, supabase } from '../utils/supabaseClient';
+import { getSupabaseClient, supabase, MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity } from '../utils/supabaseClient';
 
+export { MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity };
 export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
+
+// ==============================================================================
+// THEMED CAPACITY / GUARDRAIL ALERT MODAL (Replaces Native Browser Alerts)
+// ==============================================================================
+function CapacityAlertModal({ isOpen, onClose, config }) {
+  if (!isOpen || !config) return null;
+
+  const { title, message, details, type = 'warning' } = config;
+
+  const isError = type === 'error';
+  const isWarning = type === 'warning';
+  const isInfo = type === 'info';
+
+  const accentColor = isError ? '#ef4444' : isWarning ? '#e5a900' : '#10b981';
+  const badgeBg = isError ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(229, 169, 0, 0.15)' : 'rgba(16, 185, 129, 0.15)';
+  const badgeBorder = isError ? 'rgba(239, 68, 68, 0.35)' : isWarning ? 'rgba(229, 169, 0, 0.35)' : 'rgba(16, 185, 129, 0.35)';
+
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: 'rgba(3, 20, 12, 0.82)',
+        backdropFilter: 'blur(6px)',
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+        animation: 'modalFadeIn 0.2s ease-out'
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={{
+          backgroundColor: '#0c2317',
+          border: '1.5px solid #1e4d36',
+          borderRadius: '16px',
+          width: '100%',
+          maxWidth: '480px',
+          padding: '1.5rem',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.9), 0 0 25px rgba(6, 78, 46, 0.4)',
+          color: '#ffffff',
+          position: 'relative'
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                backgroundColor: badgeBg,
+                border: `1px solid ${badgeBorder}`,
+                color: accentColor,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}
+            >
+              {isError ? <AlertTriangle size={22} /> : isWarning ? <Shield size={22} /> : <CheckCircle2 size={22} />}
+            </div>
+            <div>
+              <span style={{ fontSize: '0.68rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: accentColor }}>
+                {isError ? 'Guardrail Alert' : isWarning ? 'System Notice' : 'Information'}
+              </span>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#fef3c7', fontFamily: 'Oswald, sans-serif', letterSpacing: '0.3px' }}>
+                {title}
+              </h3>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              padding: '4px',
+              display: 'flex',
+              alignItems: 'center',
+              borderRadius: '6px'
+            }}
+            title="Close"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Message */}
+        <p style={{ fontSize: '0.88rem', color: '#cbd5e1', lineHeight: 1.55, margin: '0 0 1rem 0' }}>
+          {message}
+        </p>
+
+        {/* Optional Structured Breakdown Table */}
+        {details && (
+          <div
+            style={{
+              backgroundColor: 'rgba(2, 44, 34, 0.75)',
+              border: '1px solid #164e33',
+              borderRadius: '10px',
+              padding: '0.75rem 0.9rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.8rem'
+            }}
+          >
+            {details.platoon && (
+              <div style={{ marginBottom: '0.5rem', fontWeight: 700, color: '#6ee7b7' }}>
+                🎯 Target Unit: {details.platoon}
+              </div>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem', color: '#cbd5e1' }}>
+              {details.inDb !== undefined && (
+                <div>• In Database: <strong style={{ color: '#ffffff' }}>{details.inDb}</strong></div>
+              )}
+              {details.inQueue !== undefined && (
+                <div>• In Print Queue: <strong style={{ color: '#ffffff' }}>{details.inQueue}</strong></div>
+              )}
+              {details.projected !== undefined && (
+                <div>• Projected Total: <strong style={{ color: '#ef4444' }}>{details.projected}</strong></div>
+              )}
+              {details.max !== undefined && (
+                <div>• Platoon Capacity: <strong style={{ color: '#e5a900' }}>{details.max} Cadets Max</strong></div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Action Button */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: '#e5a900',
+              color: '#0A192F',
+              fontWeight: 800,
+              fontSize: '0.84rem',
+              padding: '0.55rem 1.4rem',
+              borderRadius: '8px',
+              border: 'none',
+              cursor: 'pointer',
+              boxShadow: '0 2px 6px rgba(229, 169, 0, 0.4)',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = '#c68c00'}
+            onMouseLeave={(e) => e.currentTarget.style.background = '#e5a900'}
+          >
+            UNDERSTOOD
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Helper to parse Company Name to Numeric Code (1-4)
 export const getCompanyCode = (companyStr) => {
@@ -249,17 +413,67 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const batchQueue = printQueue;
   const setBatchQueue = setPrintQueue;
 
+  // Selected Platoon Real-Time Capacity Calculation
+  const selectedPlatoonParts = normalizePlatoonParts(battalion, company, platoon);
+  
+  // Existing registered basic cadets in this platoon from Supabase / Master Roster prop
+  const dbCadetsInSelectedPlatoon = cadets.filter(c => {
+    const isOfficer = (
+      c.type === 'Cadet Officer' ||
+      String(c.rank || '').includes('1CL') ||
+      String(c.rank || '').includes('2CL') ||
+      String(c.rank || '').includes('3CL') ||
+      String(c.rank || '').includes('4CL') ||
+      String(c.rank || '').includes('COL') ||
+      String(c.rank || '').includes('MAJ') ||
+      String(c.rank || '').includes('CPT') ||
+      String(c.rank || '').includes('LT')
+    );
+    if (isOfficer) return false;
+    return normalizePlatoonParts(c.battalion, c.company, c.platoon).key === selectedPlatoonParts.key;
+  });
+
+  // Queued basic cadets in this platoon
+  const queuedCadetsInSelectedPlatoon = printQueue.filter(c => {
+    const isOfficer = (
+      c.type === 'Cadet Officer' ||
+      String(c.rank || '').includes('1CL') ||
+      String(c.rank || '').includes('2CL') ||
+      String(c.rank || '').includes('3CL') ||
+      String(c.rank || '').includes('4CL') ||
+      String(c.rank || '').includes('COL') ||
+      String(c.rank || '').includes('MAJ') ||
+      String(c.rank || '').includes('CPT') ||
+      String(c.rank || '').includes('LT')
+    );
+    if (isOfficer) return false;
+    return normalizePlatoonParts(c.battalion, c.company, c.platoon).key === selectedPlatoonParts.key;
+  });
+
+  // Combined unique count (accounting for same ID in both DB and queue)
+  const combinedSelectedPlatoonCadetIds = new Set([
+    ...dbCadetsInSelectedPlatoon.map(c => String(c.id || c.cadetId || '').toUpperCase()),
+    ...queuedCadetsInSelectedPlatoon.map(c => String(c.id || c.cadetId || '').toUpperCase())
+  ]);
+  const currentPlatoonLoad = combinedSelectedPlatoonCadetIds.size;
+  const isPlatoonAtMax = currentPlatoonLoad >= MAX_PLATOON_CAPACITY;
+
+  // Print Lock State: true only AFTER user clicks "Print Batch" for the current batch
   const [hasPrintedCurrentBatch, setHasPrintedCurrentBatch] = useState(false);
   const hasPrinted = hasPrintedCurrentBatch;
   const setHasPrinted = setHasPrintedCurrentBatch;
-
   const [isSaving, setIsSaving] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
+
+  // Custom Capacity & Guardrail Alert Modal State
+  const [alertModal, setAlertModal] = useState(null);
+  const showAlert = (config) => setAlertModal(config);
+  const closeAlert = () => setAlertModal(null);
 
   // Synchronize Form State to LocalStorage
   useEffect(() => {
     try {
-      localStorage.setItem('csu_rotc_id_gen_form', JSON.stringify({
+      const formData = {
         category,
         lastName,
         firstName,
@@ -270,7 +484,8 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         company,
         platoon,
         designation
-      }));
+      };
+      localStorage.setItem('csu_rotc_id_gen_form', JSON.stringify(formData));
     } catch (_) { }
   }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation]);
 
@@ -285,36 +500,37 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     } catch (_) { }
   }, [printQueue]);
 
-  // Helper: Format combined Full Name: LAST NAME, FIRST NAME MIDDLE INITIAL
-  const getFormattedFullName = () => {
-    const last = lastName.trim().toUpperCase();
-    const first = firstName.trim().toUpperCase();
-    const mi = middleInitial.replace(/\./g, '').trim().toUpperCase();
-
-    if (!last && !first) return 'SANTOS, MARIA L';
-    if (last && first) return `${last}, ${first}${mi ? ` ${mi}` : ''}`;
-    return `${last || first}${mi ? ` ${mi}` : ''}`;
-  };
-
-  const fullName = getFormattedFullName();
-
-  // Category Switch Handler
-  const handleCategorySwitch = (newCategory) => {
-    setCategory(newCategory);
-    if (newCategory === 'basic') {
+  // Category Switcher Handler
+  const handleCategorySwitch = (newCat) => {
+    setCategory(newCat);
+    if (newCat === 'basic') {
       setRank('Cadet');
       setBattalion('1st Battalion');
       setCompany('Alpha');
       setPlatoon('1st Platoon');
       setDesignation('None');
     } else {
-      setRank('Cadet COL (ROTC) 1CL');
+      const firstRank = officerRanks && officerRanks.length > 0 ? officerRanks[0] : '1CL Cadet Col';
+      const firstDesig = officerDesignations && officerDesignations.length > 0 ? officerDesignations[0] : 'Corps Commander';
+      setRank(firstRank);
       setBattalion('CADET OFFICERS');
       setCompany('1CL');
-      setPlatoon('Corps Command Staff');
-      setDesignation('Corps Commander');
+      setPlatoon(firstDesig);
+      setDesignation(firstDesig);
     }
   };
+
+  // Helper to format full display name: "LASTNAME, FIRSTNAME M"
+  const fullName = (() => {
+    const l = lastName.trim().toUpperCase();
+    const f = firstName.trim().toUpperCase();
+    const m = middleInitial.trim().toUpperCase().replace(/\./g, '');
+    if (!l && !f) return 'CADET FULL NAME';
+    let formatted = l || 'LASTNAME';
+    if (f) formatted += `, ${f}`;
+    if (m) formatted += ` ${m}`;
+    return formatted;
+  })();
 
   const handleLastNameChange = (val) => {
     setLastName(val.toUpperCase());
@@ -338,50 +554,128 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     setCadetId(formatted);
   };
 
-  // 1. Add New Card to Queue (Resets Print Lock for New Items - Zero Supabase Calls)
+  // 1. Add New Card to Queue (Strict 37 Cadets Max Guardrail)
   const handleAddToQueue = (e) => {
     if (e && typeof e.preventDefault === 'function') {
       e.preventDefault();
     }
 
     if (!lastName.trim() || !firstName.trim() || !cadetId.trim()) {
-      alert("Please fill in Last Name, First Name, and Cadet ID.");
+      showAlert({
+        type: 'warning',
+        title: 'Missing Required Fields',
+        message: 'Please fill in Last Name, First Name, and Cadet ID before adding to the queue.'
+      });
       return;
     }
 
-    let officerClass = '1CL';
-    if (rank.includes('1CL')) officerClass = '1CL';
-    else if (rank.includes('2CL')) officerClass = '2CL';
-    else if (rank.includes('3CL')) officerClass = '3CL';
-    else if (rank.includes('4CL')) officerClass = '4CL';
-    else if (rank.includes('ASPIRANT') || rank.includes('COCC')) officerClass = 'ASPIRANT';
+    const cleanCid = cadetId.trim();
+
+    // --------------------------------------------------------------------------
+    // GUARDRAIL: Strict 37 Cadets Max Capacity Limit per Platoon
+    // --------------------------------------------------------------------------
+    if (category === 'basic') {
+      const targetParts = normalizePlatoonParts(battalion, company, platoon);
+
+      // Check DB registered count
+      const existingInDb = cadets.filter(c => {
+        const isOfficer = (
+          c.type === 'Cadet Officer' ||
+          String(c.rank || '').includes('1CL') ||
+          String(c.rank || '').includes('2CL') ||
+          String(c.rank || '').includes('3CL') ||
+          String(c.rank || '').includes('4CL') ||
+          String(c.rank || '').includes('COL') ||
+          String(c.rank || '').includes('MAJ') ||
+          String(c.rank || '').includes('CPT') ||
+          String(c.rank || '').includes('LT')
+        );
+        if (isOfficer) return false;
+        return normalizePlatoonParts(c.battalion, c.company, c.platoon).key === targetParts.key;
+      });
+
+      const dbHasThisCadet = existingInDb.some(c => String(c.id || c.cadetId || '').toUpperCase() === cleanCid.toUpperCase());
+
+      // If DB already has 37 cadets and this is a NEW cadet not currently in DB
+      if (existingInDb.length >= MAX_PLATOON_CAPACITY && !dbHasThisCadet) {
+        showAlert({
+          type: 'error',
+          title: 'Platoon Database Capacity Full (37/37 Max)',
+          message: `The Supabase database already has ${existingInDb.length} registered cadets assigned to ${targetParts.label}. Cannot add a 38th cadet to this platoon. Platoon capacity is strictly capped at ${MAX_PLATOON_CAPACITY} cadets.`,
+          details: {
+            platoon: targetParts.label,
+            inDb: existingInDb.length,
+            inQueue: queuedCadetsInSelectedPlatoon.length,
+            max: MAX_PLATOON_CAPACITY
+          }
+        });
+        return;
+      }
+
+      // Check existing queue count for this platoon
+      const existingInQueue = printQueue.filter(c => {
+        const isOfficer = (
+          c.type === 'Cadet Officer' ||
+          String(c.rank || '').includes('1CL') ||
+          String(c.rank || '').includes('2CL') ||
+          String(c.rank || '').includes('3CL') ||
+          String(c.rank || '').includes('4CL') ||
+          String(c.rank || '').includes('COL') ||
+          String(c.rank || '').includes('MAJ') ||
+          String(c.rank || '').includes('CPT') ||
+          String(c.rank || '').includes('LT')
+        );
+        if (isOfficer) return false;
+        return normalizePlatoonParts(c.battalion, c.company, c.platoon).key === targetParts.key;
+      });
+
+      // Calculate projected combined count
+      const combinedIds = new Set([
+        ...existingInDb.map(c => String(c.id || c.cadetId || '').toUpperCase()),
+        ...existingInQueue.map(c => String(c.id || c.cadetId || '').toUpperCase()),
+        cleanCid.toUpperCase()
+      ]);
+
+      if (combinedIds.size > MAX_PLATOON_CAPACITY) {
+        showAlert({
+          type: 'error',
+          title: 'Platoon Capacity Limit Exceeded (37 Max)',
+          message: `Adding this cadet would exceed the 37-cadet maximum capacity for ${targetParts.label}.`,
+          details: {
+            platoon: targetParts.label,
+            inDb: existingInDb.length,
+            inQueue: existingInQueue.length,
+            projected: combinedIds.size,
+            max: MAX_PLATOON_CAPACITY
+          }
+        });
+        return;
+      }
+    }
 
     const newCadet = {
-      id: cadetId.trim(),
+      id: cleanCid,
       lastName: lastName.trim().toUpperCase(),
       firstName: firstName.trim().toUpperCase(),
       middleInitial: middleInitial.trim().toUpperCase(),
       name: fullName,
-      rank: category === 'basic' ? 'Cadet' : rank,
-      battalion: category === 'basic' ? battalion : 'CADET OFFICERS',
-      company: category === 'basic' ? normalizeCompany(company) : officerClass,
-      platoon: category === 'basic' ? platoon : (designation && designation !== 'None' ? designation : 'Corps Command Staff'),
-      designation: category === 'basic' ? 'None' : designation,
-      type: normalizeCadetType(category, rank),
+      rank: 'Cadet',
+      battalion: battalion,
+      company: normalizeCompany(company),
+      platoon: platoon,
+      designation: 'None',
+      type: 'Basic Cadet',
       is_active: true,
       queueId: Date.now()
     };
 
-    // Add new card and require a new print trigger for this new batch
     setPrintQueue(prev => {
       const exists = prev.some(c => (c.id || c.cadet_id) === newCadet.id);
       return exists ? prev.map(c => (c.id || c.cadet_id) === newCadet.id ? newCadet : c) : [...prev, newCadet];
     });
 
-    // Reset printed state so new/modified batch must be printed before saving to DB
     setHasPrintedCurrentBatch(false);
 
-    // Clear inputs after adding to local queue
     setLastName('');
     setFirstName('');
     setMiddleInitial('');
@@ -394,8 +688,6 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const handleAddToBatch = handleAddToQueue;
-
   const handleRemoveFromQueue = (index) => {
     setPrintQueue(prev => {
       const updated = prev.filter((_, idx) => idx !== index);
@@ -406,26 +698,30 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     });
   };
 
+  const handleAddToBatch = handleAddToQueue;
   const handleRemoveFromBatch = handleRemoveFromQueue;
 
-  // 2. Print Execution Handler: Opens print view and unlocks Save to Database for current batch
   const handlePrintBatch = () => {
     if (!printQueue || printQueue.length === 0) {
-      alert("Batch queue is empty. Please add cadet cards to the batch before printing.");
+      showAlert({
+        type: 'info',
+        title: 'Batch Queue Is Empty',
+        message: 'Please add cadet cards to the batch queue before printing.'
+      });
       return;
     }
-
-    // Unlock Save to Database button for current batch
     setHasPrintedCurrentBatch(true);
-
-    // Trigger Browser Print Dialog
     window.print();
   };
 
-  // 3. Save Printed Cards to Database & Clear Them From Queue (Explicit User Action Only)
+  // 3. Save Printed Cards to Database & Clear Them From Queue (Explicit User Action Only with 37 Max Guardrail)
   const handleSaveToDatabase = async () => {
     if (!hasPrintedCurrentBatch || printQueue.length === 0) {
-      alert("You must print the ID cards first before saving to Supabase!");
+      showAlert({
+        type: 'warning',
+        title: 'Print Required First',
+        message: 'You must print the ID cards first before saving them to the Supabase database!'
+      });
       return;
     }
 
@@ -445,9 +741,28 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         is_active: true
       }));
 
-      // Explicit DB Insert Call via Supabase
+      // Explicit DB Insert Call via Supabase with Platoon Capacity Guardrail
       const client = getSupabaseClient();
       if (client) {
+        // Enforce 37-cadet max platoon validation before executing upsert
+        const validation = await validatePlatoonCapacity(recordsToInsert, client);
+        if (!validation.valid) {
+          showAlert({
+            type: 'error',
+            title: 'Database Save Blocked (Capacity Violation)',
+            message: validation.error,
+            details: {
+              platoon: validation.platoon,
+              inDb: validation.currentCount,
+              inQueue: validation.incomingCount,
+              projected: validation.projectedCount,
+              max: MAX_PLATOON_CAPACITY
+            }
+          });
+          setIsSaving(false);
+          return;
+        }
+
         const { error } = await client
           .from('cadets')
           .upsert(recordsToInsert, { onConflict: 'id' });
@@ -480,7 +795,11 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
     } catch (err) {
       console.error("Error saving to database:", err);
-      alert(`Database save failed: ${err.message || "Please check connection."}`);
+      showAlert({
+        type: 'error',
+        title: 'Database Save Failed',
+        message: err.message || 'Please check your connection and Supabase settings.'
+      });
     } finally {
       setIsSaving(false);
     }
@@ -511,27 +830,6 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
           </div>
 
           <div className="form-card-body">
-            {/* Category Segmented Switcher */}
-            <div className="category-switcher">
-              <button
-                type="button"
-                className={`switch-btn ${category === 'basic' ? 'active' : ''}`}
-                onClick={() => handleCategorySwitch('basic')}
-              >
-                <Shield size={16} />
-                <span>Basic Cadet</span>
-              </button>
-
-              <button
-                type="button"
-                className={`switch-btn ${category === 'officer' ? 'active' : ''}`}
-                onClick={() => handleCategorySwitch('officer')}
-              >
-                <Award size={16} />
-                <span>Cadet Officer</span>
-              </button>
-            </div>
-
             {/* Split Name Fields */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 90px', gap: '0.75rem' }}>
               <div className="form-field-group">
@@ -570,7 +868,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
               </div>
             </div>
 
-            {/* Cadet ID & Rank */}
+            {/* Cadet ID & Rank (Locked to Cadet) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-field-group">
                 <label>Cadet ID</label>
@@ -587,119 +885,164 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
               <div className="form-field-group">
                 <label>Rank</label>
-                {category === 'basic' ? (
-                  <input
-                    type="text"
-                    className="custom-input"
-                    value="Cadet"
-                    disabled
-                    style={{ backgroundColor: '#f3f4f6', color: 'var(--text-dark)', fontWeight: 600 }}
-                  />
-                ) : (
-                  <select
-                    className="custom-select"
-                    value={rank}
-                    onChange={(e) => setRank(e.target.value)}
-                  >
-                    {officerRanks.map(r => (
-                      <option key={r} value={r}>{r}</option>
-                    ))}
-                  </select>
-                )}
+                <input
+                  type="text"
+                  className="custom-input"
+                  value="Cadet"
+                  disabled
+                  style={{ backgroundColor: '#f3f4f6', color: 'var(--text-dark)', fontWeight: 600 }}
+                />
               </div>
             </div>
 
             {/* Basic Cadet Echelon Hierarchy Assignment */}
-            {category === 'basic' && (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
-                <div className="form-field-group">
-                  <label>Battalion</label>
-                  <select
-                    className="custom-select"
-                    value={battalion}
-                    onChange={(e) => setBattalion(e.target.value)}
-                  >
-                    <option value="1st Battalion">1st Battalion</option>
-                    <option value="2nd Battalion">2nd Battalion</option>
-                  </select>
-                </div>
-
-                <div className="form-field-group">
-                  <label>Company</label>
-                  <select
-                    className="custom-select"
-                    value={company}
-                    onChange={(e) => setCompany(e.target.value)}
-                  >
-                    <option value="Alpha">Alpha</option>
-                    <option value="Bravo">Bravo</option>
-                    <option value="Charlie">Charlie</option>
-                    <option value="Delta">Delta</option>
-                  </select>
-                </div>
-
-                <div className="form-field-group">
-                  <label>Platoon</label>
-                  <select
-                    className="custom-select"
-                    value={platoon}
-                    onChange={(e) => setPlatoon(e.target.value)}
-                  >
-                    <option value="1st Platoon">1st Pltn</option>
-                    <option value="2nd Platoon">2nd Pltn</option>
-                  </select>
-                </div>
-              </div>
-            )}
-
-            {/* Cadet Officer: Single Designation Field (Replaces Bn, Co, Platoon) */}
-            {category === 'officer' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
               <div className="form-field-group">
-                <label>Officer Designation / Position</label>
+                <label>Battalion</label>
                 <select
                   className="custom-select"
-                  value={designation}
-                  onChange={(e) => setDesignation(e.target.value)}
+                  value={battalion}
+                  onChange={(e) => setBattalion(e.target.value)}
                 >
-                  {officerDesignations.map(d => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
+                  <option value="1st Battalion">1st Battalion</option>
+                  <option value="2nd Battalion">2nd Battalion</option>
                 </select>
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>
-                  Rendered on Line 2 inside the green echelon badge
+              </div>
+
+              <div className="form-field-group">
+                <label>Company</label>
+                <select
+                  className="custom-select"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                >
+                  <option value="Alpha">Alpha</option>
+                  <option value="Bravo">Bravo</option>
+                  <option value="Charlie">Charlie</option>
+                  <option value="Delta">Delta</option>
+                </select>
+              </div>
+
+              <div className="form-field-group">
+                <label>Platoon</label>
+                <select
+                  className="custom-select"
+                  value={platoon}
+                  onChange={(e) => setPlatoon(e.target.value)}
+                >
+                  <option value="1st Platoon">1st Pltn</option>
+                  <option value="2nd Platoon">2nd Pltn</option>
+                </select>
+              </div>
+            </div>
+
+            {/* LIVE VISUAL CAPACITY PROGRESS BAR (37 Cadets Max per Platoon) */}
+            <div
+              style={{
+                marginTop: '0.85rem',
+                marginBottom: '0.45rem',
+                padding: '0.75rem 0.85rem',
+                backgroundColor: '#f8fafc',
+                borderRadius: '12px',
+                border: `1.5px solid ${isPlatoonAtMax ? '#fecaca' : currentPlatoonLoad >= 30 ? '#fde68a' : '#e2e8f0'}`,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                transition: 'all 0.25s ease'
+              }}
+            >
+              {/* Progress Header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Users size={15} color={isPlatoonAtMax ? '#dc2626' : currentPlatoonLoad >= 30 ? '#d97706' : '#059669'} />
+                  <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#1e293b' }}>
+                    {selectedPlatoonParts.label}
+                  </span>
+                </div>
+                <span
+                  style={{
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    color: isPlatoonAtMax ? '#b91c1c' : currentPlatoonLoad >= 30 ? '#b45309' : '#047857'
+                  }}
+                >
+                  {currentPlatoonLoad} / {MAX_PLATOON_CAPACITY} Cadets ({Math.min(100, Math.round((currentPlatoonLoad / MAX_PLATOON_CAPACITY) * 100))}%)
                 </span>
               </div>
-            )}
+
+              {/* Progress Bar Track */}
+              <div
+                style={{
+                  width: '100%',
+                  height: '10px',
+                  backgroundColor: '#e2e8f0',
+                  borderRadius: '999px',
+                  overflow: 'hidden',
+                  position: 'relative'
+                }}
+              >
+                <div
+                  style={{
+                    width: `${Math.min(100, Math.max(0, (currentPlatoonLoad / MAX_PLATOON_CAPACITY) * 100))}%`,
+                    height: '100%',
+                    background: isPlatoonAtMax
+                      ? 'linear-gradient(90deg, #ef4444, #b91c1c)'
+                      : currentPlatoonLoad >= 30
+                        ? 'linear-gradient(90deg, #f59e0b, #d97706)'
+                        : 'linear-gradient(90deg, #10b981, #059669)',
+                    borderRadius: '999px',
+                    transition: 'width 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+                    boxShadow: isPlatoonAtMax
+                      ? '0 0 8px rgba(239, 68, 68, 0.5)'
+                      : currentPlatoonLoad >= 30
+                        ? '0 0 8px rgba(245, 158, 11, 0.35)'
+                        : '0 0 8px rgba(16, 185, 129, 0.35)'
+                  }}
+                />
+              </div>
+
+              {/* Progress Footer Breakdown */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.4rem', fontSize: '0.69rem', color: '#64748b' }}>
+                <span>
+                  Database: <strong style={{ color: '#0f172a' }}>{dbCadetsInSelectedPlatoon.length}</strong> • Queue: <strong style={{ color: '#0f172a' }}>{queuedCadetsInSelectedPlatoon.length}</strong>
+                </span>
+                <span style={{ fontWeight: 800, color: isPlatoonAtMax ? '#dc2626' : currentPlatoonLoad >= 30 ? '#d97706' : '#059669' }}>
+                  {isPlatoonAtMax ? '⛔ Platoon Limit Full' : `${Math.max(0, MAX_PLATOON_CAPACITY - currentPlatoonLoad)} slot(s) remaining`}
+                </span>
+              </div>
+            </div>
 
             {/* Add to Batch Queue Button */}
             <button
               type="button"
               onClick={handleAddToBatch}
               style={{
-                marginTop: '0.65rem',
+                marginTop: '0.45rem',
                 width: '100%',
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '6px',
-                background: '#E5A900',
-                color: '#0A192F',
+                background: isPlatoonAtMax ? '#cbd5e1' : '#E5A900',
+                color: isPlatoonAtMax ? '#64748b' : '#0A192F',
                 fontWeight: 700,
                 fontSize: '0.88rem',
                 padding: '0.65rem 1.25rem',
                 borderRadius: '10px',
                 border: 'none',
                 boxShadow: '0px 4px 6px rgba(0, 0, 0, 0.1)',
-                cursor: 'pointer',
+                cursor: isPlatoonAtMax ? 'not-allowed' : 'pointer',
                 transition: 'all 0.2s ease-in-out'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = '#C68C00';
-                e.currentTarget.style.boxShadow = '0px 6px 10px rgba(0, 0, 0, 0.15)';
+                if (!isPlatoonAtMax) {
+                  e.currentTarget.style.background = '#C68C00';
+                  e.currentTarget.style.boxShadow = '0px 6px 10px rgba(0, 0, 0, 0.15)';
+                }
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = '#E5A900';
-                e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
+                if (!isPlatoonAtMax) {
+                  e.currentTarget.style.background = '#E5A900';
+                  e.currentTarget.style.boxShadow = '0px 4px 6px rgba(0, 0, 0, 0.1)';
+                }
               }}
             >
               <Plus size={18} style={{ strokeWidth: 2.5 }} /> Add to Batch Print Queue
@@ -856,6 +1199,13 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         </div>
 
       </div>
+
+      {/* Themed Capacity & Guardrail Alert Modal */}
+      <CapacityAlertModal
+        isOpen={Boolean(alertModal)}
+        config={alertModal}
+        onClose={closeAlert}
+      />
     </div>
   );
 }
