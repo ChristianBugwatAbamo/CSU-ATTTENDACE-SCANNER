@@ -415,7 +415,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
   // Selected Platoon Real-Time Capacity Calculation
   const selectedPlatoonParts = normalizePlatoonParts(battalion, company, platoon);
-  
+
   // Existing registered basic cadets in this platoon from Supabase / Master Roster prop
   const dbCadetsInSelectedPlatoon = cadets.filter(c => {
     const isOfficer = (
@@ -533,19 +533,25 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   })();
 
   const handleLastNameChange = (val) => {
-    setLastName(val.toUpperCase());
+    // Strictly block numbers and special characters; permit letters, spaces, hyphens, and ñ/Ñ
+    const sanitized = val.replace(/[0-9]/g, '').replace(/[^a-zA-Z\s\-ñÑ']/g, '').toUpperCase();
+    setLastName(sanitized);
   };
 
   const handleFirstNameChange = (val) => {
-    setFirstName(val.toUpperCase());
+    // Strictly block numbers and special characters; permit letters, spaces, hyphens, and ñ/Ñ
+    const sanitized = val.replace(/[0-9]/g, '').replace(/[^a-zA-Z\s\-ñÑ']/g, '').toUpperCase();
+    setFirstName(sanitized);
   };
 
   const handleMiddleInitialChange = (val) => {
-    const cleaned = val.replace(/\./g, '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 1);
+    // Single alphabetical letter only
+    const cleaned = val.replace(/[0-9]/g, '').replace(/[^a-zA-ZñÑ]/g, '').toUpperCase().slice(0, 1);
     setMiddleInitial(cleaned);
   };
 
   const handleIdChange = (val) => {
+    // Strictly accept only up to 8 digits and auto-format as XXX-XXXXX
     const digits = val.replace(/\D/g, '').slice(0, 8);
     let formatted = digits;
     if (digits.length > 3) {
@@ -569,7 +575,29 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       return;
     }
 
+    // Strict Name Validation: Prohibit numeric characters
+    const NAME_VALIDATION_REGEX = /^[A-Z\s\-Ñ']+$/i;
+    if (!NAME_VALIDATION_REGEX.test(lastName.trim()) || !NAME_VALIDATION_REGEX.test(firstName.trim())) {
+      showAlert({
+        type: 'warning',
+        title: 'Invalid Characters in Name',
+        message: 'Last Name and First Name cannot contain numeric digits or invalid symbols. Please use letters only.'
+      });
+      return;
+    }
+
     const cleanCid = cadetId.trim();
+
+    // Strict Cadet ID Validation: Must strictly match XXX-XXXXX format (3 digits - 5 digits)
+    const CADET_ID_REGEX = /^\d{3}-\d{5}$/;
+    if (!CADET_ID_REGEX.test(cleanCid)) {
+      showAlert({
+        type: 'warning',
+        title: 'Invalid Cadet ID Format',
+        message: 'Cadet ID must strictly follow the format XXX-XXXXX (3 digits, hyphen, 5 digits — e.g., 221-01231).'
+      });
+      return;
+    }
 
     // --------------------------------------------------------------------------
     // GUARDRAIL: Strict 37 Cadets Max Capacity Limit per Platoon
@@ -875,12 +903,12 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="e.g., 221-00001"
+                  placeholder="e.g., 221-01231"
                   maxLength={9}
                   value={cadetId}
                   onChange={(e) => handleIdChange(e.target.value)}
                 />
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Used for QR code rendering</span>
+
               </div>
 
               <div className="form-field-group">
