@@ -19,6 +19,7 @@ import {
   X
 } from 'lucide-react';
 import BatchScannerModal from './BatchScannerModal';
+import BatchSyncHierarchyTracker from './BatchSyncHierarchyTracker';
 import { getSupabaseClient, inferCadetFromId } from '../utils/supabaseClient';
 
 export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncComplete }) {
@@ -49,6 +50,36 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     }
     return set;
   }, [cadets]);
+
+  // Ingested batches tracker (combines pending batches and active session logs)
+  const allIngestedBatches = React.useMemo(() => {
+    const list = [];
+    if (Array.isArray(pendingBatches)) {
+      pendingBatches.forEach(b => {
+        if (b.battalion || b.company || b.platoon) {
+          list.push({
+            battalion: b.battalion,
+            company: b.company,
+            platoon: b.platoon,
+            timestamp: b.scannedAt || b.timestamp || b.created_at || b.date || new Date().toISOString()
+          });
+        }
+      });
+    }
+    if (Array.isArray(attendanceLogs)) {
+      attendanceLogs.forEach(l => {
+        if (l.battalion || l.company || l.platoon) {
+          list.push({
+            battalion: l.battalion,
+            company: l.company,
+            platoon: l.platoon,
+            timestamp: l.timestamp || l.date || l.timeIn || l.timeOut || l.receivedAt
+          });
+        }
+      });
+    }
+    return list;
+  }, [pendingBatches, attendanceLogs]);
 
   // Sync Pending Batches to localStorage
   useEffect(() => {
@@ -503,8 +534,6 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
         </div>
       </div>
 
-
-
       {/* SECTION: PENDING BATCHES FOR APPROVAL QUEUE */}
       <div className="card" style={{ marginBottom: '1.75rem' }}>
         <div className="card-header" style={{ paddingBottom: '0.85rem' }}>
@@ -866,6 +895,9 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           )}
         </div>
       </div>
+
+      {/* REAL-TIME UNIT BATCH SYNC HIERARCHY STATUS MAP */}
+      <BatchSyncHierarchyTracker ingestedBatches={allIngestedBatches} />
 
       {/* Ingestion Overview & Latest Ingested Batches */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem' }}>
