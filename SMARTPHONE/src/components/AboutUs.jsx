@@ -14,7 +14,7 @@ export default function AboutUs() {
           />
         </div>
         <div className="about-hero-titles">
-          <span className="about-echelon-tag">ARESCOM • 15th RCDG • 1501st CDC</span>
+
           <h1 className="about-unit-title">Caraga State University</h1>
           <h2 className="about-unit-subtitle">ROTC Unit Attendance System</h2>
           <div className="about-version-badge">
@@ -45,7 +45,7 @@ export default function AboutUs() {
           <div className="guide-item">
             <div className="guide-num">1</div>
             <div className="guide-content">
-              <strong>Configure Session Echelon</strong>
+              <strong>Configure Session</strong>
               <p>Navigate to Settings to select Battalion, Company, and Platoon, and choose <em>Time-In</em> or <em>Time-Out</em>.</p>
             </div>
           </div>
@@ -53,7 +53,7 @@ export default function AboutUs() {
           <div className="guide-item">
             <div className="guide-num">2</div>
             <div className="guide-content">
-              <strong>Scan Cadet QR Cards</strong>
+              <strong>Scan Cadet ID QR Cards</strong>
               <p>Aim camera at cadet QR codes. Real-time duplicate protection prevents multiple check-ins in the same session.</p>
             </div>
           </div>
@@ -70,7 +70,7 @@ export default function AboutUs() {
             <div className="guide-num">4</div>
             <div className="guide-content">
               <strong>100% Offline Autonomy</strong>
-              <p>All scans are safely stored in device IndexedDB storage and survive browser restarts or battery reboots.</p>
+              <p>All scans are safely stored in device IndexedDB storage.</p>
             </div>
           </div>
         </div>
@@ -101,7 +101,7 @@ export default function AboutUs() {
           <div className="spec-box">
             <Award size={16} className="spec-icon" />
             <div className="spec-label">Target Unit</div>
-            <div className="spec-value">1501st CDC CSU ROTC</div>
+            <div className="spec-value">CSU MAIN ROTC UNIT</div>
           </div>
         </div>
       </div>
@@ -115,7 +115,7 @@ export default function AboutUs() {
         <div className="credits-body">
           <div className="credit-row">
             <span className="credit-role">Commanding Unit:</span>
-            <span className="credit-name">Caraga State University ROTC Unit • 1501st Community Defense Center (CDC) • 15th RCDG • ARESCOM</span>
+            <span className="credit-name">Caraga State University Reserve Officers' Training Corps Unit (ROTCU) • 1501st Community Defense Center (CDC) • 15th Regional Community Defense Group (RCDG)</span>
           </div>
           <div className="credit-row">
             <span className="credit-role">Host Institution:</span>

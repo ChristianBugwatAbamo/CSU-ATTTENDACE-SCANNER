@@ -380,14 +380,14 @@ export function getScannedUnitEchelon(log) {
     }
 
     if (!co) {
-      const coMatch = s.match(/(Alpha|Bravo|Charlie|Delta|HQ|Headquarters|Cadet Officer)(?:\s*Company)?/i);
+      const coMatch = s.match(/(Alpha|Bravo|Charlie|Delta)(?:\s*Company)?/i);
       if (coMatch && !coMatch[0].toLowerCase().includes('battalion')) {
         co = coMatch[0].includes('Company') ? coMatch[0] : `${coMatch[0]} Company`;
       }
     }
 
     if (!pl) {
-      const plMatch = s.match(/([1-4](?:st|nd|rd|th)?\s*Platoon|Officer Corps)/i);
+      const plMatch = s.match(/([1-2](?:st|nd)?\s*Platoon|Officer Corps)/i);
       if (plMatch) pl = plMatch[0];
     }
   }

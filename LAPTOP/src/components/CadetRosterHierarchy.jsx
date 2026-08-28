@@ -35,9 +35,7 @@ export default function CadetRosterHierarchy() {
 
       const bnClean = (selectedBattalion || '').toLowerCase().includes('2') ? '2' : '1';
       const coClean = (selectedCompany || '').replace(/ COY| COMPANY/i, '').trim();
-      const plClean = (selectedPlatoon || '').toLowerCase().includes('4') ? '4'
-        : (selectedPlatoon || '').toLowerCase().includes('3') ? '3'
-        : (selectedPlatoon || '').toLowerCase().includes('2') ? '2' : '1';
+      const plClean = (selectedPlatoon || '').toLowerCase().includes('2') ? '2' : '1';
 
       if (client) {
         const { data, error } = await client

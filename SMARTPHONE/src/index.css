@@ -554,6 +554,17 @@ body {
   text-overflow: ellipsis;
 }
 
+.scanner-edge-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  margin: auto 0;
+  width: 100%;
+  max-width: 440px;
+  flex: 1;
+}
+
 .camera-container-card {
   position: relative;
   width: 94%;

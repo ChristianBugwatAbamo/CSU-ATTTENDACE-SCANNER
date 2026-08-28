@@ -53,6 +53,40 @@ export async function saveOfflineScan(scanRecord) {
   return updatedQueue;
 }
 
+// Remove a single scan from offline queue
+export async function removeOfflineScan(scanRecord) {
+  const currentQueue = await getOfflineQueue();
+  const targetId = String(scanRecord.cadetId || scanRecord.id || '').trim().toUpperCase();
+  const targetMode = scanRecord.scanMode || 'Time-In';
+  const targetTimestamp = scanRecord.timestamp;
+
+  let removed = false;
+  const updatedQueue = currentQueue.filter(item => {
+    if (removed) return true;
+    const itemId = String(item.cadetId || item.id || '').trim().toUpperCase();
+    const itemMode = item.scanMode || 'Time-In';
+    if (targetTimestamp && item.timestamp) {
+      if (itemId === targetId && itemMode === targetMode && item.timestamp === targetTimestamp) {
+        removed = true;
+        return false;
+      }
+    } else if (itemId === targetId && itemMode === targetMode) {
+      removed = true;
+      return false;
+    }
+    return true;
+  });
+
+  try {
+    await set(QUEUE_KEY, updatedQueue);
+  } catch (err) {
+    localStorage.setItem(QUEUE_KEY, JSON.stringify(updatedQueue));
+  }
+  return updatedQueue;
+}
+
+export const deleteOfflineScan = removeOfflineScan;
+
 // Clear offline queue after successful sync
 export async function clearOfflineQueue() {
   try {

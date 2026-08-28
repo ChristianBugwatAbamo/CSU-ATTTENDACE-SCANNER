@@ -11,7 +11,7 @@ export default function UnitHierarchyDrillDown({
 }) {
   const battalions = ['1ST BATTALION', '2ND BATTALION'];
   const companies = ['ALPHA COY', 'BRAVO COY', 'CHARLIE COY', 'DELTA COY'];
-  const platoons = ['1ST PLATOON', '2ND PLATOON', '3RD PLATOON', '4TH PLATOON'];
+  const platoons = ['1ST PLATOON', '2ND PLATOON'];
 
   return (
     <div

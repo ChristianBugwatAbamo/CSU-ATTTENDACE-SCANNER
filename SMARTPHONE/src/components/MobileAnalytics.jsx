@@ -2,7 +2,7 @@ import React from 'react';
 import { Activity, Clock, Users, Shield, CheckCircle2, Layers, Trash2 } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
 
-export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQueue }) {
+export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQueue, onDeleteScan }) {
   // 1. Clean out any corrupted or JSON test payloads
   const cleanScans = scanLogs.filter(scan => {
     if (!scan.cadetId) return false;
@@ -61,6 +61,12 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
   const formattedPltn = activePltn.toUpperCase();
 
   const [selectedScanDetail, setSelectedScanDetail] = React.useState(null);
+  const [isConfirmingDelete, setIsConfirmingDelete] = React.useState(false);
+
+  const handleCloseModal = () => {
+    setSelectedScanDetail(null);
+    setIsConfirmingDelete(false);
+  };
 
   return (
     <div style={{ padding: '1rem 0.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', paddingBottom: '90px' }}>
@@ -76,9 +82,10 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
           background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
           color: '#ffffff',
           borderRadius: '12px',
-          padding: '0.9rem 1rem',
+          padding: '1rem',
           border: '1px solid var(--border-dark)',
-          boxShadow: 'var(--shadow-sm)'
+          boxShadow: 'var(--shadow-sm)',
+          textAlign: 'left'
         }}>
           <div style={{
             fontSize: '0.72rem',
@@ -86,33 +93,46 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
             textTransform: 'uppercase',
             fontWeight: 800,
             letterSpacing: '0.8px',
-            marginBottom: '4px'
+            marginBottom: '6px'
           }}>
             ACTIVE SCANNING UNIT
           </div>
 
           <div style={{
-            fontSize: '1rem',
+            fontSize: '1.05rem',
             fontWeight: 800,
             fontFamily: 'Oswald, sans-serif',
             letterSpacing: '0.5px',
             lineHeight: 1.2,
-            color: '#ffffff'
+            color: '#ffffff',
+            marginBottom: '10px'
           }}>
             {formattedBn} • {formattedCoy} • {formattedPltn}
           </div>
 
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '0.74rem',
-            color: 'var(--text-muted)',
-            marginTop: '4px'
-          }}>
-            <span>Platoon Leader: <strong style={{ color: 'var(--text-bright)' }}>{sessionSetup?.dutyOfficer || 'Duty Officer'}</strong></span>
-            <span>•</span>
-            <span>Mode: <strong style={{ color: 'var(--rotc-gold-bright)' }}>{activeMode}</strong></span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '0.82rem' }}>
+            {/* Platoon Leader Label */}
+            <div style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.76rem' }}>
+              Platoon Leader:
+            </div>
+
+            {/* Name of Platoon Leader in Charge (New Line) */}
+            <div style={{ color: '#ffffff', fontWeight: 800, letterSpacing: '0.3px' }}>
+              {sessionSetup?.dutyOfficer || 'Duty Officer'}
+            </div>
+
+            {/* Mode Display (New Line) */}
+            <div style={{ paddingTop: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.76rem' }}>Mode:</span>
+              <span
+                style={{
+                  fontWeight: 800,
+                  color: activeMode === 'Time-Out' ? 'var(--rotc-gold-bright)' : 'var(--rotc-green-primary)'
+                }}
+              >
+                {activeMode}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -133,29 +153,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               </div>
             </div>
 
-            <div style={{ textAlign: 'right' }}>
-              <span style={{
-                fontSize: '0.75rem',
-                fontWeight: 800,
-                padding: '3px 10px',
-                borderRadius: '9999px',
-                background: activeScannedCount > PLATOON_CAPACITY
-                  ? 'rgba(239, 68, 68, 0.2)'
-                  : (activeScannedCount === PLATOON_CAPACITY ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)'),
-                color: activeScannedCount > PLATOON_CAPACITY
-                  ? '#f87171'
-                  : (activeScannedCount === PLATOON_CAPACITY ? '#34d399' : 'var(--rotc-gold-bright)'),
-                border: `1px solid ${activeScannedCount > PLATOON_CAPACITY
-                    ? '#ef4444'
-                    : (activeScannedCount === PLATOON_CAPACITY ? '#10b981' : '#f59e0b')
-                  }`,
-                transition: 'all 0.4s ease'
-              }}>
-                {activeScannedCount > PLATOON_CAPACITY
-                  ? `OVER CAPACITY (${activeScannedCount}/${PLATOON_CAPACITY})`
-                  : (activeScannedCount === PLATOON_CAPACITY ? `CAPACITY REACHED (${PLATOON_CAPACITY}/${PLATOON_CAPACITY})` : `${remaining} REMAINING`)}
-              </span>
-            </div>
+
           </div>
 
           {/* Smooth Animated Visual Progress Bar */}
@@ -195,7 +193,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
                 ? `Over Quota (${activeScannedCount}/${PLATOON_CAPACITY})`
                 : (activeScannedCount === PLATOON_CAPACITY ? '100% (Quota Reached)' : `${progressPercent}% of ${activePltn}`)}
             </span>
-            <span>37 Cadets Quota</span>
+
           </div>
         </div>
       </div>
@@ -312,7 +310,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
 
       {/* Tap-to-View Cadet Detail Modal */}
       {selectedScanDetail && (
-        <div className="modal-overlay" onClick={() => setSelectedScanDetail(null)} style={{
+        <div className="modal-overlay" onClick={handleCloseModal} style={{
           position: 'fixed',
           top: 0,
           left: 0,
@@ -344,7 +342,7 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               <button
                 type="button"
                 className="btn-close"
-                onClick={() => setSelectedScanDetail(null)}
+                onClick={handleCloseModal}
                 style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: 'var(--text-muted)' }}
               >
                 ✕
@@ -386,14 +384,114 @@ export default function MobileAnalytics({ scanLogs = [], sessionSetup, onResetQu
               </div>
             </div>
 
-            <button
-              type="button"
-              className="setup-gold-btn"
-              onClick={() => setSelectedScanDetail(null)}
-              style={{ width: '100%', marginTop: '1rem', padding: '0.75rem', fontWeight: 800, borderRadius: '10px' }}
-            >
-              Close Details
-            </button>
+            {/* Modal Actions: Stacked Close & Delete */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '1rem' }}>
+              {/* Primary Close Button */}
+              <button
+                type="button"
+                className="setup-gold-btn"
+                onClick={handleCloseModal}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  letterSpacing: '0.3px',
+                  borderRadius: '10px'
+                }}
+              >
+                Close Details
+              </button>
+
+              {/* Stacked Delete Section */}
+              {!isConfirmingDelete ? (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingDelete(true)}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem',
+                    fontWeight: 750,
+                    fontSize: '0.78rem',
+                    letterSpacing: '0.3px',
+                    borderRadius: '10px',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    color: '#f87171',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    transition: 'all 0.18s ease'
+                  }}
+                  title="Remove / Delete this scan from local queue"
+                >
+                  <Trash2 size={14} />
+                  <span>Delete Scan</span>
+                </button>
+              ) : (
+                <div style={{
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1.5px solid #ef4444',
+                  borderRadius: '10px',
+                  padding: '0.75rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.55rem',
+                  textAlign: 'center'
+                }}>
+                  <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#fca5a5' }}>
+                    ⚠️ Delete scan for {selectedScanDetail.cadetId}?
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingDelete(false)}
+                      style={{
+                        padding: '0.5rem',
+                        fontWeight: 700,
+                        fontSize: '0.74rem',
+                        borderRadius: '8px',
+                        background: '#334155',
+                        border: '1px solid #475569',
+                        color: '#f8fafc',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedScanDetail) return;
+                        if (onDeleteScan) {
+                          await onDeleteScan(selectedScanDetail);
+                        }
+                        handleCloseModal();
+                      }}
+                      style={{
+                        padding: '0.5rem',
+                        fontWeight: 800,
+                        fontSize: '0.74rem',
+                        borderRadius: '8px',
+                        background: '#dc2626',
+                        border: '1px solid #b91c1c',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <Trash2 size={13} />
+                      <span>Confirm Delete</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

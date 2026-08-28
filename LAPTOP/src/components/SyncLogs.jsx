@@ -933,8 +933,6 @@ export default function SyncLogs({ attendanceLogs: propsLogs, onRefresh, onClear
                   >
                     <option value="1st Platoon">1st Platoon</option>
                     <option value="2nd Platoon">2nd Platoon</option>
-                    <option value="3rd Platoon">3rd Platoon</option>
-                    <option value="4th Platoon">4th Platoon</option>
                   </select>
                 </div>
               </div>

@@ -44,54 +44,46 @@ const DEFAULT_UNIT_STRUCTURE = [
     id: 'bn-1',
     name: '1st Battalion',
     shortCode: '1BN',
-    targetQuota: 592,
+    targetQuota: 296,
     companies: [
       {
         id: 'co-1-alpha',
         name: 'Alpha Company',
         shortCode: 'ALPHA',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-1-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-1-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-1-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-1-bravo',
         name: 'Bravo Company',
         shortCode: 'BRAVO',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-1-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-1-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-1-charlie',
         name: 'Charlie Company',
         shortCode: 'CHARLIE',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-1-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-1-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-1-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-1-delta',
         name: 'Delta Company',
         shortCode: 'DELTA',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-1-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-1-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-1-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       }
     ]
@@ -100,54 +92,46 @@ const DEFAULT_UNIT_STRUCTURE = [
     id: 'bn-2',
     name: '2nd Battalion',
     shortCode: '2BN',
-    targetQuota: 592,
+    targetQuota: 296,
     companies: [
       {
         id: 'co-2-alpha',
         name: 'Alpha Company',
         shortCode: 'ALPHA',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-2-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-2-a-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-2-a-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-2-bravo',
         name: 'Bravo Company',
         shortCode: 'BRAVO',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-2-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-2-b-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-2-b-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-2-charlie',
         name: 'Charlie Company',
         shortCode: 'CHARLIE',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-2-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-2-c-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-2-c-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       },
       {
         id: 'co-2-delta',
         name: 'Delta Company',
         shortCode: 'DELTA',
-        targetQuota: 148,
+        targetQuota: 74,
         platoons: [
           { id: 'pl-2-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 },
-          { id: 'pl-2-d-3', name: '3rd Platoon', shortCode: '3PLTN', targetQuota: 37 },
-          { id: 'pl-2-d-4', name: '4th Platoon', shortCode: '4PLTN', targetQuota: 37 }
+          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
       }
     ]

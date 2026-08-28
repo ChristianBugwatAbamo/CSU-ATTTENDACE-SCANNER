@@ -647,8 +647,6 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                   >
                     <option value="1st Platoon">1st Pltn</option>
                     <option value="2nd Platoon">2nd Pltn</option>
-                    <option value="3rd Platoon">3rd Pltn</option>
-                    <option value="4th Platoon">4th Pltn</option>
                   </select>
                 </div>
               </div>

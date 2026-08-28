@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import HeaderBar from './components/HeaderBar';
 import SessionSetup from './components/SessionSetup';
 import QRScanner from './components/QRScanner';
@@ -8,7 +8,8 @@ import MobileSettings from './components/MobileSettings';
 import MobileBottomNav from './components/MobileBottomNav';
 import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
-import { getOfflineQueue, saveOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp } from './services/storage';
+import ScannerLandingView from './components/ScannerLandingView';
+import { getOfflineQueue, saveOfflineScan, removeOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp } from './services/storage';
 
 const SESSION_SETUP_KEY = 'csu_rotc_mobile_session_setup';
 
@@ -26,6 +27,7 @@ export default function App() {
   const [adminIpState, setAdminIpState] = useState(getAdminIp());
   const [offlineQueue, setOfflineQueue] = useState([]);
   const [serverConnected, setServerConnected] = useState(false);
+  const [showLanding, setShowLanding] = useState(true);
 
   // Active Bottom Navigation Tab: 'scanner' | 'dashboard' | 'about' | 'settings'
   const [activeTab, setActiveTab] = useState('scanner');
@@ -65,6 +67,34 @@ export default function App() {
       localStorage.setItem(SESSION_SETUP_KEY, JSON.stringify(sessionSetup));
     } catch (_) {}
   }, [sessionSetup]);
+
+  // Track previous configuration key to trigger auto-flush on setup updates
+  const prevConfigRef = useRef(null);
+
+  // Auto-Reset Effect: Flush scanned queue and reset sync QR state on configuration changes
+  useEffect(() => {
+    const currentConfigKey = `${sessionSetup.battalion || ''}|${sessionSetup.company || ''}|${sessionSetup.platoon || ''}|${sessionSetup.scanMode || ''}|${sessionSetup.sessionDate || ''}|${sessionSetup.sessionTime || ''}`;
+
+    if (prevConfigRef.current === null) {
+      prevConfigRef.current = currentConfigKey;
+      return;
+    }
+
+    if (prevConfigRef.current !== currentConfigKey) {
+      prevConfigRef.current = currentConfigKey;
+      clearOfflineQueue().then(() => {
+        setOfflineQueue([]);
+        setIsBatchSyncOpen(false);
+      });
+    }
+  }, [
+    sessionSetup.battalion,
+    sessionSetup.company,
+    sessionSetup.platoon,
+    sessionSetup.scanMode,
+    sessionSetup.sessionDate,
+    sessionSetup.sessionTime
+  ]);
 
   // Load Offline Queue on mount
   useEffect(() => {
@@ -130,6 +160,13 @@ export default function App() {
     setOfflineQueue(updatedQueue);
   };
 
+  // Delete Specific Scan from Offline Queue
+  const handleDeleteScan = async (scanToDelete) => {
+    if (!scanToDelete) return;
+    const updatedQueue = await removeOfflineScan(scanToDelete);
+    setOfflineQueue(updatedQueue);
+  };
+
   // Handle Sync Success
   const handleSyncSuccess = async () => {
     await clearOfflineQueue();
@@ -165,6 +202,18 @@ export default function App() {
     setCameraFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
   };
 
+  if (showLanding) {
+    return (
+      <ScannerLandingView
+        onStartScanning={() => {
+          setShowLanding(false);
+          setActiveTab('scanner');
+        }}
+        isOffline={!serverConnected}
+      />
+    );
+  }
+
   return (
     <div className={`mobile-container ${activeTab === 'settings' || activeTab === 'about' ? 'settings-theme-bg' : ''}`}>
       <HeaderBar
@@ -174,6 +223,7 @@ export default function App() {
         isSessionActive={true}
         onToggleScanMode={handleToggleScanMode}
         onEditSetup={handleEditSetup}
+        onOpenLanding={() => setShowLanding(true)}
         serverConnected={serverConnected}
         queueCount={offlineQueue.length}
         onOpenBatchSync={() => setIsBatchSyncOpen(true)}
@@ -185,7 +235,17 @@ export default function App() {
         activeTab={activeTab}
       />
 
-      <main style={{ flexGrow: 1, paddingBottom: activeTab === 'settings' || activeTab === 'scanner' || activeTab === 'about' ? '0' : '80px', display: 'flex', flexDirection: 'column' }}>
+      <main
+        style={{
+          flexGrow: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: activeTab === 'scanner' ? 'center' : 'flex-start',
+          alignItems: activeTab === 'scanner' ? 'center' : 'stretch',
+          minHeight: 'calc(100vh - 120px)',
+          paddingBottom: activeTab === 'settings' || activeTab === 'about' ? '0' : '80px'
+        }}
+      >
         {/* Active 4-Tab Mobile Navigation Views */}
         {activeTab === 'scanner' && (
           <QRScanner
@@ -204,6 +264,7 @@ export default function App() {
             scanLogs={offlineQueue}
             sessionSetup={sessionSetup}
             onResetQueue={handleOpenResetModal}
+            onDeleteScan={handleDeleteScan}
           />
         )}
 

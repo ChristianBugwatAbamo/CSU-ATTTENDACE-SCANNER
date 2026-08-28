@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { QrCode, X, CheckCircle2, Smartphone, ShieldCheck, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
@@ -20,13 +20,31 @@ export default function SyncControl({
   const [internalQrModalOpen, setInternalQrModalOpen] = useState(false);
   const [activeBatchPayload, setActiveBatchPayload] = useState([]);
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
+  const [isConfirmingReset, setIsConfirmingReset] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState(null);
   const [currentChunk, setCurrentChunk] = useState(0);
+
+  // Automatically flush active batch QR state when session configuration updates
+  useEffect(() => {
+    setActiveBatchPayload([]);
+    setCurrentChunk(0);
+    setIsConfirmingReset(false);
+  }, [
+    sessionSetup?.battalion,
+    sessionSetup?.company,
+    sessionSetup?.platoon,
+    sessionSetup?.scanMode,
+    sessionSetup?.sessionDate,
+    sessionSetup?.sessionTime
+  ]);
 
   const isQrModalOpen = isOpen !== undefined ? isOpen : internalQrModalOpen;
   const setQrModalOpen = (val) => {
     if (onClose && !val) {
       onClose();
+    }
+    if (!val) {
+      setIsConfirmingReset(false);
     }
     setInternalQrModalOpen(val);
   };
@@ -57,6 +75,7 @@ export default function SyncControl({
       await onSyncSuccess();
     }
     setActiveBatchPayload([]);
+    setIsConfirmingReset(false);
     setQrModalOpen(false);
     setSyncStatusMsg({
       type: 'success',
@@ -299,57 +318,126 @@ export default function SyncControl({
               background: '#f8fafc',
               border: '1px solid var(--border-light)',
               borderRadius: '12px',
-              padding: '0.75rem',
+              padding: '0.8rem',
               marginBottom: '1.25rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: '4px',
+              gap: '0.45rem',
               fontSize: '0.8rem',
               textAlign: 'left'
             }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Duty Officer:</span>
-                <strong style={{ color: 'var(--rotc-green-dark)' }}>{dutyOfficer}</strong>
+              <div style={{ display: 'grid', gridTemplateColumns: '105px 1fr', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Duty Officer:</span>
+                <strong style={{ color: 'var(--rotc-green-dark)', wordBreak: 'break-word' }}>
+                  {dutyOfficer || sessionSetup?.dutyOfficer || 'Duty Officer'}
+                </strong>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Session:</span>
-                <strong>{sessionName}</strong>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '105px 1fr', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Scan Mode:</span>
+                <div style={{ display: 'flex' }}>
+                  <span style={{
+                    fontWeight: 800,
+                    fontSize: '0.74rem',
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    background: (sessionSetup?.scanMode || 'Time-In') === 'Time-Out' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    color: (sessionSetup?.scanMode || 'Time-In') === 'Time-Out' ? '#b45309' : '#047857',
+                    border: `1px solid ${(sessionSetup?.scanMode || 'Time-In') === 'Time-Out' ? '#f59e0b' : '#10b981'}`
+                  }}>
+                    {sessionSetup?.scanMode || 'Time-In'}
+                  </span>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #cbd5e1', paddingTop: '4px', marginTop: '2px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Total Cadets:</span>
-                <span style={{ background: 'var(--rotc-yellow-gold)', color: 'var(--text-dark)', padding: '2px 8px', borderRadius: '9999px', fontWeight: 800 }}>
-                  {effectiveQueue.length} Cadets ({totalChunks} QR Page{totalChunks > 1 ? 's' : ''})
-                </span>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '105px 1fr', alignItems: 'baseline', gap: '0.5rem' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Unit Hierarchy:</span>
+                <strong style={{ color: '#0f172a', wordBreak: 'break-word', lineHeight: 1.3 }}>
+                  {(sessionSetup?.battalion || '1st Battalion')} • {(sessionSetup?.company || 'Alpha Company')} • {(sessionSetup?.platoon || '1st Platoon')}
+                </strong>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '105px 1fr', alignItems: 'center', gap: '0.5rem', borderTop: '1px dashed #cbd5e1', paddingTop: '6px', marginTop: '2px' }}>
+                <span style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Total Cadets:</span>
+                <div style={{ display: 'flex' }}>
+                  <span style={{ background: 'var(--rotc-yellow-gold)', color: '#0f172a', padding: '2px 8px', borderRadius: '9999px', fontWeight: 800 }}>
+                    {effectiveQueue.length} Cadets ({totalChunks} QR Page{totalChunks > 1 ? 's' : ''})
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Modal Actions */}
             <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              <button
-                className="btn-sync-gold"
-                style={{ width: '100%', fontSize: '0.9rem', padding: '0.75rem' }}
-                onClick={handleClearAndFinish}
-              >
-                <ShieldCheck size={18} />
-                <span>MARK AS SCANNED & RESET QUEUE</span>
-              </button>
-
-              <button
-                type="button"
-                style={{
-                  background: 'transparent',
-                  border: '1px solid var(--border-light)',
-                  borderRadius: '10px',
-                  padding: '0.6rem',
-                  fontSize: '0.8rem',
-                  fontWeight: 600,
-                  color: 'var(--text-muted)',
-                  cursor: 'pointer'
-                }}
-                onClick={() => setQrModalOpen(false)}
-              >
-                Close QR Code
-              </button>
+              {!isConfirmingReset ? (
+                <button
+                  className="btn-sync-gold"
+                  style={{ width: '100%', fontSize: '0.9rem', padding: '0.75rem' }}
+                  onClick={() => setIsConfirmingReset(true)}
+                >
+                  <ShieldCheck size={18} />
+                  <span>MARK AS SCANNED & RESET QUEUE</span>
+                </button>
+              ) : (
+                <div style={{
+                  background: '#fef2f2',
+                  border: '1.5px solid #ef4444',
+                  borderRadius: '12px',
+                  padding: '0.85rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.55rem',
+                  textAlign: 'center',
+                  width: '100%',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.12)'
+                }}>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#991b1b', lineHeight: 1.3 }}>
+                    ⚠️ Confirm All {totalChunks} QR Page{totalChunks > 1 ? 's' : ''} Scanned?
+                  </div>
+                  <div style={{ fontSize: '0.74rem', color: '#b91c1c', fontWeight: 600 }}>
+                    This will permanently clear {effectiveQueue.length} cadet scan{effectiveQueue.length !== 1 ? 's' : ''} from this device.
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '3px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingReset(false)}
+                      style={{
+                        padding: '0.6rem',
+                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        borderRadius: '8px',
+                        background: '#e2e8f0',
+                        border: '1px solid #cbd5e1',
+                        color: '#0f172a',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearAndFinish}
+                      style={{
+                        padding: '0.6rem',
+                        fontWeight: 800,
+                        fontSize: '0.78rem',
+                        borderRadius: '8px',
+                        background: '#dc2626',
+                        border: '1px solid #b91c1c',
+                        color: '#ffffff',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      <span>Yes, Reset Queue</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -258,7 +258,7 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
           Field Session Settings
         </h1>
         <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', margin: '3px 0 0 0' }}>
-          Configure officer on duty, echelon hierarchy, and active scan mode
+          Configure officer on duty and active scan mode
         </p>
       </div>
 
@@ -477,8 +477,6 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
                   <option value="" disabled>-- Select PL --</option>
                   <option value="1st Platoon">1st Platoon</option>
                   <option value="2nd Platoon">2nd Platoon</option>
-                  <option value="3rd Platoon">3rd Platoon</option>
-                  <option value="4th Platoon">4th Platoon</option>
                 </select>
               </div>
             </div>

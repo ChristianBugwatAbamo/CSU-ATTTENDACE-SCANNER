@@ -5,6 +5,9 @@ export default function HeaderBar({
   sessionSetup,
   isSessionActive,
   onToggleScanMode,
+  onEditSetup,
+  onOpenLanding,
+  serverConnected,
   queueCount = 0,
   onOpenBatchSync,
   isTorchOn = false,
@@ -21,7 +24,12 @@ export default function HeaderBar({
       {/* Top Main Row */}
       <div className="header-main-row">
         {/* Left: Unit Seal Logo & Title */}
-        <div className="header-left">
+        <div
+          className="header-left"
+          onClick={onOpenLanding}
+          style={{ cursor: onOpenLanding ? 'pointer' : 'default' }}
+          title={onOpenLanding ? 'Return to Home / Landing Portal' : undefined}
+        >
           <img
             src="./rotc-seal-transparent.png"
             alt="CSU ROTC Logo"
@@ -30,18 +38,9 @@ export default function HeaderBar({
           />
           <div className="header-title">
             <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, letterSpacing: '0.3px', lineHeight: 1.15 }}>
-              CSU ROTC Unit Scanner
+              CSU ROTC UNIT
             </h1>
-            {isScannerTab && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '2px' }}>
-                {/* Item 3: Offline Storage Indicator (Only active on Scanner tab) */}
-                <div className="header-storage-pill" title="LocalStorage & IndexedDB Active • All records write locally">
-                  <Database size={10} />
-                  <span className="storage-live-dot"></span>
-                  <span>OFFLINE DB ACTIVE</span>
-                </div>
-              </div>
-            )}
+
           </div>
         </div>
 
@@ -75,15 +74,7 @@ export default function HeaderBar({
                 </button>
               )}
 
-              {/* Scan Mode Pill: IN / OUT */}
-              <button
-                type="button"
-                onClick={() => onToggleScanMode(sessionSetup?.scanMode === 'Time-In' ? 'Time-Out' : 'Time-In')}
-                className={`header-mode-toggle ${sessionSetup?.scanMode === 'Time-In' ? 'mode-in' : 'mode-out'}`}
-                title="Tap to switch Time-In / Time-Out"
-              >
-                {sessionSetup?.scanMode === 'Time-In' ? '🟢 IN' : '🟡 OUT'}
-              </button>
+
             </>
           )}
         </div>
