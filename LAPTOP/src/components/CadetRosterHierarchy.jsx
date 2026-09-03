@@ -3,7 +3,8 @@ import { supabase, getSupabaseClient } from '../supabaseClient';
 import {
   Users,
   RefreshCw,
-  Search
+  Search,
+  X
 } from 'lucide-react';
 import CadetRosterTable from './CadetRosterTable';
 import IncompleteCadetsWarning from './IncompleteCadetsWarning';
@@ -17,6 +18,7 @@ export default function CadetRosterHierarchy() {
   const [cadets, setCadets] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   // Cadet Edit Modal State
   const [selectedCadet, setSelectedCadet] = useState(null);
@@ -33,9 +35,11 @@ export default function CadetRosterHierarchy() {
       const client = getSupabaseClient() || supabase;
       let fetchedCadets = [];
 
-      const bnClean = (selectedBattalion || '').toLowerCase().includes('2') ? '2' : '1';
+      const bnMatch = (selectedBattalion || '').match(/(\d+)/);
+      const bnClean = bnMatch ? bnMatch[1] : (selectedBattalion || '').trim();
       const coClean = (selectedCompany || '').replace(/ COY| COMPANY/i, '').trim();
-      const plClean = (selectedPlatoon || '').toLowerCase().includes('2') ? '2' : '1';
+      const plMatch = (selectedPlatoon || '').match(/(\d+)/);
+      const plClean = plMatch ? plMatch[1] : (selectedPlatoon || '').trim();
 
       if (client) {
         const { data, error } = await client
@@ -167,24 +171,74 @@ export default function CadetRosterHierarchy() {
               </span>
             </div>
 
-            {/* Quick Filter Search */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '240px' }}>
-              <div style={{ position: 'relative', width: '100%' }}>
-                <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+            {/* Quick Filter Search - Emphasized & Prominent */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: '320px', maxWidth: '440px', flex: '1 1 320px', justifyContent: 'flex-end' }}>
+              <div style={{
+                position: 'relative',
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                backgroundColor: '#ffffff',
+                borderRadius: '0.625rem',
+                border: isSearchFocused ? '2px solid #059669' : '2px solid #94a3b8',
+                boxShadow: isSearchFocused
+                  ? '0 0 0 4px rgba(16, 185, 129, 0.18), 0 2px 6px rgba(0,0,0,0.08)'
+                  : '0 2px 5px rgba(15, 23, 42, 0.06)',
+                transition: 'all 0.2s ease-in-out'
+              }}>
+                <Search
+                  size={16}
+                  style={{
+                    position: 'absolute',
+                    left: '12px',
+                    color: isSearchFocused ? '#059669' : '#64748b',
+                    transition: 'color 0.2s ease'
+                  }}
+                />
                 <input
                   type="text"
                   placeholder="Search name, ID, contact, address..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setIsSearchFocused(true)}
+                  onBlur={() => setIsSearchFocused(false)}
                   style={{
                     width: '100%',
-                    padding: '0.45rem 0.6rem 0.45rem 2rem',
-                    fontSize: '0.8rem',
-                    border: '1px solid #cbd5e1',
-                    borderRadius: '0.375rem',
+                    padding: '0.6rem 2.2rem 0.6rem 2.4rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    color: '#0f172a',
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    borderRadius: '0.625rem',
                     outline: 'none'
                   }}
                 />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    style={{
+                      position: 'absolute',
+                      right: '10px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: '#e2e8f0',
+                      border: 'none',
+                      borderRadius: '50%',
+                      width: '18px',
+                      height: '18px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      color: '#475569'
+                    }}
+                    title="Clear search filter"
+                  >
+                    <X size={11} />
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -221,3 +275,5 @@ export default function CadetRosterHierarchy() {
     </div>
   );
 }
+
+export { CadetRosterHierarchy as CadetsRoster };

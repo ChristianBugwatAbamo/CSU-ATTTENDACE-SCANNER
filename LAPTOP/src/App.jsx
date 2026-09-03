@@ -11,25 +11,13 @@ import LoginPage from './components/LoginPage';
 import PublicLandingPage from './components/PublicLandingPage';
 import CadetRosterHierarchy from './components/CadetRosterHierarchy';
 import {
-  evaluateSingleScan,
-  reconcileCadetDailyStatus,
-  getActiveFormationCutoff,
-  recalculateAttendanceLogs,
-  normalizeBattalion,
-  normalizeCompany,
-  normalizePlatoon,
-  getScannedUnitEchelon
-} from './utils/attendanceStatus';
-import {
   fetchCadetsFromSupabase,
   fetchAttendanceFromSupabase,
-  bulkUpsertAttendanceToSupabase,
-  ingestBatchToSupabase,
   subscribeToAttendanceRealtime,
-  getSupabaseClient,
-  inferCadetFromId
+  getSupabaseClient
 } from './utils/supabaseClient';
-import { LogOut, ShieldCheck } from 'lucide-react';
+import { recalculateAttendanceLogs, getActiveFormationCutoff, reconcileCadetDailyStatus } from './utils/attendanceStatus';
+import { ShieldCheck } from 'lucide-react';
 
 export default function App() {
   const VALID_TABS = ['dashboard', 'analytics', 'cadets', 'history', 'idcards', 'scanner', 'settings'];
@@ -302,10 +290,11 @@ export default function App() {
 
   function toDateKey(dateInput) {
     if (!dateInput) return '';
-    if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-      return dateInput.slice(0, 10);
+    const str = String(dateInput).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return str;
     }
-    const d = new Date(dateInput);
+    const d = new Date(str);
     if (isNaN(d.getTime())) return '';
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -321,19 +310,20 @@ export default function App() {
       let updated = [...prev];
 
       enrichedRecords.forEach((rawRecord) => {
-        const scanDateStr = toDateKey(rawRecord.date || rawRecord.timestamp) || toDateKey(new Date());
-        const cid = String(rawRecord.cadetId || rawRecord.i || '').trim().toUpperCase();
+        const scanDateStr = toDateKey(rawRecord.date || rawRecord.scanned_at || rawRecord.scannedAt || rawRecord.timestamp) || toDateKey(new Date());
+        const cid = String(rawRecord.cadetId || rawRecord.cadet_id || rawRecord.i || '').trim().toUpperCase();
         if (!cid) return;
 
         const isTimeOut = rawRecord.scanMode === 'Time-Out' ||
+          rawRecord.scan_mode === 'Time-Out' ||
           rawRecord.m === 0 ||
           rawRecord.mode === 'TIME_OUT' ||
           (rawRecord.status && String(rawRecord.status).toUpperCase().includes('TIME-OUT'));
 
         // Look up cadet's existing record for the current date (single-row model)
         const existingIndex = updated.findIndex((l) => {
-          const dStr = toDateKey(l.date || l.timestamp);
-          const lCid = String(l.cadetId || l.i || '').trim().toUpperCase();
+          const dStr = toDateKey(l.date || l.scanned_at || l.scannedAt || l.timestamp);
+          const lCid = String(l.cadetId || l.cadet_id || l.i || '').trim().toUpperCase();
           return lCid === cid && dStr === scanDateStr;
         });
 
@@ -379,13 +369,15 @@ export default function App() {
             status: reconciled.finalDailyStatus,
             dutyOfficer: rawRecord.dutyOfficer || existing.dutyOfficer,
             sessionName: rawRecord.sessionName || existing.sessionName,
-            timestamp: updatedTimeIn || updatedTimeOut || rawRecord.timestamp,
+            timestamp: updatedTimeIn || updatedTimeOut || rawRecord.timestamp || rawRecord.scanned_at || new Date().toISOString(),
+            scanned_at: rawRecord.scanned_at || rawRecord.scannedAt || updatedTimeIn || updatedTimeOut || rawRecord.timestamp || new Date().toISOString(),
+            scannedAt: rawRecord.scanned_at || rawRecord.scannedAt || updatedTimeIn || updatedTimeOut || rawRecord.timestamp || new Date().toISOString(),
             receivedAt: new Date().toISOString()
           };
         } else {
           // INSERT new cadet row
-          const timeInTimestamp = !isTimeOut ? rawRecord.timestamp : null;
-          const timeOutTimestamp = isTimeOut ? rawRecord.timestamp : null;
+          const timeInTimestamp = !isTimeOut ? (rawRecord.timestamp || rawRecord.scanned_at) : null;
+          const timeOutTimestamp = isTimeOut ? (rawRecord.timestamp || rawRecord.scanned_at) : null;
 
           const timeInScan = timeInTimestamp ? { ...rawRecord, scanMode: 'Time-In', timestamp: timeInTimestamp } : null;
           const timeOutScan = timeOutTimestamp ? { ...rawRecord, scanMode: 'Time-Out', timestamp: timeOutTimestamp } : null;
@@ -416,7 +408,9 @@ export default function App() {
             status: reconciled.finalDailyStatus,
             dutyOfficer: rawRecord.dutyOfficer || rawRecord.duty_officer || 'Duty Officer',
             sessionName: rawRecord.sessionName || rawRecord.session_name || 'Formation Session',
-            timestamp: rawRecord.timestamp,
+            timestamp: rawRecord.timestamp || rawRecord.scanned_at || new Date().toISOString(),
+            scanned_at: rawRecord.scanned_at || rawRecord.scannedAt || rawRecord.timestamp || new Date().toISOString(),
+            scannedAt: rawRecord.scanned_at || rawRecord.scannedAt || rawRecord.timestamp || new Date().toISOString(),
             receivedAt: new Date().toISOString()
           };
 
@@ -565,7 +559,6 @@ export default function App() {
               cadets={cadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
-              onNavigateToSyncLogs={() => setActiveTab('synclogs')}
             />
           )}
 

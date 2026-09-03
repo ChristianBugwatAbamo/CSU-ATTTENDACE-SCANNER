@@ -66,6 +66,20 @@ export function parseTimeToMinutes(input) {
 }
 
 /**
+ * Formats ISO, Date instance, or unix epoch timestamp into human-readable 12-hour time (e.g. "07:15 AM").
+ */
+export function formatDisplayTime(timestamp) {
+  if (!timestamp) return null;
+  try {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+  } catch (_) {}
+  return String(timestamp);
+}
+
+/**
  * Parses timestamp into total minutes from midnight (0 - 1439).
  */
 export function parseTimestampMinutes(timestamp) {
@@ -125,8 +139,8 @@ export function getAttendanceStatus(log, cutoffTimeStr = '07:30') {
  * 5. Time-In No Scan   && Time-Out No Scan   => Time-In: ABSENT,  Time-Out: ABSENT,      Final: ABSENT
  */
 export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoffTimeStr = '07:30') {
-  const timeInRaw = typeof timeInScan === 'string' ? timeInScan : (timeInScan?.timestamp || timeInScan?.timeIn || timeInScan?.timeInTime || null);
-  const timeOutRaw = typeof timeOutScan === 'string' ? timeOutScan : (timeOutScan?.timestamp || timeOutScan?.timeOut || timeOutScan?.timeOutTime || null);
+  const timeInRaw = typeof timeInScan === 'string' ? timeInScan : (timeInScan?.timestamp || timeInScan?.timeIn || timeInScan?.time_in || timeInScan?.scanned_at || timeInScan?.scannedAt || timeInScan?.timeInTime || null);
+  const timeOutRaw = typeof timeOutScan === 'string' ? timeOutScan : (timeOutScan?.timestamp || timeOutScan?.timeOut || timeOutScan?.time_out || timeOutScan?.scanned_at || timeOutScan?.scannedAt || timeOutScan?.timeOutTime || null);
 
   const hasTimeIn = Boolean(timeInRaw && String(timeInRaw).trim());
   const hasTimeOut = Boolean(timeOutRaw && String(timeOutRaw).trim());
@@ -153,16 +167,16 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
 
   if (hasTimeIn && hasTimeOut) {
     if (isLate) {
-      finalDailyStatus = 'LATE';
+      finalDailyStatus = 'LATE (Complete)';
       finalStatusClass = 'status-late-complete';
     } else {
-      finalDailyStatus = 'PRESENT';
+      finalDailyStatus = 'PRESENT (Complete)';
       finalStatusClass = 'status-present-complete';
     }
   } else if (hasTimeIn && !hasTimeOut) {
     if (isLate) {
-      finalDailyStatus = 'LATE / NO TIME-OUT';
-      finalStatusClass = 'status-incomplete-late';
+      finalDailyStatus = 'LATE (No Time-Out)';
+      finalStatusClass = 'status-late-notimeout';
     } else {
       finalDailyStatus = 'NO TIME-OUT';
       finalStatusClass = 'status-incomplete';
@@ -176,26 +190,17 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
     finalStatusClass = 'status-absent';
   }
 
-  const timeInScanObj = hasTimeIn ? (typeof timeInScan === 'object' && timeInScan !== null ? timeInScan : { timestamp: timeInRaw, scanMode: 'Time-In' }) : null;
-  const timeOutScanObj = hasTimeOut ? (typeof timeOutScan === 'object' && timeOutScan !== null ? timeOutScan : { timestamp: timeOutRaw, scanMode: 'Time-Out' }) : null;
-
   return {
-    cadetId: cadet?.id || cadet?.cadetId || timeInScan?.cadetId || timeOutScan?.cadetId || 'UNKNOWN',
-    name: cadet?.name || timeInScan?.name || timeOutScan?.name || 'Cadet',
-    rank: cadet?.rank || timeInScan?.rank || timeOutScan?.rank || 'Cadet',
-    battalion: cadet?.battalion || timeInScan?.battalion || timeOutScan?.battalion || '1st Battalion',
-    company: cadet?.company || timeInScan?.company || timeOutScan?.company || 'Alpha Company',
-    platoon: cadet?.platoon || timeInScan?.platoon || timeOutScan?.platoon || '1st Platoon',
-    dutyOfficer: timeInScan?.dutyOfficer || timeOutScan?.dutyOfficer || 'N/A',
-    sessionName: timeInScan?.sessionName || timeOutScan?.sessionName || 'Field Session',
+    ...cadet,
+    cadetId: cadet.id || cadet.cadetId || cadet.cadet_id,
     hasTimeIn,
     hasTimeOut,
-    timeInScan: timeInScanObj,
-    timeOutScan: timeOutScanObj,
-    timeIn: timeInRaw,
-    timeOut: timeOutRaw,
-    timeInTime: timeInRaw,
-    timeOutTime: timeOutRaw,
+    timeInScan,
+    timeOutScan,
+    dutyOfficer: timeInScan?.dutyOfficer || timeInScan?.duty_officer || timeOutScan?.dutyOfficer || timeOutScan?.duty_officer || cadet.dutyOfficer || cadet.duty_officer || null,
+    sessionName: timeInScan?.sessionName || timeInScan?.session_name || timeOutScan?.sessionName || timeOutScan?.session_name || cadet.sessionName || cadet.session_name || null,
+    timeInDisplay: formatDisplayTime(timeInRaw),
+    timeOutDisplay: formatDisplayTime(timeOutRaw),
     timeInStatus,
     timeOutStatus,
     finalDailyStatus,
@@ -207,21 +212,57 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
 }
 
 /**
+ * Normalizes any date input (YYYY-MM-DD string, Date instance, or ISO timestamp)
+ * into a canonical YYYY-MM-DD date key in Philippine Standard Time (Asia/Manila, UTC+8).
+ * Avoids any timezone shift caused by Date.toDateString() or UTC midnight parsing.
+ */
+export function normalizeDateKey(dateInput) {
+  if (!dateInput) return null;
+  if (typeof dateInput === 'string') {
+    const trimmed = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const match = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match && !trimmed.includes('Z') && !trimmed.includes('+')) {
+      return match[1];
+    }
+  }
+
+  try {
+    const d = typeof dateInput === 'string' || typeof dateInput === 'number' ? new Date(dateInput) : dateInput;
+    if (d instanceof Date && !isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(d);
+    }
+  } catch (_) {}
+
+  return String(dateInput).slice(0, 10);
+}
+
+/**
  * Reconciles the full cadet roster against attendance scan records.
  * Returns the enriched list of reconciled cadets + attendance summary breakdown.
  */
 export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sessionDate = null, cutoffTimeStr = '07:30') {
-  const targetDateStr = sessionDate ? new Date(sessionDate).toDateString() : null;
+  const targetDateKey = sessionDate ? normalizeDateKey(sessionDate) : null;
 
   // Filter logs by date if a specific session date is provided
-  const relevantLogs = targetDateStr
-    ? attendanceLogs.filter(l => l.timestamp && new Date(l.timestamp).toDateString() === targetDateStr)
+  const relevantLogs = targetDateKey
+    ? attendanceLogs.filter(l => {
+        const rawDate = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in;
+        return rawDate && normalizeDateKey(rawDate) === targetDateKey;
+      })
     : attendanceLogs;
 
   // Group logs by normalized Cadet ID
   const cadetLogsMap = new Map();
   relevantLogs.forEach(log => {
-    const id = String(log.cadetId || log.id || '').trim().toUpperCase();
+    const id = String(log.cadetId || log.cadet_id || log.id || log.i || '').trim().toUpperCase();
     if (!id) return;
     if (!cadetLogsMap.has(id)) {
       cadetLogsMap.set(id, { timeIn: null, timeOut: null, all: [] });
@@ -230,25 +271,25 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
     group.all.push(log);
 
     // Check if the log itself carries explicit timeIn / timeOut properties (merged row model)
-    const rawTimeIn = log.timeIn || log.timeInTime || (log.timeInScan ? log.timeInScan.timestamp : null);
-    const rawTimeOut = log.timeOut || log.timeOutTime || (log.timeOutScan ? log.timeOutScan.timestamp : null);
+    const rawTimeIn = log.timeIn || log.time_in || log.timeInTime || (log.timeInScan ? (log.timeInScan.timestamp || log.timeInScan.time_in || log.timeInScan.scanned_at) : null) || (log.scanMode === 'Time-In' || log.scan_mode === 'Time-In' ? (log.timestamp || log.scanned_at || log.scannedAt) : null);
+    const rawTimeOut = log.timeOut || log.time_out || log.timeOutTime || (log.timeOutScan ? (log.timeOutScan.timestamp || log.timeOutScan.time_out || log.timeOutScan.scanned_at) : null) || (log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out' ? (log.timestamp || log.scanned_at || log.scannedAt) : null);
 
     if (rawTimeIn) {
       const timeInObj = log.timeInScan || { ...log, scanMode: 'Time-In', timestamp: rawTimeIn };
-      if (!group.timeIn || (rawTimeIn && new Date(rawTimeIn) < new Date(group.timeIn.timestamp || group.timeIn.timeIn))) {
+      if (!group.timeIn || (rawTimeIn && new Date(rawTimeIn) < new Date(group.timeIn.timestamp || group.timeIn.timeIn || group.timeIn.time_in))) {
         group.timeIn = timeInObj;
       }
     }
     if (rawTimeOut) {
       const timeOutObj = log.timeOutScan || { ...log, scanMode: 'Time-Out', timestamp: rawTimeOut };
-      if (!group.timeOut || (rawTimeOut && new Date(rawTimeOut) > new Date(group.timeOut.timestamp || group.timeOut.timeOut))) {
+      if (!group.timeOut || (rawTimeOut && new Date(rawTimeOut) > new Date(group.timeOut.timestamp || group.timeOut.timeOut || group.timeOut.time_out))) {
         group.timeOut = timeOutObj;
       }
     }
 
     // If neither explicit property is set, fall back to scanMode / status
     if (!rawTimeIn && !rawTimeOut) {
-      const mode = log.scanMode || (String(log.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
+      const mode = log.scanMode || log.scan_mode || (String(log.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
       if (mode === 'Time-Out') {
         if (!group.timeOut || (log.timestamp && new Date(log.timestamp) > new Date(group.timeOut.timestamp))) {
           group.timeOut = log;
@@ -266,7 +307,7 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
 
   // 1. Process all registered cadets from master roster
   cadets.forEach(cadet => {
-    const id = String(cadet.id || cadet.cadetId || '').trim().toUpperCase();
+    const id = String(cadet.id || cadet.cadetId || cadet.cadet_id || '').trim().toUpperCase();
     processedIds.add(id);
     const logsGroup = cadetLogsMap.get(id);
     const timeInScan = logsGroup ? logsGroup.timeIn : null;
@@ -281,8 +322,8 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
     if (!processedIds.has(id)) {
       const sample = logsGroup.timeIn || logsGroup.timeOut || logsGroup.all[0];
       const virtualCadet = {
-        id: sample.cadetId || id,
-        name: sample.name || sample.cadetName || 'Unregistered Cadet',
+        id: sample.cadetId || sample.cadet_id || id,
+        name: sample.name || sample.cadetName || 'Cadet ' + id,
         rank: sample.rank || 'Cadet',
         battalion: sample.battalion || '1st Battalion',
         company: sample.company || 'Alpha Company',

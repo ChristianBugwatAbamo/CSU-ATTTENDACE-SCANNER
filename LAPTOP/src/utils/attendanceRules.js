@@ -31,12 +31,13 @@ export const ATTENDANCE_POLICY_RULES = [
 
 export function toDateKey(dateInput) {
   if (!dateInput) return '';
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-    return dateInput.slice(0, 10);
+  const str = String(dateInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
   }
-  let d = new Date(dateInput);
+  let d = new Date(str);
   if (isNaN(d.getTime()) && typeof dateInput === 'string') {
-    d = new Date(`${dateInput} ${new Date().getFullYear()}`);
+    d = new Date(`${str} ${new Date().getFullYear()}`);
   }
   if (isNaN(d.getTime())) return '';
   const year = d.getFullYear();
@@ -193,4 +194,57 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
     status,
     reason
   };
+}
+
+/**
+ * Sorts evaluated cadets in ascending order based on:
+ * 1. Calculated Absences (0, 1, 2, 3...)
+ * 2. Alert Status Tiers (Warning Threshold [1] -> Official Drop [2])
+ * 3. Tardiness (Total Interval Lates) (0, 1, 2...)
+ * 4. Missing Scans count (0, 1, 2...)
+ * 5. Stable Alphabetical Tie-breaker by Cadet Name / ID
+ */
+export function sortCadetAlertsAscending(cadets = []) {
+  if (!Array.isArray(cadets)) return [];
+
+  const getStatusRank = (c) => {
+    const s = String(c?.status || '').toUpperCase();
+    if (s === 'DROPPED') return 2; // Higher alert tier (Official Drop)
+    if (s === 'WARNING') return 1; // Lower alert tier (Warning Threshold)
+    return 0; // Good / lowest tier
+  };
+
+  return [...cadets].sort((a, b) => {
+    // 1. Calculated Absences (Ascending: 0, 1, 2, 3...)
+    const absencesA = Number(a.totalAbsences ?? a.unexcusedAbsences ?? 0);
+    const absencesB = Number(b.totalAbsences ?? b.unexcusedAbsences ?? 0);
+    if (absencesA !== absencesB) {
+      return absencesA - absencesB;
+    }
+
+    // 2. Alert Status Tiers (Ascending: Warning Threshold [1] -> Official Drop [2])
+    const statusDiff = getStatusRank(a) - getStatusRank(b);
+    if (statusDiff !== 0) {
+      return statusDiff;
+    }
+
+    // 3. Tardiness / Total Interval Lates (Ascending: 0, 1, 2...)
+    const latesA = Number(a.totalIntervalLates ?? 0);
+    const latesB = Number(b.totalIntervalLates ?? 0);
+    if (latesA !== latesB) {
+      return latesA - latesB;
+    }
+
+    // 4. Missing Scans (No Time-In / Time-Out) (Ascending: 0, 1, 2...)
+    const missingA = Number(a.totalIntervalMissingScans ?? 0);
+    const missingB = Number(b.totalIntervalMissingScans ?? 0);
+    if (missingA !== missingB) {
+      return missingA - missingB;
+    }
+
+    // 5. Stable Tie-breaker: Alphabetical by Cadet Name / ID
+    const nameA = String(a.name || a.id || '').toUpperCase();
+    const nameB = String(b.name || b.id || '').toUpperCase();
+    return nameA.localeCompare(nameB);
+  });
 }

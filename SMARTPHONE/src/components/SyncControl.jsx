@@ -19,6 +19,7 @@ export default function SyncControl({
 }) {
   const [internalQrModalOpen, setInternalQrModalOpen] = useState(false);
   const [activeBatchPayload, setActiveBatchPayload] = useState([]);
+  const [activeBatchId, setActiveBatchId] = useState(() => 'b_' + Date.now().toString(36));
   const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
   const [isConfirmingReset, setIsConfirmingReset] = useState(false);
   const [syncStatusMsg, setSyncStatusMsg] = useState(null);
@@ -60,14 +61,11 @@ export default function SyncControl({
       setTimeout(() => setSyncStatusMsg(null), 3000);
       return;
     }
+    const newBatchId = 'b_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    setActiveBatchId(newBatchId);
     setActiveBatchPayload(queueToSync);
     setCurrentChunk(0);
     setQrModalOpen(true);
-
-    // Clear local queue for the next scanning session
-    if (onSyncSuccess) {
-      await onSyncSuccess();
-    }
   };
 
   const handleClearAndFinish = async () => {
@@ -122,6 +120,7 @@ export default function SyncControl({
 
     return JSON.stringify({
       T: 'RBS',                      // ROTC Batch Sync
+      b: activeBatchId || ('b_' + totalChunks + '_' + effectiveQueue.length), // Unique Batch Session ID to prevent multi-page QR stitching collision
       d: officer,                    // Duty Officer (Full string, e.g. "C/LT COL CHARIS S JALIQUE (ROTC) 1CL")
       m: modeKey,                    // Active Scan Mode ('IN' or 'OUT')
       bn: bn,                        // Battalion
@@ -129,7 +128,13 @@ export default function SyncControl({
       pl: pl,                        // Platoon
       p: chunkIndex + 1,             // Current Page (1-indexed)
       n: totalChunks,                // Total Pages
-      r: slice.map(item => String(item.cadetId || item.id || item.i || '').trim())
+      r: slice.map(item => {
+        const cid = String(item.cadetId || item.id || item.i || '').trim();
+        // Preserve exact scanning timestamp as epoch seconds (compact 10 digits)
+        const rawTime = item.timestamp || item.scanned_at || item.scannedAt;
+        const epochSec = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : Math.floor(Date.now() / 1000);
+        return [cid, epochSec];
+      })
     });
   };
 

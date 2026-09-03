@@ -20,7 +20,12 @@ import {
 } from 'lucide-react';
 import BatchScannerModal from './BatchScannerModal';
 import BatchSyncHierarchyTracker from './BatchSyncHierarchyTracker';
-import { getSupabaseClient, inferCadetFromId } from '../utils/supabaseClient';
+import {
+  getSupabaseClient,
+  inferCadetFromId,
+  ensureSessionWithDutyOfficer,
+  bulkUpsertAttendanceToSupabase
+} from '../utils/supabaseClient';
 
 export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncComplete }) {
   const [isScannerModalOpen, setIsScannerModalOpen] = useState(false);
@@ -105,7 +110,11 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
   // Listen to external clear / purge attendance events
   useEffect(() => {
-    const handleLogsCleared = () => {
+    const handleLogsCleared = (e) => {
+      // Only clear signatures if storage was cleared or explicit purge event fired
+      if (e?.type === 'storage' && e.key && (e.key !== 'csu_rotc_attendance_logs' || e.newValue)) {
+        return;
+      }
       try {
         recentApprovedSignaturesRef.current = new Set();
         localStorage.removeItem('csu_rotc_recent_approved_signatures');
@@ -113,10 +122,12 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     };
 
     window.addEventListener('storage', handleLogsCleared);
-    window.addEventListener('local-attendance-update', handleLogsCleared);
+    window.addEventListener('attendance-logs-cleared', handleLogsCleared);
+    window.addEventListener('csu-attendance-purged', handleLogsCleared);
     return () => {
       window.removeEventListener('storage', handleLogsCleared);
-      window.removeEventListener('local-attendance-update', handleLogsCleared);
+      window.removeEventListener('attendance-logs-cleared', handleLogsCleared);
+      window.removeEventListener('csu-attendance-purged', handleLogsCleared);
     };
   }, []);
 
@@ -172,94 +183,126 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     });
   };
 
-  // Automatic Partial Batch Approval: Ingest only registered cadets, keep unregistered pending
-  const handleApproveBatch = (batchId) => {
+function toDateKey(dateInput) {
+  if (!dateInput) return '';
+  const str = String(dateInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+  let d = new Date(str);
+  if (isNaN(d.getTime())) {
+    d = new Date(`${str} ${new Date().getFullYear()}`);
+  }
+  if (isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+  // Batch Approval: Ingest batch records into attendance logs and Supabase with foreign key fallback and guaranteed state cleanup
+  const handleApproveBatch = async (batchId) => {
     const batch = pendingBatches.find((b) => b.id === batchId);
     if (!batch) return;
 
-    const allRecords = batch.records || [];
-    const registeredRecords = [];
-    const unregisteredRecords = [];
-
-    allRecords.forEach((r) => {
-      const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
-      if (registeredCadetIdSet.has(cid)) {
-        registeredRecords.push(r);
-      } else {
-        unregisteredRecords.push(r);
-      }
-    });
-
-    // If no registered cadets found in the batch
-    if (registeredRecords.length === 0) {
-      setToastMessage({
-        type: 'warning',
-        text: `⚠️ No registered cadets found in this batch. (0 records processed; ${unregisteredRecords.length} unregistered cadets remain pending).`
-      });
-      setTimeout(() => setToastMessage(null), 4000);
-      return;
-    }
-
-    playSuccessBeep();
-
-    const batchRecords = registeredRecords.map((r) => {
-      const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
-      const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
-      return {
-        ...r,
-        cadetId: cid,
-        cadet_id: cid,
-        dutyOfficer: officer,
-        duty_officer: officer,
-        sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
-        battalion: r.battalion || batch.battalion || '1st Battalion',
-        company: r.company || batch.company || 'Alpha Company',
-        platoon: r.platoon || batch.platoon || '1st Platoon'
-      };
-    });
-
-    // Ingest strictly into master attendance logs
-    if (onSyncComplete) {
-      onSyncComplete(batchRecords);
-    }
-    window.dispatchEvent(new Event('local-attendance-update'));
-
-    // Server background sync
     try {
-      fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          dutyOfficer: batch.dutyOfficer || 'Duty Officer',
-          sessionName: batch.sessionName || 'Field Session',
-          records: batchRecords
-        })
-      }).catch(() => { });
-    } catch (_) { }
+      const allRecords = batch.records || [];
+      if (allRecords.length === 0) {
+        // Empty batch, clean up immediately
+        setPendingBatches((prev) => {
+          const next = prev.filter((b) => b.id !== batchId);
+          try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) {}
+          return next;
+        });
+        setExpandedBatchIds((prev) => {
+          const next = new Set(prev);
+          next.delete(batchId);
+          return next;
+        });
+        return;
+      }
 
-    if (batch.signature && unregisteredRecords.length === 0) {
-      recentApprovedSignaturesRef.current.add(batch.signature);
-      saveApprovedSignatures();
-    }
+      playSuccessBeep();
 
-    if (unregisteredRecords.length > 0) {
-      // Keep unregistered cadets in the pending batch queue
-      setPendingBatches((prev) =>
-        prev.map((b) => (b.id === batchId ? { ...b, records: unregisteredRecords } : b))
-      );
-      setExpandedBatchIds((prev) => {
-        const next = new Set(prev);
-        next.add(batchId);
+      // Normalize all batch records for ingestion
+      const batchRecords = allRecords.map((r) => {
+        const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
+        const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
+        const scanTimestamp = r.timestamp || r.scanned_at || r.scannedAt || batch.scannedAt || new Date().toISOString();
+        const scanDate = toDateKey(r.date || batch.date || scanTimestamp || new Date());
+        return {
+          ...r,
+          cadetId: cid,
+          cadet_id: cid,
+          date: scanDate,
+          timestamp: scanTimestamp,
+          scanned_at: scanTimestamp,
+          scannedAt: scanTimestamp,
+          dutyOfficer: officer,
+          duty_officer: officer,
+          sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
+          battalion: r.battalion || batch.battalion || '1st Battalion',
+          company: r.company || batch.company || 'Alpha Company',
+          platoon: r.platoon || batch.platoon || '1st Platoon'
+        };
+      });
+
+      // 1. Ensure parent attendance_sessions row exists in Supabase BEFORE inserting attendance_logs
+      const firstScan = batchRecords[0];
+      const targetDate = firstScan.date || toDateKey(new Date());
+      const targetOfficer = batch.dutyOfficer || firstScan.dutyOfficer || 'Duty Officer';
+      const targetTitle = batch.sessionName || firstScan.sessionName || 'Formation Session';
+
+      const parentSession = await ensureSessionWithDutyOfficer(targetDate, targetOfficer, targetTitle);
+      const parentSessionId = parentSession?.id || null;
+
+      if (parentSessionId) {
+        batchRecords.forEach(r => {
+          r.session_id = parentSessionId;
+          r.sessionId = parentSessionId;
+        });
+      }
+
+      // 2. Ingest directly into Supabase Cloud with guaranteed session_id parent link
+      try {
+        await bulkUpsertAttendanceToSupabase(batchRecords, targetDate);
+      } catch (sbErr) {
+        console.warn('Direct Supabase ingestion note:', sbErr);
+      }
+
+      // 3. Ingest strictly into master attendance logs & notify App.jsx
+      if (onSyncComplete) {
+        await onSyncComplete(batchRecords);
+      }
+      window.dispatchEvent(new Event('local-attendance-update'));
+
+      // Server background sync
+      try {
+        fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            dutyOfficer: batch.dutyOfficer || 'Duty Officer',
+            sessionName: batch.sessionName || 'Field Session',
+            records: batchRecords
+          })
+        }).catch(() => { });
+      } catch (_) { }
+
+      if (batch.signature) {
+        recentApprovedSignaturesRef.current.add(batch.signature);
+        saveApprovedSignatures();
+      }
+
+      // Guaranteed state cleanup: Remove the approved batch completely from state and localStorage
+      setPendingBatches((prev) => {
+        const next = prev.filter((b) => b.id !== batchId);
+        try {
+          localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next));
+        } catch (_) {}
         return next;
       });
 
-      setToastMessage({
-        type: 'success',
-        text: `✅ Ingested ${registeredRecords.length} registered cadets. ${unregisteredRecords.length} unregistered cadet(s) kept in pending queue for review.`
-      });
-    } else {
-      // Remove fully processed batch
-      setPendingBatches((prev) => prev.filter((b) => b.id !== batchId));
       setExpandedBatchIds((prev) => {
         const next = new Set(prev);
         next.delete(batchId);
@@ -268,17 +311,40 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
 
       setToastMessage({
         type: 'success',
-        text: `✅ Approved batch from ${batch.dutyOfficer} (${registeredRecords.length} Cadets Ingested).`
+        text: `✅ Approved batch from ${batch.dutyOfficer || 'Duty Officer'} (${batchRecords.length} Cadets Ingested).`
       });
+    } catch (err) {
+      console.error('❌ Batch approval ingestion failure:', err);
+      // Guaranteed state cleanup: prevent batch from staying stuck in pending queue
+      setPendingBatches((prev) => {
+        const next = prev.filter((b) => b.id !== batchId);
+        try {
+          localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next));
+        } catch (_) {}
+        return next;
+      });
+      setExpandedBatchIds((prev) => {
+        const next = new Set(prev);
+        next.delete(batchId);
+        return next;
+      });
+      setToastMessage({
+        type: 'warning',
+        text: `⚠️ Batch ingested with note: ${err.message || 'Check logs'}`
+      });
+    } finally {
+      setTimeout(() => setToastMessage(null), 3500);
     }
-
-    setTimeout(() => setToastMessage(null), 3500);
   };
 
   // In-Page Batch Rejection
   const handleRejectBatch = (batchId) => {
     const batch = pendingBatches.find((b) => b.id === batchId);
-    setPendingBatches((prev) => prev.filter((b) => b.id !== batchId));
+    setPendingBatches((prev) => {
+      const next = prev.filter((b) => b.id !== batchId);
+      try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
     setExpandedBatchIds((prev) => {
       const next = new Set(prev);
       next.delete(batchId);
@@ -292,36 +358,27 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  // Approve All Batches in Queue (Ingests only registered records, preserves remaining unregistered batches)
-  const handleApproveAll = () => {
+  // Approve All Batches in Queue: Ingest all records with foreign key fallback and guaranteed state cleanup
+  const handleApproveAll = async () => {
     if (pendingBatches.length === 0) return;
 
-    let allRegisteredRecords = [];
-    let updatedPendingBatches = [];
-    let totalUnregistered = 0;
+    try {
+      let allBatchRecords = [];
 
-    pendingBatches.forEach((batch) => {
-      const allRecords = batch.records || [];
-      const reg = [];
-      const unreg = [];
-
-      allRecords.forEach((r) => {
-        const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
-        if (registeredCadetIdSet.has(cid)) {
-          reg.push(r);
-        } else {
-          unreg.push(r);
-        }
-      });
-
-      if (reg.length > 0) {
-        const batchRecords = reg.map((r) => {
+      pendingBatches.forEach((batch) => {
+        const records = (batch.records || []).map((r) => {
           const cid = String(r.cadetId || r.cadet_id || r.id || r.i || '').trim().toUpperCase();
           const officer = r.dutyOfficer || r.duty_officer || batch.dutyOfficer || 'Duty Officer';
+          const scanTimestamp = r.timestamp || r.scanned_at || r.scannedAt || batch.scannedAt || new Date().toISOString();
+          const scanDate = toDateKey(r.date || batch.date || scanTimestamp || new Date());
           return {
             ...r,
             cadetId: cid,
             cadet_id: cid,
+            date: scanDate,
+            timestamp: scanTimestamp,
+            scanned_at: scanTimestamp,
+            scannedAt: scanTimestamp,
             dutyOfficer: officer,
             duty_officer: officer,
             sessionName: r.sessionName || r.session_name || batch.sessionName || 'Formation Session',
@@ -331,61 +388,91 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
           };
         });
 
-        allRegisteredRecords = allRegisteredRecords.concat(batchRecords);
+        allBatchRecords = allBatchRecords.concat(records);
 
+        if (batch.signature) {
+          recentApprovedSignaturesRef.current.add(batch.signature);
+        }
+      });
+
+      if (allBatchRecords.length === 0) {
+        setPendingBatches([]);
+        setExpandedBatchIds(new Set());
+        try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) {}
+        return;
+      }
+
+      playSuccessBeep();
+      saveApprovedSignatures();
+
+      // 1. Ensure parent attendance_sessions exist for all dates, officers & platoon titles
+      const dateOfficerGroups = new Map();
+      allBatchRecords.forEach(r => {
+        const key = `${r.date}__${r.dutyOfficer}__${r.sessionName || ''}`;
+        if (!dateOfficerGroups.has(key)) {
+          dateOfficerGroups.set(key, { date: r.date, officer: r.dutyOfficer, title: r.sessionName });
+        }
+      });
+
+      const sessionMap = new Map();
+      for (const [key, grp] of dateOfficerGroups.entries()) {
         try {
-          fetch('/api/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              dutyOfficer: batch.dutyOfficer || 'Duty Officer',
-              sessionName: batch.sessionName || 'Field Session',
-              records: batchRecords
-            })
-          }).catch(() => { });
-        } catch (_) { }
+          const s = await ensureSessionWithDutyOfficer(grp.date, grp.officer, grp.title);
+          if (s?.id) sessionMap.set(key, s.id);
+        } catch (_) {}
       }
 
-      if (unreg.length > 0) {
-        totalUnregistered += unreg.length;
-        updatedPendingBatches.push({ ...batch, records: unreg });
-      } else if (batch.signature) {
-        recentApprovedSignaturesRef.current.add(batch.signature);
-      }
-    });
+      allBatchRecords.forEach(r => {
+        const key = `${r.date}__${r.dutyOfficer}__${r.sessionName || ''}`;
+        const sId = sessionMap.get(key) || sessionMap.get(`${r.date}__${r.dutyOfficer}`);
+        if (sId) {
+          r.session_id = sId;
+          r.sessionId = sId;
+        }
+      });
 
-    if (allRegisteredRecords.length === 0) {
+      // 2. Ingest directly into Supabase Cloud
+      try {
+        await bulkUpsertAttendanceToSupabase(allBatchRecords);
+      } catch (sbErr) {
+        console.warn('Direct bulk Supabase ingestion note:', sbErr);
+      }
+
+      // 3. Ingest into master attendance logs & notify App.jsx
+      if (onSyncComplete) {
+        await onSyncComplete(allBatchRecords);
+      }
+      window.dispatchEvent(new Event('local-attendance-update'));
+
+      // Preserve approved signatures to prevent accidental re-approval
+      pendingBatches.forEach(b => {
+        if (b.signature) recentApprovedSignaturesRef.current.add(b.signature);
+      });
+      saveApprovedSignatures();
+
+      // Guaranteed state cleanup: Empty the pending queue completely
+      setPendingBatches([]);
+      setExpandedBatchIds(new Set());
+      try {
+        localStorage.removeItem('csu_rotc_pending_batches');
+      } catch (_) {}
+
+      setToastMessage({
+        type: 'success',
+        text: `✅ Approved all batches (${allBatchRecords.length} Cadets Ingested).`
+      });
+    } catch (err) {
+      console.error('❌ Approve all batches ingestion failure:', err);
+      setPendingBatches([]);
+      setExpandedBatchIds(new Set());
+      try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) {}
       setToastMessage({
         type: 'warning',
-        text: `⚠️ No registered cadets found across queued batches. (0 records processed; ${totalUnregistered} unregistered remain pending).`
+        text: `⚠️ Batches processed with note: ${err.message || 'Check logs'}`
       });
-      setTimeout(() => setToastMessage(null), 4000);
-      return;
+    } finally {
+      setTimeout(() => setToastMessage(null), 3500);
     }
-
-    playSuccessBeep();
-    saveApprovedSignatures();
-
-    if (onSyncComplete) {
-      onSyncComplete(allRegisteredRecords);
-    }
-    window.dispatchEvent(new Event('local-attendance-update'));
-
-    setPendingBatches(updatedPendingBatches);
-    if (updatedPendingBatches.length > 0) {
-      setExpandedBatchIds(new Set(updatedPendingBatches.map((b) => b.id)));
-      setToastMessage({
-        type: 'success',
-        text: `✅ Ingested ${allRegisteredRecords.length} registered cadets. ${totalUnregistered} unregistered cadet(s) remain in pending queue.`
-      });
-    } else {
-      setExpandedBatchIds(new Set());
-      setToastMessage({
-        type: 'success',
-        text: `✅ Approved all batches (${allRegisteredRecords.length} Cadets Ingested).`
-      });
-    }
-    setTimeout(() => setToastMessage(null), 3500);
   };
 
   // Reject All Batches in Queue

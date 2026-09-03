@@ -61,66 +61,34 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
             </li>
           );
         })}
+
+        {/* Styled Log Out Item directly below Settings in Main Navigation */}
+        {onLogout && (
+          <li
+            className="sidebar-item sidebar-logout-item"
+            onClick={onLogout}
+            style={{
+              marginTop: '0.25rem',
+              color: '#f87171',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+              e.currentTarget.style.color = '#fca5a5';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+              e.currentTarget.style.color = '#f87171';
+            }}
+          >
+            <LogOut size={20} color="#f87171" />
+            <span style={{ fontWeight: 600 }}>Log Out</span>
+          </li>
+        )}
       </ul>
 
       <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '1rem 1.15rem' }}>
-        {/* Admin Session Indicator */}
-        {currentUser && (
-          <div
-            style={{
-              padding: '7px 10px',
-              borderRadius: '8px',
-              background: 'rgba(255, 255, 255, 0.07)',
-              border: '1px solid rgba(229, 169, 0, 0.25)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '4px',
-              gap: '8px'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-              <div
-                style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  background: '#34d399',
-                  flexShrink: 0,
-                  boxShadow: '0 0 5px rgba(52, 211, 153, 0.6)'
-                }}
-              />
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#e2e8f0', letterSpacing: '0.3px' }}>
-                Admin HQ Session Active
-              </span>
-            </div>
-
-            {onLogout && (
-              <button
-                type="button"
-                onClick={onLogout}
-                style={{
-                  background: 'rgba(239, 68, 68, 0.18)',
-                  border: '1px solid rgba(239, 68, 68, 0.35)',
-                  color: '#fca5a5',
-                  padding: '3px 8px',
-                  borderRadius: '5px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '0.7rem',
-                  fontWeight: 700,
-                  whiteSpace: 'nowrap'
-                }}
-                title="Sign Out of Command Center"
-              >
-                <LogOut size={11} /> Logout
-              </button>
-            )}
-          </div>
-        )}
-
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.78rem' }}>
           <span><strong>Local Server:</strong></span>
           <span className="server-status-pill" style={{ margin: 0, padding: '2px 8px', fontSize: '0.68rem' }}>

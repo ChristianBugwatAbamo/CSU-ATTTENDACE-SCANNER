@@ -5,6 +5,28 @@ const ADMIN_IP_KEY = 'csu_rotc_admin_ip';
 const SESSION_NAME_KEY = 'csu_rotc_session_name';
 const DUTY_OFFICER_KEY = 'csu_rotc_duty_officer';
 
+/**
+ * Returns YYYY-MM-DD date formatted according to Philippine Standard Time (PST UTC+8).
+ * Prevents UTC midnight boundary shifts (e.g. 12:00 AM - 7:59 AM evaluating as yesterday).
+ */
+export function getLocalPhilippineDate(d = new Date()) {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Manila',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(d instanceof Date ? d : new Date(d));
+  } catch (_) {
+    const dateObj = d instanceof Date ? d : new Date(d);
+    if (isNaN(dateObj.getTime())) return '';
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+}
+
 // Get unsynced scans queue
 export async function getOfflineQueue() {
   try {

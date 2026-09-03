@@ -1,5 +1,7 @@
 import React from 'react';
 import { Users } from 'lucide-react';
+import { DEFAULT_UNIT_STRUCTURE } from './AdminSettings';
+import { fetchSettingsFromSupabase } from '../utils/supabaseClient';
 
 export default function DashboardUnitHierarchy({
   selectedBattalion,
@@ -8,10 +10,120 @@ export default function DashboardUnitHierarchy({
   setSelectedCompany,
   selectedPlatoon,
   setSelectedPlatoon,
+  unitStructure: propUnitStructure
 }) {
-  const battalions = ['1ST BATTALION', '2ND BATTALION'];
-  const companies = ['ALPHA COY', 'BRAVO COY', 'CHARLIE COY', 'DELTA COY'];
-  const platoons = ['1ST PLATOON', '2ND PLATOON'];
+  const [localStructure, setLocalStructure] = React.useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.unit_structure || parsed.unitStructure || null;
+      }
+    } catch (_) {}
+    return null;
+  });
+
+  // Sync with cloud settings on mount
+  React.useEffect(() => {
+    let isMounted = true;
+    async function syncCloudStructure() {
+      try {
+        const sb = await fetchSettingsFromSupabase();
+        if (sb && isMounted) {
+          const struct = sb.unit_structure || sb.unitStructure;
+          if (Array.isArray(struct) && struct.length > 0) {
+            setLocalStructure(struct);
+          }
+        }
+      } catch (_) {}
+    }
+    syncCloudStructure();
+    return () => { isMounted = false; };
+  }, []);
+
+  React.useEffect(() => {
+    const handleUpdate = (e) => {
+      const s = e?.detail || (() => {
+        try { return JSON.parse(localStorage.getItem('csu_rotc_admin_settings') || '{}'); } catch (_) { return {}; }
+      })();
+      const struct = s.unit_structure || s.unitStructure;
+      if (struct && Array.isArray(struct) && struct.length > 0) {
+        setLocalStructure(struct);
+      }
+    };
+    window.addEventListener('csu_settings_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('csu_settings_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
+  const activeStructure = (propUnitStructure && Array.isArray(propUnitStructure) && propUnitStructure.length > 0)
+    ? propUnitStructure
+    : (localStructure && Array.isArray(localStructure) && localStructure.length > 0 ? localStructure : DEFAULT_UNIT_STRUCTURE);
+
+  const battalions = activeStructure.map(b => (b.name || '').toUpperCase());
+
+  // Clean normalizer for robust string matching
+  const cleanStr = (s) => String(s || '').trim().toUpperCase().replace(/ COMPANY$| COY$/i, '');
+
+  // Robust matcher for Battalion identifier or name
+  const matchBattalion = (b, sel) => {
+    if (!b || !sel) return false;
+    const s = String(sel).trim().toUpperCase();
+    const bId = String(b.id || '').trim().toUpperCase();
+    const bName = String(b.name || '').trim().toUpperCase();
+    const bCode = String(b.shortCode || '').trim().toUpperCase();
+
+    if (bId === s || bName === s || bCode === s) return true;
+
+    const getBnNum = (str) => {
+      const m = String(str).match(/(?:^|\D)(\d+)(?:ST|ND|RD|TH)?(?:\s*BN|\s*BATTALION)?(?:\D|$)/i);
+      return m ? m[1] : null;
+    };
+
+    const selNum = getBnNum(s);
+    const bNum = getBnNum(bName) || getBnNum(bId) || getBnNum(bCode);
+    if (selNum && bNum && selNum === bNum) return true;
+
+    return bName.includes(s) || s.includes(bName);
+  };
+
+  // 1. Resolve active battalion object strictly from selection
+  let activeBnObj = null;
+  if (selectedBattalion) {
+    activeBnObj = activeStructure.find((b) => matchBattalion(b, selectedBattalion));
+  }
+
+  // Fallback to first battalion for company selector list if none selected
+  const displayBnObj = activeBnObj || activeStructure[0] || null;
+
+  // 2. Dynamically extract companies from the currently active Battalion (NO STATIC FALLBACK)
+  const companies = (displayBnObj && Array.isArray(displayBnObj.companies) && displayBnObj.companies.length > 0)
+    ? displayBnObj.companies.map(c => (c.name || c).toUpperCase().replace(/ COMPANY$/i, ' COY'))
+    : [];
+
+  // 3. Resolve active company from displayBnObj.companies
+  let activeCoObj = null;
+  if (selectedCompany && displayBnObj && Array.isArray(displayBnObj.companies)) {
+    const normCo = cleanStr(selectedCompany);
+    activeCoObj = displayBnObj.companies.find(
+      (c) => String(c.id || '').toUpperCase() === String(selectedCompany).toUpperCase() ||
+             cleanStr(c.name) === normCo
+    );
+  }
+
+  // If no company selected or if selectedCompany does not exist in this battalion,
+  // default to the first company of the active battalion so platoons can be displayed
+  if (!activeCoObj && displayBnObj && Array.isArray(displayBnObj.companies) && displayBnObj.companies.length > 0) {
+    activeCoObj = displayBnObj.companies[0];
+  }
+
+  // 4. Dynamically extract platoons from the active company (NO STATIC FALLBACK)
+  const platoons = (activeCoObj && Array.isArray(activeCoObj.platoons) && activeCoObj.platoons.length > 0)
+    ? activeCoObj.platoons.map(p => (p.name || p).toUpperCase())
+    : [];
 
   const handleBattalionClick = (b) => {
     if (selectedBattalion === b) {
@@ -20,6 +132,9 @@ export default function DashboardUnitHierarchy({
       if (setSelectedPlatoon) setSelectedPlatoon(null);
     } else {
       setSelectedBattalion(b);
+      // Immediately reset selected company and platoon when changing battalions
+      if (setSelectedCompany) setSelectedCompany(null);
+      if (setSelectedPlatoon) setSelectedPlatoon(null);
     }
   };
 
@@ -29,6 +144,7 @@ export default function DashboardUnitHierarchy({
       if (setSelectedPlatoon) setSelectedPlatoon(null);
     } else {
       setSelectedCompany(c);
+      if (setSelectedPlatoon) setSelectedPlatoon(null);
     }
   };
 

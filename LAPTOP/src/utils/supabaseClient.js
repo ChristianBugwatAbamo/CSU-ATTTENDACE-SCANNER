@@ -128,8 +128,12 @@ export const MAX_PLATOON_CAPACITY = 37;
  * Normalizes battalion, company, and platoon to standardized query parts.
  */
 export function normalizePlatoonParts(battalion, company, platoon) {
-  const bn = String(battalion || '').toLowerCase().includes('2') ? '2nd Battalion' : '1st Battalion';
-  const bnCode = String(battalion || '').toLowerCase().includes('2') ? '2' : '1';
+  const bnStr = String(battalion || '').trim();
+  const bnMatch = bnStr.match(/(\d+)/);
+  const bnNum = bnMatch ? bnMatch[1] : null;
+  const suffix = bnNum === '1' ? 'st' : bnNum === '2' ? 'nd' : bnNum === '3' ? 'rd' : 'th';
+  const bn = bnNum ? `${bnNum}${suffix} Battalion` : (bnStr || '1st Battalion');
+  const bnCode = bnNum || '1';
 
   let co = 'Alpha Company';
   const coStr = String(company || '').trim().toUpperCase();
@@ -281,6 +285,14 @@ export async function updateCadetInSupabase(id, updates) {
   if (!client) return null;
 
   try {
+    // If reassigning platoon or echelon, enforce Platoon Capacity Guardrail (37 max)
+    if (updates.platoon || updates.company || updates.battalion) {
+      const validation = await validatePlatoonCapacity({ id, ...updates }, client);
+      if (!validation.valid) {
+        throw new Error(validation.error);
+      }
+    }
+
     const { data, error } = await client
       .from('cadets')
       .update(updates)
@@ -334,6 +346,7 @@ export async function fetchAttendanceFromSupabase() {
     if (error) throw error;
     return (data || []).map(l => ({
       cadetId: l.cadet_id,
+      cadet_id: l.cadet_id,
       name: l.name,
       rank: l.rank,
       battalion: l.battalion,
@@ -343,7 +356,11 @@ export async function fetchAttendanceFromSupabase() {
       date: l.date,
       timeIn: l.time_in,
       timeOut: l.time_out,
+      time_in: l.time_in,
+      time_out: l.time_out,
       timestamp: l.timestamp || l.time_in || l.time_out,
+      scanned_at: l.scanned_at || l.timestamp || l.time_in || l.time_out,
+      scannedAt: l.scanned_at || l.timestamp || l.time_in || l.time_out,
       scanMode: l.scan_mode,
       timeInStatus: l.time_in_status,
       timeOutStatus: l.time_out_status,
@@ -385,9 +402,14 @@ export async function fetchAttendanceSessionsFromSupabase() {
     if (error) throw error;
     return (data || []).map(s => ({
       dateKey: s.session_date,
+      sessionDate: s.session_date,
+      session_date: s.session_date,
       sessionName: s.session_name,
+      session_name: s.session_name,
       dutyOfficer: s.duty_officer,
+      duty_officer: s.duty_officer,
       cutoffTime: s.cutoff_time,
+      cutoff_time: s.cutoff_time,
       totalScanned: s.total_scanned || 0
     }));
   } catch (err) {
@@ -398,10 +420,11 @@ export async function fetchAttendanceSessionsFromSupabase() {
 
 function toDateKey(dateInput) {
   if (!dateInput) return '';
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-    return dateInput.slice(0, 10);
+  const str = String(dateInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
   }
-  const d = new Date(dateInput);
+  const d = new Date(str);
   if (isNaN(d.getTime())) return '';
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -480,7 +503,10 @@ export function inferCadetFromId(cadetId, partial = {}) {
     const coDigit = cid.charAt(5);
     const plDigit = cid.charAt(6);
 
-    if (!bn) bn = bnDigit === '2' ? '2nd Battalion' : '1st Battalion';
+    if (!bn) {
+      const suffix = bnDigit === '1' ? 'st' : bnDigit === '2' ? 'nd' : bnDigit === '3' ? 'rd' : 'th';
+      bn = `${bnDigit}${suffix} Battalion`;
+    }
     if (!co) {
       if (coDigit === '1') co = 'Alpha Company';
       else if (coDigit === '2') co = 'Bravo Company';
@@ -585,13 +611,15 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
       ? scan.duty_officer
       : (scan.dutyOfficer && scan.dutyOfficer !== 'Duty Officer' ? scan.dutyOfficer : detectedDutyOfficer) || 'HQ Duty Officer';
 
-    const groupKey = `${scanDate}__${scanDutyOfficer}`;
+    const scanPlatoon = scan.platoon || scan.pl || '';
+    const scanSessionTitle = scan.session_name || scan.sessionName || (scanPlatoon ? `Formation (${scanPlatoon})` : '');
+    const groupKey = `${scanDate}__${scanDutyOfficer}__${scanSessionTitle}`;
 
     if (!sessionGroupsMap.has(groupKey)) {
       const dObj = new Date(`${scanDate}T12:00:00`);
       const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
-      const platoonName = scan.platoon || scan.pl || null;
-      const defaultTitle = scan.session_name || scan.sessionName || (platoonName && platoonName !== '1st Platoon'
+      const platoonName = scanPlatoon || null;
+      const defaultTitle = scanSessionTitle || (platoonName && platoonName !== '1st Platoon'
         ? `Saturday Formation (${platoonName}) - ${scanDate}`
         : (dayOfWeek === 6 ? `Saturday Formation & Muster (${scanDate})` : `Daily Training & Drill Session (${scanDate})`));
 
@@ -610,6 +638,33 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
       uniqueCadetsMap.set(cid, inferCadetFromId(cid, scan));
     }
   });
+
+  // 1b. Foreign Key Fallback: Ensure all unique cadets exist in public.cadets before inserting attendance logs
+  if (uniqueCadetsMap.size > 0) {
+    try {
+      const cadetsToProvision = Array.from(uniqueCadetsMap.values()).map(c => ({
+        id: c.id,
+        name: c.name || `Cadet ${c.id}`,
+        rank: c.rank || 'Cadet',
+        battalion: c.battalion || '1st Battalion',
+        company: c.company || 'Alpha Company',
+        platoon: c.platoon || '1st Platoon',
+        type: c.type || 'Basic Cadet',
+        designation: c.designation || 'N/A',
+        is_active: true
+      }));
+
+      const { error: cadetProvisionError } = await client
+        .from('cadets')
+        .upsert(cadetsToProvision, { onConflict: 'id', ignoreDuplicates: true });
+
+      if (cadetProvisionError) {
+        console.warn('Note on auto-provisioning cadets before attendance ingestion:', cadetProvisionError);
+      }
+    } catch (err) {
+      console.warn('Cadet foreign key provision check error:', err);
+    }
+  }
 
   // Provision distinct session rows per Duty Officer + Date
   const sessionIdMap = new Map();
@@ -649,7 +704,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
   }
 
   // 3. Process each scan: execute targeted UPDATE for TIME-OUT on existing rows, or UPSERT for new
-  const updatePromises = [];
+  const updateEntries = [];
   const upsertRows = [];
 
   for (const rawScan of batchScans) {
@@ -659,8 +714,10 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
     const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
     const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'HQ Duty Officer';
-    const groupKey = `${scanDate}__${effectiveDutyOfficer}`;
-    const targetSessionId = sessionIdMap.get(groupKey) || null;
+    const scanPlatoon = rawScan.platoon || rawScan.pl || '';
+    const scanSessionTitle = rawScan.session_name || rawScan.sessionName || (scanPlatoon ? `Formation (${scanPlatoon})` : '');
+    const groupKey = `${scanDate}__${effectiveDutyOfficer}__${scanSessionTitle}`;
+    const targetSessionId = sessionIdMap.get(groupKey) || sessionIdMap.get(`${scanDate}__${effectiveDutyOfficer}`) || Array.from(sessionIdMap.values())[0] || null;
     const key = `${cid}__${scanDate}`;
     const existing = existingDbMap.get(key);
     const cadetMeta = uniqueCadetsMap.get(cid) || inferCadetFromId(cid, rawScan);
@@ -699,7 +756,12 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           .eq('cadet_id', cid)
           .eq('date', scanDate);
 
-        updatePromises.push(updatePromise);
+        updateEntries.push({
+          promise: updatePromise,
+          cid,
+          scanDate,
+          updatePayload
+        });
       } else {
         // No existing time-in: Insert new record with NO TIME-IN
         const insertRow = {
@@ -754,7 +816,12 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           .eq('cadet_id', cid)
           .eq('date', scanDate);
 
-        updatePromises.push(updatePromise);
+        updateEntries.push({
+          promise: updatePromise,
+          cid,
+          scanDate,
+          updatePayload
+        });
       } else {
         const insertRow = {
           cadet_id: cid,
@@ -783,32 +850,27 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     }
   }
 
-  // Execute all direct updates in parallel
-  if (updatePromises.length > 0) {
-    const updateResults = await Promise.allSettled(updatePromises);
+  // Execute all direct updates in parallel with 1:1 cadet-to-promise alignment
+  if (updateEntries.length > 0) {
+    const updateResults = await Promise.allSettled(updateEntries.map(e => e.promise));
     for (let idx = 0; idx < updateResults.length; idx++) {
       const res = updateResults[idx];
+      const entry = updateEntries[idx];
       const err = res.status === 'rejected' ? res.reason : res.value?.error;
-      if (err && (err.code === 'PGRST204' || String(err.message).includes('session_id'))) {
-        // Fallback retry without session_id
-        const rawScan = batchScans[idx] || {};
-        const cid = String(rawScan.cadet_id || rawScan.cadetId || rawScan.id || rawScan.i || '').trim().toUpperCase();
-        const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
-        const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
-        const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'HQ Duty Officer';
-
+      if (err && (err.code === 'PGRST204' || err.code === '23503' || String(err.message).includes('session_id') || String(err.details || '').includes('attendance_sessions'))) {
+        // Fallback retry without session_id targeting the EXACT matched cadet and update payload
         try {
+          const fallbackPayload = { ...entry.updatePayload };
+          delete fallbackPayload.session_id;
+
           await client
             .from('attendance_logs')
-            .update({
-              time_out: scanTimestamp,
-              time_out_status: 'PRESENT',
-              duty_officer: effectiveDutyOfficer,
-              updated_at: new Date().toISOString()
-            })
-            .eq('cadet_id', cid)
-            .eq('date', scanDate);
-        } catch (_) {}
+            .update(fallbackPayload)
+            .eq('cadet_id', entry.cid)
+            .eq('date', entry.scanDate);
+        } catch (retryErr) {
+          console.warn('Direct update retry error:', retryErr);
+        }
       } else if (err) {
         console.error('Direct attendance log update error:', err);
       }
@@ -824,7 +886,9 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
         .from('attendance_logs')
         .upsert(chunk, { onConflict: 'cadet_id,date' });
 
-      if (error && (error.code === 'PGRST204' || String(error.message).includes('session_id'))) {
+      // Fallback 1: If session_id foreign key constraint fails, strip session_id and retry
+      if (error && (error.code === 'PGRST204' || error.code === '23503' || String(error.message).includes('session_id') || String(error.details || '').includes('attendance_sessions'))) {
+        console.warn('Retrying attendance logs upsert without session_id foreign key constraint...');
         const strippedChunk = chunk.map(row => {
           const { session_id, ...rest } = row;
           return rest;
@@ -835,8 +899,30 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
         error = retryResult.error;
       }
 
+      // Fallback 2: If cadet_id foreign key constraint fails, auto-insert missing cadets and retry
+      if (error && (error.code === '23503' || String(error.message).includes('cadets') || String(error.details || '').includes('cadets'))) {
+        console.warn('Cadet foreign key violation. Auto-provisioning missing cadets and retrying...');
+        try {
+          const missingCadets = chunk.map(r => ({
+            id: r.cadet_id,
+            name: r.name || `Cadet ${r.cadet_id}`,
+            rank: r.rank || 'Cadet',
+            battalion: r.battalion || '1st Battalion',
+            company: r.company || 'Alpha Company',
+            platoon: r.platoon || '1st Platoon',
+            type: 'Basic Cadet',
+            is_active: true
+          }));
+          await client.from('cadets').upsert(missingCadets, { onConflict: 'id' });
+          const retryResult2 = await client
+            .from('attendance_logs')
+            .upsert(chunk, { onConflict: 'cadet_id,date' });
+          error = retryResult2.error;
+        } catch (_) {}
+      }
+
       if (error) {
-        console.error('Batch attendance upsert error:', error);
+        console.error('❌ Batch attendance upsert error:', error);
       }
     }
   }
@@ -885,7 +971,9 @@ export async function bulkUpsertAttendanceToSupabase(logs, sessionDate = null) {
  */
 export async function ensureSessionWithDutyOfficer(sessionDate, officerName = null, sessionTitle = null, cutoffTime = null) {
   const client = getSupabaseClient();
-  if (!client || !sessionDate) return null;
+  if (!client) return null;
+
+  const cleanDate = toDateKey(sessionDate) || toDateKey(new Date());
 
   let dutyOfficerName = officerName && officerName !== 'Duty Officer' && String(officerName).trim() !== ''
     ? String(officerName).trim()
@@ -908,58 +996,80 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
   const activeCutoff = cutoffTime || getActiveFormationCutoff() || '07:30';
 
   try {
-    // 1. Check if a session already exists for this (session_date, duty_officer)
-    const { data: existingSession, error: fetchErr } = await client
-      .from('attendance_sessions')
-      .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, present_count, late_count')
-      .eq('session_date', sessionDate)
-      .eq('duty_officer', finalOfficer)
-      .maybeSingle();
+    // 1. Check if a session already exists for this exact sessionTitle on cleanDate
+    if (sessionTitle && sessionTitle !== 'Formation Session' && sessionTitle !== 'Field Session') {
+      const { data: titleSession } = await client
+        .from('attendance_sessions')
+        .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, present_count, late_count')
+        .eq('session_date', cleanDate)
+        .eq('session_name', sessionTitle)
+        .maybeSingle();
 
-    if (existingSession) {
-      return existingSession;
+      if (titleSession && titleSession.id) {
+        return titleSession;
+      }
     }
 
-    // 2. Insert new distinct session row for this Duty Officer + Date
-    const dObj = new Date(`${sessionDate}T12:00:00`);
+    // 2. Check if a session exists for this (session_date, duty_officer)
+    if (finalOfficer && finalOfficer !== 'HQ Duty Officer' && finalOfficer !== 'Duty Officer') {
+      const { data: officerSession } = await client
+        .from('attendance_sessions')
+        .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, present_count, late_count')
+        .eq('session_date', cleanDate)
+        .eq('duty_officer', finalOfficer)
+        .maybeSingle();
+
+      if (officerSession && officerSession.id) {
+        return officerSession;
+      }
+    }
+
+    // 3. Insert new distinct session row for this Duty Officer + Platoon Title + Date
+    const dObj = new Date(`${cleanDate}T12:00:00`);
     const dayOfWeek = isNaN(dObj.getTime()) ? 6 : dObj.getDay();
     const defaultTitle = sessionTitle || (dayOfWeek === 6
-      ? `Saturday Formation & Muster (${sessionDate})`
-      : `Daily Training & Drill Session (${sessionDate})`);
+      ? `Saturday Formation & Muster (${cleanDate})`
+      : `Daily Training & Drill Session (${cleanDate})`);
 
     const { data: newSession, error: insertErr } = await client
       .from('attendance_sessions')
       .insert({
-        session_date: sessionDate,
+        session_date: cleanDate,
         session_name: defaultTitle,
         duty_officer: finalOfficer,
         cutoff_time: activeCutoff
       })
-      .select()
+      .select('id, session_date, session_name, duty_officer, cutoff_time')
       .maybeSingle();
 
-    if (!insertErr && newSession) {
+    if (!insertErr && newSession && newSession.id) {
       return newSession;
     }
 
-    // Fallback if unique constraint on session_date still exists in DB before migration SQL
+    // 4. Fallback ONLY if insert failed (e.g. database has a single session per date unique constraint)
     if (insertErr) {
+      console.warn('attendance_sessions insert note, fetching existing session for date:', insertErr.message);
       const { data: fallbackSession } = await client
         .from('attendance_sessions')
         .select('id, session_date, session_name, duty_officer, cutoff_time')
-        .eq('session_date', sessionDate)
+        .eq('session_date', cleanDate)
+        .limit(1)
         .maybeSingle();
 
-      if (fallbackSession) {
-        await client
-          .from('attendance_sessions')
-          .update({ duty_officer: finalOfficer, updated_at: new Date().toISOString() })
-          .eq('id', fallbackSession.id);
+      if (fallbackSession && fallbackSession.id) {
         return fallbackSession;
       }
     }
 
-    return null;
+    // 5. Ultimate fallback: grab the most recent session from the table to satisfy Foreign Key
+    const { data: latestSession } = await client
+      .from('attendance_sessions')
+      .select('id, session_date, session_name, duty_officer, cutoff_time')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return latestSession || null;
   } catch (err) {
     console.error('ensureSessionWithDutyOfficer error:', err);
     return null;
@@ -1159,33 +1269,43 @@ export async function saveSettingsToSupabase(settings) {
       } catch (_) {}
     }
 
+    const activeUnitStructure = settings.unit_structure || settings.unitStructure || null;
+    const officerName = settings.commanding_officer || settings.commandingOfficer || 'COL CHARIS J ABAMO INF (GSC) PA';
+    const officerTitle = settings.commanding_officer_title || settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit';
+    const signatoryName = settings.id_signatory_name || settings.signatoryName || officerName;
+    const signatoryTitle = settings.id_signatory_title || settings.signatoryDesignation || officerTitle;
+
     const fullPayload = {
       // Tab 1: Muster & Unit
       formation_cutoff_time: cutoff,
       formation_tardy_grace: Number(settings.formationTardyGrace ?? 15),
       cadet_quota_per_platoon: Number(settings.cadetQuotaPerPlatoon ?? 37),
       total_unit_target: Number(settings.totalUnitTarget || settings.unitTargetCapacity || 1184),
-      unit_structure: settings.unitStructure || null,
+      unit_structure: activeUnitStructure,
 
       // Tab 2: Unit Branding
-      unit_name: settings.unitName || '1501st CDC ROTC Unit',
-      commanding_officer: settings.commandingOfficer || 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
-      commanding_officer_title: settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit',
-      parent_command: settings.parentCommand || '15th RCDG, ARESCOM, Philippine Army',
-      host_institution: settings.hostInstitution || 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
-      rotc_seal_url: settings.rotcSealUrl || '/rotc-seal-transparent.png',
-      university_logo_url: settings.universityLogoUrl || '/csu-logo.png',
+      unit_name: settings.unitName || settings.unit_name || '1501st CDC ROTC Unit',
+      commanding_officer: officerName,
+      commanding_officer_title: officerTitle,
+      parent_command: settings.parentCommand || settings.parent_command || '15th RCDG, ARESCOM, Philippine Army',
+      host_institution: settings.hostInstitution || settings.host_institution || 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
+      rotc_seal_url: settings.rotcSealUrl || settings.rotc_seal_url || '/rotc-seal-transparent.png',
+      university_logo_url: settings.universityLogoUrl || settings.university_logo_url || '/csu-logo.png',
 
       // Tab 3: Exports & Letters
       excel_export_path: settings.exportDirectory || settings.excelExportPath || './desktop_excel_reports/',
       letterhead_config: letterheadObj,
+      letterhead_html: settings.letterheadHtml || settings.letterhead_html || letterheadObj?.contentHtml || null,
+      office_symbol: settings.officeSymbol || settings.office_symbol || letterheadObj?.officeSymbol || 'CSUROTCU1',
+      left_logo_url: settings.leftLogoUrl || settings.left_logo_url || letterheadObj?.leftLogoUrl || '/csug-logo.png',
+      right_logo_url: settings.rightLogoUrl || settings.right_logo_url || letterheadObj?.rightLogoUrl || '/rotc-seal-transparent.png',
       auto_backup_enabled: settings.autoBackupEnabled !== false,
 
       // Tab 4: ID Printing
-      id_signatory_name: settings.signatoryName || settings.idSignatoryName || settings.commandingOfficer || 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
-      id_signatory_title: settings.signatoryDesignation || settings.idSignatoryTitle || settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit',
-      id_signature_url: settings.signatureImageUrl || settings.idSignatureUrl || '',
-      id_card_orientation: settings.cardOrientation || settings.idCardOrientation || 'vertical',
+      id_signatory_name: signatoryName, // 👈 Explicitly synced with commanding_officer
+      id_signatory_title: signatoryTitle, // 👈 Explicitly synced with commanding_officer_title
+      id_signature_url: settings.signatureImageUrl || settings.idSignatureUrl || settings.id_signature_url || '',
+      id_card_orientation: settings.cardOrientation || settings.idCardOrientation || settings.id_card_orientation || 'vertical',
       officer_ranks_list: settings.officerRanks || settings.officer_ranks_list || null,
       officer_roles_list: settings.officerDesignations || settings.officer_roles_list || null,
 
@@ -1201,6 +1321,7 @@ export async function saveSettingsToSupabase(settings) {
 
     let savedData = null;
     let targetId = (existingRows && existingRows.length > 0) ? existingRows[0].id : null;
+    const missingColumns = [];
 
     // Resilient upsert: attempts full payload first; if any column not yet migrated in DB, strips missing columns and retries
     let attemptPayload = { ...fullPayload };
@@ -1231,6 +1352,10 @@ export async function saveSettingsToSupabase(settings) {
       if (res.error.code === 'PGRST204' || res.error.message?.includes('column')) {
         const match = res.error.message.match(/'([^']+)' column/);
         if (match && match[1] && match[1] in attemptPayload) {
+          missingColumns.push(match[1]);
+          if (match[1] === 'unit_structure') {
+            console.warn("⚠️ Column 'unit_structure' does not exist yet in Supabase 'system_settings'. Run the migration in Supabase SQL editor: ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS unit_structure JSONB DEFAULT '[]'::jsonb;");
+          }
           delete attemptPayload[match[1]];
           continue;
         }
@@ -1246,9 +1371,116 @@ export async function saveSettingsToSupabase(settings) {
       .update({ cutoff_time: cutoff, updated_at: new Date().toISOString() })
       .eq('session_date', today);
 
-    return savedData;
+    return {
+      ...(savedData || {}),
+      _missingColumns: missingColumns,
+      missingUnitStructure: missingColumns.includes('unit_structure')
+    };
   } catch (err) {
     console.error('Supabase save settings error:', err);
     return null;
   }
+}
+
+/**
+ * Reassign cadets and their attendance logs when an echelon (e.g. company) is deleted or modified.
+ * Updates Supabase tables (`cadets` & `attendance_logs`) and local caches (`csu_rotc_cadets_roster` & `csu_rotc_master_attendance`).
+ */
+export async function reassignCadetsCompany(battalionName, oldCompanyName, targetCompanyName) {
+  const client = getSupabaseClient();
+  let supabaseUpdatedCount = 0;
+  let supabaseError = null;
+
+  const bnClean = (battalionName || '').trim();
+  const oldCoClean = (oldCompanyName || '').trim();
+  const targetCoClean = (targetCompanyName || '').trim();
+
+  // 1. Update Supabase
+  if (client && bnClean && oldCoClean && targetCoClean) {
+    try {
+      // Update cadets table
+      const { data: cadetData, error: cadetErr } = await client
+        .from('cadets')
+        .update({ company: targetCoClean, updated_at: new Date().toISOString() })
+        .ilike('battalion', `%${bnClean}%`)
+        .ilike('company', `%${oldCoClean.replace(/ COMPANY$| COY$/i, '')}%`)
+        .select();
+
+      if (cadetErr) {
+        console.warn('Supabase cadet reassignment warning:', cadetErr);
+        supabaseError = cadetErr;
+      } else {
+        supabaseUpdatedCount = cadetData?.length || 0;
+      }
+
+      // Update attendance_logs table
+      const { error: logErr } = await client
+        .from('attendance_logs')
+        .update({ company: targetCoClean })
+        .ilike('battalion', `%${bnClean}%`)
+        .ilike('company', `%${oldCoClean.replace(/ COMPANY$| COY$/i, '')}%`);
+
+      if (logErr) console.warn('Supabase attendance logs reassignment warning:', logErr);
+    } catch (err) {
+      console.warn('Supabase reassignCadetsCompany error:', err);
+      supabaseError = err;
+    }
+  }
+
+  // 2. Update local storage: csu_rotc_cadets_roster
+  let localCadetsCount = 0;
+  try {
+    const rawCadets = localStorage.getItem('csu_rotc_cadets_roster');
+    if (rawCadets) {
+      const parsedCadets = JSON.parse(rawCadets);
+      let modified = false;
+      const updatedCadets = parsedCadets.map(cadet => {
+        const matchBn = (cadet.battalion || '').toLowerCase().includes(bnClean.toLowerCase().replace(/ battalion/i, ''));
+        const matchCo = (cadet.company || '').toLowerCase().includes(oldCoClean.toLowerCase().replace(/ company$| coy$/i, ''));
+        if (matchBn && matchCo) {
+          modified = true;
+          localCadetsCount++;
+          return { ...cadet, company: targetCoClean };
+        }
+        return cadet;
+      });
+      if (modified) {
+        localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
+        window.dispatchEvent(new CustomEvent('csu_cadets_updated', { detail: updatedCadets }));
+      }
+    }
+  } catch (e) {
+    console.warn('LocalStorage cadets reassignment error:', e);
+  }
+
+  // 3. Update local storage: csu_rotc_master_attendance
+  try {
+    const rawLogs = localStorage.getItem('csu_rotc_master_attendance');
+    if (rawLogs) {
+      const parsedLogs = JSON.parse(rawLogs);
+      let modified = false;
+      const updatedLogs = parsedLogs.map(log => {
+        const matchBn = (log.battalion || '').toLowerCase().includes(bnClean.toLowerCase().replace(/ battalion/i, ''));
+        const matchCo = (log.company || '').toLowerCase().includes(oldCoClean.toLowerCase().replace(/ company$| coy$/i, ''));
+        if (matchBn && matchCo) {
+          modified = true;
+          return { ...log, company: targetCoClean };
+        }
+        return log;
+      });
+      if (modified) {
+        localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(updatedLogs));
+        window.dispatchEvent(new CustomEvent('local-attendance-update', { detail: updatedLogs }));
+      }
+    }
+  } catch (e) {
+    console.warn('LocalStorage logs reassignment error:', e);
+  }
+
+  return {
+    success: true,
+    supabaseUpdatedCount,
+    localCadetsCount,
+    error: supabaseError
+  };
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { UserCheck, Calendar, Clock, Building, Users, Play, Shield, Layers, CheckCircle2, ChevronDown, X, Award, Check } from 'lucide-react';
+import { getLocalPhilippineDate } from '../services/storage';
 
 const OFFICER_CLASSES = [
   {
@@ -155,7 +156,7 @@ export default function SessionSetup({ initialSetup = {}, onStartSession, isEdit
   const [oicMiddleInitial, setOicMiddleInitial] = useState(parsedOic.middleInitial || '');
   const [oicLastName, setOicLastName] = useState(parsedOic.lastName || '');
 
-  const [sessionDate, setSessionDate] = useState(initialSetup.sessionDate || new Date().toISOString().split('T')[0]);
+  const [sessionDate, setSessionDate] = useState(initialSetup.sessionDate || getLocalPhilippineDate());
   const [battalion, setBattalion] = useState(initialSetup.battalion || '');
   const [company, setCompany] = useState(initialSetup.company || '');
   const [platoon, setPlatoon] = useState(initialSetup.platoon || '');

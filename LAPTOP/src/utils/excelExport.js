@@ -11,10 +11,12 @@ import {
 } from './attendanceStatus';
 
 export const DEFAULT_LETTERHEAD = {
-  headquarters: 'HEADQUARTERS 1501st (CSU) COMMUNITY DEFENSE CENTER',
-  parentCommand: '15th Regional Community Defense Group, Reserve Command, Philippine Army',
-  unitName: 'CSU ROTC UNIT (1501st CDC)',
-  location: 'Caraga State University, Ampayon, Butuan City',
+  topMotto: 'ARMY 2040: WORLD CLASS. MULTI-MISSION READY. CROSS-DOMAIN CAPABLE',
+  headquarters: 'H E A D Q U A R T E R S',
+  unitName: 'CARAGA STATE UNIVERSITY MAIN CAMPUS ROTC UNIT (ACTIVATED)',
+  parentCommand: '1501 (ADN), 15TH (CARAGA) RCDG, ARESCOM',
+  location: 'Ampayon, Butuan City',
+  officeSymbol: 'CSUROTCU1',
   leftLogoUrl: '/csu-logo.png',
   rightLogoUrl: '/rotc-seal-transparent.png'
 };
@@ -64,14 +66,20 @@ async function addLogoToWorkbook(workbook, logoInput) {
   if (!logoInput || typeof logoInput !== 'string' || !logoInput.trim()) return null;
   try {
     if (logoInput.startsWith('data:image/')) {
-      const match = logoInput.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      const match = logoInput.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
       if (match) {
-        let ext = match[1].toLowerCase();
-        if (ext === 'jpg' || ext === 'jpeg') ext = 'jpeg';
-        else ext = 'png';
+        let rawExt = match[1].toLowerCase();
+        let ext = 'png';
+        if (rawExt.includes('jpeg') || rawExt.includes('jpg')) ext = 'jpeg';
+        else if (rawExt.includes('gif')) ext = 'gif';
+        else if (rawExt.includes('png')) ext = 'png';
+        else {
+          // Unsupported image format for direct ExcelJS embedding (e.g. svg, webp)
+          return null;
+        }
 
         return workbook.addImage({
-          base64: match[2],
+          base64: match[2].trim(),
           extension: ext
         });
       }
@@ -81,7 +89,11 @@ async function addLogoToWorkbook(workbook, logoInput) {
       if (res.ok) {
         const blob = await res.blob();
         const buffer = await blob.arrayBuffer();
-        const ext = logoInput.toLowerCase().endsWith('.jpg') || logoInput.toLowerCase().endsWith('.jpeg') ? 'jpeg' : 'png';
+        const lower = logoInput.toLowerCase();
+        let ext = 'png';
+        if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) ext = 'jpeg';
+        else if (lower.endsWith('.gif')) ext = 'gif';
+
         return workbook.addImage({
           buffer,
           extension: ext
@@ -122,14 +134,41 @@ function groupRecordsHierarchically(rows) {
 }
 
 /**
- * Generates and downloads an Excel attendance report workbook with:
- * - Hierarchical Nested Grouping: Company Banner (#003E1D) -> Platoon Banner (#008037) -> Table Headers (#005A2B) -> Cadet Rows
- * - Left Logo in Columns A-B (Rows 1-3)
+ * Formats any date input (YYYY-MM-DD, ISO string, or Date) to standard military date: "24 August 2026"
+ */
+export function formatMilitaryDate(dateInput) {
+  if (!dateInput) {
+    const now = new Date();
+    return `${now.getDate()} ${now.toLocaleString('en-US', { month: 'long' })} ${now.getFullYear()}`;
+  }
+
+  if (typeof dateInput === 'string') {
+    const clean = dateInput.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
+      const parts = clean.slice(0, 10).split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      const dt = new Date(y, m, d);
+      return `${d} ${dt.toLocaleString('en-US', { month: 'long' })} ${y}`;
+    }
+  }
+
+  const d = new Date(dateInput);
+  if (!isNaN(d.getTime())) {
+    return `${d.getDate()} ${d.toLocaleString('en-US', { month: 'long' })} ${d.getFullYear()}`;
+  }
+
+  return String(dateInput);
+}
+
+/**
+ * Generates an official, multi-sheet .xlsx attendance workbook using ExcelJS.
  * - Center Header Text in Columns C-H (Rows 1-3)
  * - Right Logo in Columns I-J (Rows 1-3)
  * - Multi-sheet tabs structured cleanly
  */
-export async function exportAttendanceToExcel(records = [], sessionName = 'Field Formation Session', customLetterhead = null) {
+export async function exportAttendanceToExcel(records = [], sessionName = 'Field Formation Session', customLetterhead = null, formationDate = null) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'CSU ROTC Admin HQ';
   workbook.lastModifiedBy = 'CSU ROTC Admin HQ';
@@ -138,48 +177,77 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
 
   const letterhead = customLetterhead || getActiveLetterhead();
   const cutoffTime = getActiveFormationCutoff();
-  const dateStr = new Date().toISOString().split('T')[0];
-  const formattedDate = new Date().toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
+
+  // Resolve effective formation date from parameter, customLetterhead, records, or calendar state
+  let effectiveFormationDate = formationDate || customLetterhead?.selectedDate || customLetterhead?.formationDate;
+  if (!effectiveFormationDate && records.length > 0) {
+    const firstLog = records.find(r => r.timestamp || r.timeIn || r.date);
+    if (firstLog) {
+      const raw = firstLog.timestamp || firstLog.timeIn || firstLog.date;
+      if (typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+        effectiveFormationDate = raw.slice(0, 10);
+      }
+    }
+  }
+  if (!effectiveFormationDate) {
+    try {
+      effectiveFormationDate = localStorage.getItem('csu_rotc_selected_formation_date');
+    } catch (_) {}
+  }
+
+  const formattedDate = formatMilitaryDate(effectiveFormationDate);
 
   // Load and add Left & Right Logos to workbook
   const leftLogoId = await addLogoToWorkbook(workbook, letterhead.leftLogoUrl);
   const rightLogoId = await addLogoToWorkbook(workbook, letterhead.rightLogoUrl);
 
+  // Safe Time Cell Formatter: Handles pre-formatted strings ("06:45 AM"), ISO timestamps, or fallback
+  const formatTimeCell = (val) => {
+    if (!val || val === '—' || val === '-') return '—';
+    if (typeof val === 'string' && (/AM|PM/i.test(val) || /^\d{1,2}:\d{2}\s*(AM|PM)?$/i.test(val.trim()))) {
+      return val.trim();
+    }
+    try {
+      const d = new Date(val);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+      }
+    } catch (_) {}
+    return String(val);
+  };
+
   // Pre-process records into enriched attendance rows
-  const enrichedRecords = records.map((log, idx) => {
+  const enrichedRecords = (records || []).map((log, idx) => {
     const echelon = getScannedUnitEchelon(log);
     const isOfficer = log.battalion === 'CADET OFFICERS' ||
       log.type === 'Cadet Officer' ||
       (log.rank && (log.rank.includes('1CL') || log.rank.includes('2CL') || log.rank.includes('3CL') || log.rank.includes('4CL') || log.rank.includes('ASPIRANT')));
 
-    const timeInTimestamp = log.timeIn || (log.scanMode !== 'Time-Out' ? log.timestamp : null);
-    const timeOutTimestamp = log.timeOut || (log.scanMode === 'Time-Out' ? log.timestamp : null);
+    const timeInVal = log.timeInDisplay || log.timeIn || (log.scanMode !== 'Time-Out' ? log.timestamp : null);
+    const timeOutVal = log.timeOutDisplay || log.timeOut || (log.scanMode === 'Time-Out' ? log.timestamp : null);
 
-    const hasValidTimeIn = Boolean(timeInTimestamp && String(timeInTimestamp).trim());
-    const hasValidTimeOut = Boolean(timeOutTimestamp && String(timeOutTimestamp).trim());
+    const hasValidTimeIn = Boolean(timeInVal && String(timeInVal).trim() && String(timeInVal).trim() !== '—');
+    const hasValidTimeOut = Boolean(timeOutVal && String(timeOutVal).trim() && String(timeOutVal).trim() !== '—');
 
     const timeInStatus = hasValidTimeIn
-      ? evaluateSingleScan({ timestamp: timeInTimestamp, scanMode: 'Time-In' }, cutoffTime)
+      ? evaluateSingleScan({ timestamp: timeInVal, scanMode: 'Time-In' }, cutoffTime)
       : 'ABSENT';
 
-    let finalStatus = 'ABSENT';
-    if (hasValidTimeIn && hasValidTimeOut) {
-      finalStatus = timeInStatus === 'LATE' ? 'LATE' : 'PRESENT';
-    } else if (hasValidTimeIn && !hasValidTimeOut) {
-      finalStatus = timeInStatus === 'LATE' ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
-    } else if (!hasValidTimeIn && hasValidTimeOut) {
-      finalStatus = 'NO TIME-IN';
-    } else {
-      finalStatus = 'ABSENT';
+    let finalStatus = log.finalStatus || log.status;
+    if (!finalStatus) {
+      if (hasValidTimeIn && hasValidTimeOut) {
+        finalStatus = timeInStatus === 'LATE' ? 'LATE' : 'PRESENT';
+      } else if (hasValidTimeIn && !hasValidTimeOut) {
+        finalStatus = timeInStatus === 'LATE' ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
+      } else if (!hasValidTimeIn && hasValidTimeOut) {
+        finalStatus = 'NO TIME-IN';
+      } else {
+        finalStatus = 'ABSENT';
+      }
     }
 
-    const timeInFormatted = hasValidTimeIn ? new Date(timeInTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
-    const timeOutFormatted = hasValidTimeOut ? new Date(timeOutTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
+    const timeInFormatted = formatTimeCell(timeInVal);
+    const timeOutFormatted = formatTimeCell(timeOutVal);
 
     return {
       index: idx + 1,
@@ -217,81 +285,119 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
       { key: 'col_j', width: 22 }   // Col J (Final Status) - Right Logo
     ];
 
-    // 2. Set precise Row Heights for header rows 1-3
-    worksheet.getRow(1).height = 22;
+    // 2. Set precise Row Heights for header rows 1-6
+    worksheet.getRow(1).height = 18;
     worksheet.getRow(2).height = 20;
     worksheet.getRow(3).height = 22;
+    worksheet.getRow(4).height = 19;
+    worksheet.getRow(5).height = 19;
+    worksheet.getRow(6).height = 18;
 
-    // 3. Merge Left Logo Cells A1:B3
-    worksheet.mergeCells('A1:B3');
-    const leftLogoCell = worksheet.getCell('A1');
+    // 3. Row 1: Top Motto Line (Centered across Columns A to J)
+    worksheet.mergeCells('A1:J1');
+    const mottoCell = worksheet.getCell('A1');
+    mottoCell.value = letterhead.topMotto || 'ARMY 2040: WORLD CLASS. MULTI-MISSION READY. CROSS-DOMAIN CAPABLE';
+    mottoCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF0F172A' } };
+    mottoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // 4. Merge Left Logo Cells A2:B5
+    worksheet.mergeCells('A2:B5');
+    const leftLogoCell = worksheet.getCell('A2');
     leftLogoCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 4. Center Header Text: Columns C to H (Rows 1, 2, 3)
-    // Row 1: Headquarters Line
-    worksheet.mergeCells('C1:H1');
-    const hqCell = worksheet.getCell('C1');
-    hqCell.value = letterhead.headquarters || 'HEADQUARTERS 1501st (CSU) COMMUNITY DEFENSE CENTER';
+    // 5. Center Header Text: Columns C to H (Rows 2, 3, 4, 5)
+    // Row 2: Headquarters Title Line
+    worksheet.mergeCells('C2:H2');
+    const hqCell = worksheet.getCell('C2');
+    hqCell.value = letterhead.headquarters || 'H E A D Q U A R T E R S';
     hqCell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF003E1D' } };
     hqCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // Row 2: Parent Command Line
-    worksheet.mergeCells('C2:H2');
-    const cmdCell = worksheet.getCell('C2');
-    cmdCell.value = letterhead.parentCommand || '15th Regional Community Defense Group, Reserve Command, Philippine Army';
-    cmdCell.font = { name: 'Arial', size: 9.5, italic: true, color: { argb: 'FF475569' } };
-    cmdCell.alignment = { horizontal: 'center', vertical: 'middle' };
-
-    // Row 3: Unit Name & Location Line
+    // Row 3: ROTC Unit Name
     worksheet.mergeCells('C3:H3');
     const unitCell = worksheet.getCell('C3');
-    unitCell.value = `${letterhead.unitName || 'CSU ROTC UNIT (1501st CDC)'} • ${letterhead.location || 'Ampayon, Butuan City'}`;
-    unitCell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1E293B' } };
+    unitCell.value = letterhead.unitName || 'CARAGA STATE UNIVERSITY MAIN CAMPUS ROTC UNIT (ACTIVATED)';
+    unitCell.font = { name: 'Arial', size: 10.5, bold: true, color: { argb: 'FF1E293B' } };
     unitCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 5. Merge Right Logo Cells I1:J3
-    worksheet.mergeCells('I1:J3');
-    const rightLogoCell = worksheet.getCell('I1');
+    // Row 4: Parent Command Line
+    worksheet.mergeCells('C4:H4');
+    const cmdCell = worksheet.getCell('C4');
+    cmdCell.value = letterhead.parentCommand || '1501 (ADN), 15TH (CARAGA) RCDG, ARESCOM';
+    cmdCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF334155' } };
+    cmdCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Row 5: Host Institution & Location Line
+    worksheet.mergeCells('C5:H5');
+    const locCell = worksheet.getCell('C5');
+    locCell.value = letterhead.location || 'Ampayon, Butuan City';
+    locCell.font = { name: 'Arial', size: 9.5, italic: false, color: { argb: 'FF475569' } };
+    locCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // 6. Merge Right Logo Cells I2:J5
+    worksheet.mergeCells('I2:J5');
+    const rightLogoCell = worksheet.getCell('I2');
     rightLogoCell.alignment = { horizontal: 'center', vertical: 'middle' };
 
-    // 6. Embed Left Logo with exact two-cell bounds inside A1:B3
+    // 7. Embed Left Logo with exact bounds inside A2:B5
     if (leftLogoId !== null) {
-      worksheet.addImage(leftLogoId, {
-        tl: { col: 0.1, row: 0.1 },
-        br: { col: 1.9, row: 2.9 },
-        editAs: 'oneCell'
-      });
+      try {
+        worksheet.addImage(leftLogoId, {
+          tl: { col: 0.1, row: 1.1 },
+          br: { col: 1.9, row: 4.9 },
+          editAs: 'oneCell'
+        });
+      } catch (imgErr) {
+        console.warn('Could not embed left logo in sheet:', imgErr);
+      }
     }
 
-    // 7. Embed Right Logo with exact two-cell bounds inside I1:J3
+    // 8. Embed Right Logo with exact bounds inside I2:J5
     if (rightLogoId !== null) {
-      worksheet.addImage(rightLogoId, {
-        tl: { col: 8.1, row: 0.1 },
-        br: { col: 9.9, row: 2.9 },
-        editAs: 'oneCell'
-      });
+      try {
+        worksheet.addImage(rightLogoId, {
+          tl: { col: 8.1, row: 1.1 },
+          br: { col: 9.9, row: 4.9 },
+          editAs: 'oneCell'
+        });
+      } catch (imgErr) {
+        console.warn('Could not embed right logo in sheet:', imgErr);
+      }
     }
 
-    // 8. Row 4: Sheet Echelon Title Banner (Columns A-J)
-    worksheet.mergeCells('A4:J4');
-    const titleCell = worksheet.getCell('A4');
+    // 9. Row 6: Office Symbol on Left, Current Date on Right
+    worksheet.mergeCells('A6:D6');
+    const officeCell = worksheet.getCell('A6');
+    officeCell.value = letterhead.officeSymbol || 'CSUROTCU1';
+    officeCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF1E293B' } };
+    officeCell.alignment = { horizontal: 'left', vertical: 'middle' };
+
+    worksheet.mergeCells('G6:J6');
+    const dateCell = worksheet.getCell('G6');
+    dateCell.value = formattedDate;
+    dateCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF1E293B' } };
+    dateCell.alignment = { horizontal: 'right', vertical: 'middle' };
+
+    // 10. Row 7: Sheet Echelon Title Banner (Columns A-J)
+    worksheet.mergeCells('A7:J7');
+    const titleCell = worksheet.getCell('A7');
     titleCell.value = `ATTENDANCE MASTER RECORD: ${sheetTitle.toUpperCase()}`;
     titleCell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
     titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF003E1D' } };
     titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(4).height = 24;
+    worksheet.getRow(7).height = 24;
 
-    // 9. Row 5: Sub-information (Session, Formation Cutoff, Date)
-    worksheet.mergeCells('A5:J5');
-    const subCell = worksheet.getCell('A5');
+    // 11. Row 8: Sub-information (Session, Formation Cutoff, Date)
+    worksheet.mergeCells('A8:J8');
+    const subCell = worksheet.getCell('A8');
     subCell.value = `${subtitleInfo} | Cutoff: ${cutoffTime} | Date: ${formattedDate}`;
     subCell.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF475569' } };
     subCell.alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(5).height = 18;
+    worksheet.getRow(8).height = 18;
 
-    // 10. Row 6: Empty Spacer Row
+    // 12. Row 9: Empty Spacer Row
     worksheet.addRow([]);
-    worksheet.getRow(6).height = 10;
+    worksheet.getRow(9).height = 10;
 
     // 11. Hierarchical Nested Grouping: Company -> Platoon -> Cadet Rows
     const companyMap = groupRecordsHierarchically(rows);
@@ -496,8 +602,9 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
   });
 
   // 4. Generate binary buffer & trigger download with file-saver
+  const cleanDateSlug = (effectiveFormationDate || 'Formation').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `ROTC_Attendance_${cleanDateSlug}.xlsx`;
   const buffer = await workbook.xlsx.writeBuffer();
-  const filename = `ROTC_Attendance_${dateStr}.xlsx`;
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   saveAs(blob, filename);
 

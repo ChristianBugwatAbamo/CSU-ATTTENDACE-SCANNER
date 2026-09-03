@@ -1,5 +1,5 @@
 import React from 'react';
-import { Edit3, Phone, MapPin, HeartHandshake } from 'lucide-react';
+import { Edit3, Phone, MapPin, HeartHandshake, UserCheck, Lock } from 'lucide-react';
 
 // Department Color Scheme Mapping
 const DEPARTMENT_BADGES = {
@@ -58,7 +58,14 @@ export function getDepartmentStyle(dept) {
   };
 }
 
-export default function CadetRosterTable({ cadets = [], onEditCadet }) {
+
+export default function CadetRosterTable({
+  cadets = [],
+  onEditCadet,
+  onReinstateCadet,
+  isReadOnlyTerm = false
+}) {
+
   return (
     <div
       className="overflow-x-auto rounded-xl border border-slate-200 shadow-xs"
@@ -122,20 +129,22 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
             cadets.map((cadet, index) => {
               const deptStyle = getDepartmentStyle(cadet.department);
               const fullAddress = [cadet.barangay, cadet.city, cadet.province].filter(Boolean).join(', ') || cadet.address || null;
+              const isDropped = cadet.enrollment_status === 'DROPPED' || cadet.status === 'DROPPED' || Boolean(cadet.is_dropped);
 
               return (
                 <tr
-                  key={cadet.id || index}
+                  key={cadet.id || cadet.cadetId || index}
                   className="hover:bg-slate-50/80 transition-colors"
                   style={{
                     borderBottom: index === cadets.length - 1 ? 'none' : '1px solid #f1f5f9',
-                    transition: 'background-color 0.15s ease'
+                    transition: 'background-color 0.15s ease',
+                    backgroundColor: isDropped ? 'rgba(254, 242, 242, 0.4)' : 'transparent'
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.backgroundColor = 'rgba(248, 250, 252, 0.9)';
+                    e.currentTarget.style.backgroundColor = isDropped ? '#fee2e2' : 'rgba(248, 250, 252, 0.9)';
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.backgroundColor = isDropped ? 'rgba(254, 242, 242, 0.4)' : 'transparent';
                   }}
                 >
                   {/* Row Number */}
@@ -168,16 +177,29 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
 
                   {/* Cadet Full Name */}
                   <td
-                    className="py-3.5 px-4 text-xs font-black uppercase text-slate-900"
+                    className="py-3.5 px-4"
                     style={{
-                      padding: '0.875rem 1rem',
-                      fontWeight: 900,
-                      color: '#0f172a',
-                      textTransform: 'uppercase',
-                      fontSize: '0.875rem'
+                      padding: '0.875rem 1rem'
                     }}
                   >
-                    {cadet.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.84rem', fontWeight: 900, textTransform: 'uppercase', color: '#0f172a' }}>
+                        {cadet.name}
+                      </span>
+                      {isDropped && (
+                        <span style={{
+                          fontSize: '0.62rem',
+                          fontWeight: 800,
+                          backgroundColor: '#fff1f2',
+                          color: '#e11d48',
+                          border: '1px solid #fecdd3',
+                          padding: '1px 6px',
+                          borderRadius: '4px'
+                        }}>
+                          DROPPED
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/* Gender */}
@@ -204,7 +226,7 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
                     )}
                   </td>
 
-                  {/* Department (Custom Color Badges) */}
+                  {/* Department */}
                   <td
                     className="py-3.5 px-4 text-xs"
                     style={{
@@ -219,43 +241,32 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
                           backgroundColor: deptStyle.bg,
                           color: deptStyle.text,
                           borderColor: deptStyle.border,
-                          padding: '0.2rem 0.55rem',
-                          borderRadius: '0.375rem',
-                          fontFamily: 'monospace',
-                          fontWeight: 800,
-                          borderWidth: '1px',
-                          borderStyle: 'solid',
+                          padding: '0.125rem 0.5rem',
+                          borderRadius: '0.25rem',
+                          fontSize: '0.7rem',
+                          fontWeight: 700,
                           display: 'inline-block'
                         }}
                       >
                         {cadet.department}
                       </span>
                     ) : (
-                      <span className="text-slate-400 font-normal" style={{ color: '#94a3b8' }}>No Dept</span>
+                      <span className="text-slate-300" style={{ color: '#cbd5e1' }}>—</span>
                     )}
                   </td>
 
-                  {/* Academic Program */}
+                  {/* Academic Program Column */}
                   <td
                     className="py-3.5 px-4 text-xs"
                     style={{
                       padding: '0.875rem 1rem',
-                      fontSize: '0.75rem'
+                      fontSize: '0.75rem',
+                      color: '#475569'
                     }}
                   >
-                    {cadet.program || cadet.course ? (
-                      <span
-                        className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded font-bold"
-                        style={{
-                          backgroundColor: '#ecfdf5',
-                          color: '#065f46',
-                          padding: '0.2rem 0.5rem',
-                          borderRadius: '0.25rem',
-                          fontWeight: 700,
-                          border: '1px solid #a7f3d0'
-                        }}
-                      >
-                        {cadet.program || cadet.course}
+                    {cadet.program || cadet.course || cadet.degree ? (
+                      <span className="font-semibold text-slate-700" style={{ color: '#334155', fontWeight: 600 }}>
+                        {cadet.program || cadet.course || cadet.degree}
                       </span>
                     ) : (
                       <span className="text-slate-400 font-normal" style={{ color: '#94a3b8' }}>No Program</span>
@@ -338,7 +349,7 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
                     )}
                   </td>
 
-                  {/* Edit Action Button */}
+                  {/* Action Column */}
                   <td
                     className="py-3.5 px-4 text-center"
                     style={{
@@ -346,36 +357,73 @@ export default function CadetRosterTable({ cadets = [], onEditCadet }) {
                       textAlign: 'center'
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => onEditCadet(cadet)}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/60 rounded-lg transition-colors"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.375rem',
-                        padding: '0.375rem 0.75rem',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        color: '#047857',
-                        backgroundColor: '#ecfdf5',
-                        border: '1px solid rgba(167, 243, 208, 0.8)',
-                        borderRadius: '0.5rem',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.backgroundColor = '#d1fae5';
-                        e.currentTarget.style.borderColor = '#6ee7b7';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.backgroundColor = '#ecfdf5';
-                        e.currentTarget.style.borderColor = 'rgba(167, 243, 208, 0.8)';
-                      }}
-                    >
-                      <Edit3 size={14} />
-                      Edit Details
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                      {/* Re-instate Button (If Cadet is Dropped) */}
+                      {isDropped && !isReadOnlyTerm && (
+                        <button
+                          type="button"
+                          onClick={() => onReinstateCadet && onReinstateCadet(cadet)}
+                          title="Admin Re-instate Override for Current Semester"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                            padding: '0.35rem 0.65rem',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            color: '#065f46',
+                            backgroundColor: '#d1fae5',
+                            border: '1px solid #6ee7b7',
+                            borderRadius: '0.5rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <UserCheck size={13} />
+                          <span>Re-instate</span>
+                        </button>
+                      )}
+
+                      {/* Edit Cadet Details Button */}
+                      {!isReadOnlyTerm ? (
+                        <button
+                          type="button"
+                          onClick={() => onEditCadet && onEditCadet(cadet)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/60 rounded-lg transition-colors"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.375rem',
+                            padding: '0.35rem 0.65rem',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: '#047857',
+                            backgroundColor: '#ecfdf5',
+                            border: '1px solid rgba(167, 243, 208, 0.8)',
+                            borderRadius: '0.5rem',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Edit3 size={13} />
+                          <span>Edit</span>
+                        </button>
+                      ) : (
+                        <span
+                          style={{
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            color: '#94a3b8',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px'
+                          }}
+                        >
+                          <Lock size={12} />
+                          <span>Locked</span>
+                        </span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               );

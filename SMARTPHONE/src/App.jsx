@@ -9,13 +9,13 @@ import MobileBottomNav from './components/MobileBottomNav';
 import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
 import ScannerLandingView from './components/ScannerLandingView';
-import { getOfflineQueue, saveOfflineScan, removeOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp } from './services/storage';
+import { getOfflineQueue, saveOfflineScan, removeOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp, getLocalPhilippineDate } from './services/storage';
 
 const SESSION_SETUP_KEY = 'csu_rotc_mobile_session_setup';
 
 const DEFAULT_SESSION_SETUP = {
   dutyOfficer: '',
-  sessionDate: new Date().toISOString().split('T')[0],
+  sessionDate: getLocalPhilippineDate(),
   sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   battalion: '',
   company: '',
@@ -53,7 +53,7 @@ export default function App() {
         return {
           ...DEFAULT_SESSION_SETUP,
           ...parsed,
-          sessionDate: parsed.sessionDate || new Date().toISOString().split('T')[0],
+          sessionDate: parsed.sessionDate || getLocalPhilippineDate(),
           sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
       }
@@ -68,12 +68,12 @@ export default function App() {
     } catch (_) {}
   }, [sessionSetup]);
 
-  // Track previous configuration key to trigger auto-flush on setup updates
+  // Track previous configuration key to safely close QR sync modal if echelon changes
   const prevConfigRef = useRef(null);
 
-  // Auto-Reset Effect: Flush scanned queue and reset sync QR state on configuration changes
+  // Safely close the batch sync modal on echelon change so QR can regenerate with new unit info, WITHOUT wiping scanned records
   useEffect(() => {
-    const currentConfigKey = `${sessionSetup.battalion || ''}|${sessionSetup.company || ''}|${sessionSetup.platoon || ''}|${sessionSetup.scanMode || ''}|${sessionSetup.sessionDate || ''}|${sessionSetup.sessionTime || ''}`;
+    const currentConfigKey = `${sessionSetup.battalion || ''}|${sessionSetup.company || ''}|${sessionSetup.platoon || ''}|${sessionSetup.sessionDate || ''}`;
 
     if (prevConfigRef.current === null) {
       prevConfigRef.current = currentConfigKey;
@@ -82,18 +82,13 @@ export default function App() {
 
     if (prevConfigRef.current !== currentConfigKey) {
       prevConfigRef.current = currentConfigKey;
-      clearOfflineQueue().then(() => {
-        setOfflineQueue([]);
-        setIsBatchSyncOpen(false);
-      });
+      setIsBatchSyncOpen(false);
     }
   }, [
     sessionSetup.battalion,
     sessionSetup.company,
     sessionSetup.platoon,
-    sessionSetup.scanMode,
-    sessionSetup.sessionDate,
-    sessionSetup.sessionTime
+    sessionSetup.sessionDate
   ]);
 
   // Load Offline Queue on mount

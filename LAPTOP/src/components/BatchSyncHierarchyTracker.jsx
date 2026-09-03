@@ -48,11 +48,13 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
       const targetPl = pl.toLowerCase();
 
       // Check matching Battalion (e.g., '1st battalion' or contains '1')
-      const matchBn = bBn.includes(targetBn) || (targetBn.includes('1st') && bBn.includes('1')) || (targetBn.includes('2nd') && bBn.includes('2'));
+      const targetBnNum = (targetBn.match(/(\d+)/) || [])[1];
+      const matchBn = bBn.includes(targetBn) || (targetBnNum && bBn.includes(targetBnNum));
       // Check matching Company (e.g., 'alpha' or 'alpha company')
       const matchCo = bCo.includes(targetCoy);
       // Check matching Platoon (e.g., '1st platoon' or contains '1')
-      const matchPl = bPl.includes(targetPl) || (targetPl.includes('1st') && (bPl.includes('1st') || bPl.includes('1pltn') || bPl === '1')) || (targetPl.includes('2nd') && (bPl.includes('2nd') || bPl.includes('2pltn') || bPl === '2'));
+      const targetPlNum = (targetPl.match(/(\d+)/) || [])[1];
+      const matchPl = bPl.includes(targetPl) || (targetPlNum && (bPl.includes(targetPlNum) || bPl.includes(`${targetPlNum}pltn`)));
 
       return matchBn && matchCo && matchPl;
     });
@@ -124,7 +126,7 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
         </div>
       </div>
 
-      {/* TWO BATTALIONS GRID */}
+      {/* BATTALIONS GRID */}
       <div 
         style={{
           display: 'grid',
@@ -132,11 +134,23 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
           gap: '1.25rem'
         }}
       >
-        {BATTALIONS.map((bat) => {
-          const batDone = isBattalionComplete(bat);
-          return (
-            <div 
-              key={bat}
+        {(() => {
+          let bList = BATTALIONS;
+          try {
+            const saved = localStorage.getItem('csu_rotc_admin_settings');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              const struct = parsed.unitStructure || parsed.unit_structure;
+              if (Array.isArray(struct) && struct.length > 0) {
+                bList = struct.map(b => b.name);
+              }
+            }
+          } catch (_) {}
+          return bList.map((bat) => {
+            const batDone = isBattalionComplete(bat);
+            return (
+              <div 
+                key={bat}
               style={{
                 backgroundColor: '#f8fafc',
                 border: '1px solid #e2e8f0',
@@ -249,9 +263,10 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                 })}
               </div>
 
-            </div>
-          );
-        })}
+              </div>
+            );
+          });
+        })()}
       </div>
     </div>
   );

@@ -46,7 +46,12 @@ import {
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import { getSupabaseClient } from '../utils/supabaseClient';
-import { evaluateCadetAttendance, ACTIVE_FORMATION_DATES, toDateKey as normalizeDateKey } from '../utils/attendanceRules';
+import {
+  evaluateCadetAttendance,
+  sortCadetAlertsAscending,
+  ACTIVE_FORMATION_DATES,
+  toDateKey as normalizeDateKey
+} from '../utils/attendanceRules';
 
 // Register Chart.js components + DataLabels plugin
 ChartJS.register(
@@ -344,6 +349,15 @@ export default function AnalyticsView({
   const [flaggedCadets, setFlaggedCadets] = useState([]);
   const [evidenceCadet, setEvidenceCadet] = useState(null);
 
+  // Multi-level Ascending Sort:
+  // 1. Calculated Absences (0, 1, 2, 3...)
+  // 2. Alert Status Tiers (Warning Threshold [1] -> Official Drop [2])
+  // 3. Tardiness (Interval Lates) (0, 1, 2...)
+  // 4. Missing Scans (0, 1, 2...)
+  const sortedFlaggedCadets = useMemo(() => {
+    return sortCadetAlertsAscending(flaggedCadets);
+  }, [flaggedCadets]);
+
   const [liveCadets, setLiveCadets] = useState(() => {
     if (Array.isArray(propsCadets) && propsCadets.length > 0) return propsCadets;
     try {
@@ -436,8 +450,9 @@ export default function AnalyticsView({
         return evaluateCadetAttendance(cadet, sortedFormationDates);
       });
 
-      // Filter only cadets needing admin action
-      setFlaggedCadets(evaluatedList.filter((c) => c.status !== 'GOOD'));
+      // Filter only cadets needing admin action and apply ascending multi-level sort
+      const flagged = evaluatedList.filter((c) => c.status !== 'GOOD');
+      setFlaggedCadets(sortCadetAlertsAscending(flagged));
     } catch (err) {
       console.error('Error evaluating attendance:', err);
     }
@@ -815,9 +830,9 @@ export default function AnalyticsView({
     let palIndex = 0;
 
     const barColors = list.map(item => {
-      const isPendingOrOther = item.province.toLowerCase().includes('unspecified') || 
-                               item.province.toLowerCase().includes('pending') || 
-                               item.province.toLowerCase().includes('other');
+      const isPendingOrOther = item.province.toLowerCase().includes('unspecified') ||
+        item.province.toLowerCase().includes('pending') ||
+        item.province.toLowerCase().includes('other');
       if (isPendingOrOther) return '#64748b';
       const c = palette[palIndex % palette.length];
       palIndex++;
@@ -1034,9 +1049,7 @@ export default function AnalyticsView({
             <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
               ANALYTICS & REPORTS
             </h2>
-            <span style={{ fontSize: '0.72rem', fontWeight: 800, background: '#ecfdf5', color: '#065f46', border: '1px solid #10b981', padding: '2px 8px', borderRadius: '9999px' }}>
-              SY 2025–2026 DEMOGRAPHICS
-            </span>
+
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
             Official CSU ROTC single-semester cadet demographics, gender distributions, geographic origins, and turnout trends.
@@ -1149,8 +1162,69 @@ export default function AnalyticsView({
                   College Enrollment & Gender Distribution
                 </h3>
               </div>
-              <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '2px' }}>
-                Total: {collegeGenderData.grandTotal} Cadets • {collegeGenderData.totalMales} Male ({Math.round((collegeGenderData.totalMales / (collegeGenderData.grandTotal || 1)) * 100)}%) / {collegeGenderData.totalFemales} Female ({Math.round((collegeGenderData.totalFemales / (collegeGenderData.grandTotal || 1)) * 100)}%)
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px', flexWrap: 'wrap' }}>
+                {/* Total Cadets Pill */}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    backgroundColor: '#f8fafc',
+                    color: '#334155',
+                    border: '1px solid #cbd5e1',
+                    padding: '2px 8px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  <span style={{ color: '#64748b', fontWeight: 600 }}>Total:</span>
+                  <strong>{collegeGenderData.grandTotal} Cadets</strong>
+                </span>
+
+                {/* Male Cadets Pill */}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    backgroundColor: '#eff6ff',
+                    color: '#1d4ed8',
+                    border: '1px solid #bfdbfe',
+                    padding: '2px 8px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#2563eb', display: 'inline-block' }} />
+                  <span>{collegeGenderData.totalMales} Male</span>
+                  <span style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 700 }}>
+                    ({Math.round((collegeGenderData.totalMales / (collegeGenderData.grandTotal || 1)) * 100)}%)
+                  </span>
+                </span>
+
+                {/* Female Cadets Pill */}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    backgroundColor: '#fdf2f8',
+                    color: '#be185d',
+                    border: '1px solid #fbcfe8',
+                    padding: '2px 8px',
+                    borderRadius: '6px'
+                  }}
+                >
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#ec4899', display: 'inline-block' }} />
+                  <span>{collegeGenderData.totalFemales} Female</span>
+                  <span style={{ fontSize: '0.68rem', opacity: 0.85, fontWeight: 700 }}>
+                    ({Math.round((collegeGenderData.totalFemales / (collegeGenderData.grandTotal || 1)) * 100)}%)
+                  </span>
+                </span>
               </div>
             </div>
 
@@ -1256,11 +1330,11 @@ export default function AnalyticsView({
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
               {religionData.list.map((item) => {
                 const pct = religionData.total > 0 ? Math.round((item.count / religionData.total) * 100) : 0;
-                const isPendingOrOther = item.key === 'UNSPECIFIED' || 
-                                         item.key === 'OTHERS' || 
-                                         item.name.toLowerCase().includes('pending') || 
-                                         item.name.toLowerCase().includes('unspecified') ||
-                                         item.name.toLowerCase().includes('other');
+                const isPendingOrOther = item.key === 'UNSPECIFIED' ||
+                  item.key === 'OTHERS' ||
+                  item.name.toLowerCase().includes('pending') ||
+                  item.name.toLowerCase().includes('unspecified') ||
+                  item.name.toLowerCase().includes('other');
 
                 return (
                   <div key={item.key}>
@@ -1404,17 +1478,20 @@ export default function AnalyticsView({
               </p>
             </div>
           </div>
-          <span style={{
-            fontSize: '0.74rem',
-            fontWeight: 800,
-            backgroundColor: flaggedCadets.length > 0 ? '#ffe4e6' : '#ecfdf5',
-            color: flaggedCadets.length > 0 ? '#9f1239' : '#065f46',
-            border: `1px solid ${flaggedCadets.length > 0 ? '#fecdd3' : '#a7f3d0'}`,
-            padding: '4px 12px',
-            borderRadius: '9999px'
-          }}>
-            {flaggedCadets.length} Action Required
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+
+            <span style={{
+              fontSize: '0.74rem',
+              fontWeight: 800,
+              backgroundColor: sortedFlaggedCadets.length > 0 ? '#ffe4e6' : '#ecfdf5',
+              color: sortedFlaggedCadets.length > 0 ? '#9f1239' : '#065f46',
+              border: `1px solid ${sortedFlaggedCadets.length > 0 ? '#fecdd3' : '#a7f3d0'}`,
+              padding: '4px 12px',
+              borderRadius: '9999px'
+            }}>
+              {sortedFlaggedCadets.length} Action Required
+            </span>
+          </div>
         </div>
 
         {/* CADETS TABLE SCROLL CONTAINER (MAX 10 ROWS VISIBLE WITH STICKY HEADER) */}
@@ -1434,14 +1511,14 @@ export default function AnalyticsView({
               <tr style={{ backgroundColor: '#f8fafc', color: '#475569', fontWeight: 800, textTransform: 'uppercase', fontSize: '0.72rem', letterSpacing: '0.03em' }}>
                 <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Cadet ID & Name</th>
                 <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Platoon Unit</th>
-                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Contact Number</th>
+                <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Contact Number</th>
                 <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Calculated Absences</th>
-                <th style={{ padding: '0.75rem 1rem', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Rule Evaluation</th>
+                <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Rule Evaluation</th>
                 <th style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '2px solid #e2e8f0', position: 'sticky', top: 0, backgroundColor: '#f8fafc', zIndex: 10 }}>Status Badge</th>
               </tr>
             </thead>
             <tbody>
-              {flaggedCadets.length === 0 ? (
+              {sortedFlaggedCadets.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: '2.5rem 1rem', textAlign: 'center', color: '#94a3b8', fontWeight: 500 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px' }}>
@@ -1451,7 +1528,7 @@ export default function AnalyticsView({
                   </td>
                 </tr>
               ) : (
-                flaggedCadets.map((cadet) => (
+                sortedFlaggedCadets.map((cadet) => (
                   <tr key={cadet.id} style={{ borderBottom: '1px solid #f1f5f9', transition: 'background-color 0.15s ease' }}>
                     <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
                       <div style={{ fontWeight: 800, color: '#0f172a' }}>{cadet.name}</div>
@@ -1460,13 +1537,14 @@ export default function AnalyticsView({
                     <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#475569', borderBottom: '1px solid #f1f5f9' }}>
                       {cadet.battalion} • {cadet.company} • {cadet.platoon}
                     </td>
-                    <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '1px solid #f1f5f9', whiteSpace: 'nowrap' }}>
                       {cadet.contact_number || cadet.contactNumber || cadet.phone ? (
                         <a
                           href={`tel:${cadet.contact_number || cadet.contactNumber || cadet.phone}`}
                           style={{
                             display: 'inline-flex',
                             alignItems: 'center',
+                            justifyContent: 'center',
                             gap: '5px',
                             color: '#047857',
                             textDecoration: 'none',
@@ -1484,13 +1562,14 @@ export default function AnalyticsView({
                     <td style={{ padding: '0.75rem 1rem', textAlign: 'center', fontWeight: 800, color: '#1e293b', fontSize: '0.85rem', borderBottom: '1px solid #f1f5f9' }}>
                       {cadet.totalAbsences}
                     </td>
-                    <td style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f1f5f9' }}>
+                    <td style={{ padding: '0.75rem 1rem', textAlign: 'center', borderBottom: '1px solid #f1f5f9' }}>
                       <button
                         type="button"
                         onClick={() => setEvidenceCadet(cadet)}
                         style={{
                           display: 'inline-flex',
                           alignItems: 'center',
+                          justifyContent: 'center',
                           gap: '6px',
                           color: '#0369a1',
                           backgroundColor: '#f0f9ff',
@@ -1499,7 +1578,7 @@ export default function AnalyticsView({
                           borderRadius: '6px',
                           fontWeight: 700,
                           cursor: 'pointer',
-                          textAlign: 'left',
+                          textAlign: 'center',
                           fontSize: '0.74rem',
                           transition: 'all 0.15s ease'
                         }}
@@ -1522,6 +1601,7 @@ export default function AnalyticsView({
                         <span style={{
                           display: 'inline-flex',
                           alignItems: 'center',
+                          justifyContent: 'center',
                           gap: '4px',
                           padding: '4px 10px',
                           borderRadius: '8px',
@@ -1538,6 +1618,7 @@ export default function AnalyticsView({
                         <span style={{
                           display: 'inline-flex',
                           alignItems: 'center',
+                          justifyContent: 'center',
                           gap: '4px',
                           padding: '4px 10px',
                           borderRadius: '8px',
@@ -2057,12 +2138,12 @@ export default function AnalyticsView({
                             textTransform: 'uppercase',
                             backgroundColor:
                               row.dayType === 'PRESENT' ? '#ecfdf5' :
-                              row.dayType === 'LATE' ? '#fef3c7' :
-                              row.dayType === 'EXCUSED' ? '#f0fdf4' : '#ffe4e6',
+                                row.dayType === 'LATE' ? '#fef3c7' :
+                                  row.dayType === 'EXCUSED' ? '#f0fdf4' : '#ffe4e6',
                             color:
                               row.dayType === 'PRESENT' ? '#065f46' :
-                              row.dayType === 'LATE' ? '#92400e' :
-                              row.dayType === 'EXCUSED' ? '#15803d' : '#9f1239'
+                                row.dayType === 'LATE' ? '#92400e' :
+                                  row.dayType === 'EXCUSED' ? '#15803d' : '#9f1239'
                           }}>
                             {row.status}
                           </span>
@@ -2079,22 +2160,7 @@ export default function AnalyticsView({
 
             {/* MODAL FOOTER */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: '0.5rem', borderTop: '1px solid #f1f5f9' }}>
-              <button
-                type="button"
-                onClick={() => setEvidenceCadet(null)}
-                style={{
-                  backgroundColor: '#0f172a',
-                  color: '#ffffff',
-                  border: 'none',
-                  padding: '0.5rem 1.25rem',
-                  borderRadius: '8px',
-                  fontWeight: 700,
-                  fontSize: '0.78rem',
-                  cursor: 'pointer'
-                }}
-              >
-                Close Evidence Breakdown
-              </button>
+
             </div>
           </div>
         </div>

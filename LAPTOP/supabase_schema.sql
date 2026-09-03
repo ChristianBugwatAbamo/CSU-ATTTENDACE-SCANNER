@@ -1,7 +1,11 @@
 -- ==============================================================================
--- CSU ROTC ATTENDANCE & ROSTER SYSTEM - SUPABASE POSTGRESQL SCHEMA
+-- CSU ROTC ATTENDANCE & ROSTER SYSTEM - MASTER SUPABASE POSTGRESQL SCHEMA
 -- Target Database: PostgreSQL 15+ / Supabase
--- Description: Master Roster, Unit Echelons, Attendance Logs, and Settings Schema
+-- Description: Core Master Schema containing the 4 connected production tables:
+--              1. system_settings
+--              2. cadets (Master Roster)
+--              3. attendance_sessions (Training Formations & Dates)
+--              4. attendance_logs (Daily Time-In & Time-Out Records)
 -- ==============================================================================
 
 -- 1. Enable Required Extensions
@@ -50,8 +54,8 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
 );
 
 -- ==============================================================================
--- 3. TABLE: cadets (Master Cadet Roster)
--- Contains the complete 1,200 cadet hierarchy (Officers & Basic Cadets)
+-- 3. TABLE: cadets (Master Cadet Profiles)
+-- Master registry of all 1,200 cadets (Officers & Basic Cadets)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.cadets (
     id VARCHAR(30) PRIMARY KEY, -- e.g., '221-00101', '221-11101'
@@ -63,6 +67,7 @@ CREATE TABLE IF NOT EXISTS public.cadets (
     type VARCHAR(50) NOT NULL DEFAULT 'Basic Cadet', -- 'Basic Cadet' | 'Cadet Officer'
     designation VARCHAR(150) NOT NULL DEFAULT 'N/A', -- 'Squad Leader', 'Platoon Guide', 'Corps Commander', etc.
     course VARCHAR(150),
+    department VARCHAR(100),
     contact_number VARCHAR(50),
     emergency_contact VARCHAR(150),
     qr_code_payload TEXT,
@@ -71,7 +76,6 @@ CREATE TABLE IF NOT EXISTS public.cadets (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indexes for lightning-fast lookups on large rosters
 CREATE INDEX IF NOT EXISTS idx_cadets_battalion ON public.cadets(battalion);
 CREATE INDEX IF NOT EXISTS idx_cadets_company ON public.cadets(company);
 CREATE INDEX IF NOT EXISTS idx_cadets_platoon ON public.cadets(platoon);
@@ -79,7 +83,8 @@ CREATE INDEX IF NOT EXISTS idx_cadets_type ON public.cadets(type);
 CREATE INDEX IF NOT EXISTS idx_cadets_name ON public.cadets(name);
 
 -- ==============================================================================
--- 4. TABLE: attendance_sessions (Past Formations & Training Dates)
+-- 4. TABLE: attendance_sessions (Formations & Training Dates)
+-- Supports multiple duty officer batches on the same date via composite constraint
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.attendance_sessions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -106,6 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_officer ON public.attendance_sessions(du
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.attendance_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    session_id UUID REFERENCES public.attendance_sessions(id) ON DELETE SET NULL,
     cadet_id VARCHAR(30) NOT NULL REFERENCES public.cadets(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     rank VARCHAR(100) NOT NULL DEFAULT 'Cadet',
@@ -140,82 +146,34 @@ CREATE TABLE IF NOT EXISTS public.attendance_logs (
     CONSTRAINT uq_cadet_date_attendance UNIQUE (cadet_id, date)
 );
 
--- High-performance indexes for querying historical dates & echelon filtering
-CREATE INDEX IF NOT EXISTS idx_attendance_date ON public.attendance_logs(date DESC);
-CREATE INDEX IF NOT EXISTS idx_attendance_cadet_id ON public.attendance_logs(cadet_id);
-CREATE INDEX IF NOT EXISTS idx_attendance_status ON public.attendance_logs(status);
-CREATE INDEX IF NOT EXISTS idx_attendance_final_daily_status ON public.attendance_logs(final_daily_status);
-CREATE INDEX IF NOT EXISTS idx_attendance_echelon ON public.attendance_logs(battalion, company, platoon);
+CREATE INDEX IF NOT EXISTS idx_logs_date ON public.attendance_logs(date DESC);
+CREATE INDEX IF NOT EXISTS idx_logs_cadet ON public.attendance_logs(cadet_id);
+CREATE INDEX IF NOT EXISTS idx_logs_status ON public.attendance_logs(status);
+CREATE INDEX IF NOT EXISTS idx_logs_company ON public.attendance_logs(company);
+CREATE INDEX IF NOT EXISTS idx_attendance_logs_session_id ON public.attendance_logs(session_id);
 
 -- ==============================================================================
--- 6. TABLE: excel_reports_history
--- Archive log for downloaded & synchronized multi-sheet Excel reports
--- ==============================================================================
-CREATE TABLE IF NOT EXISTS public.excel_reports_history (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    filename VARCHAR(255) NOT NULL,
-    file_path TEXT,
-    session_name VARCHAR(255),
-    report_date DATE NOT NULL,
-    records_count INTEGER NOT NULL DEFAULT 0,
-    sheets_count INTEGER NOT NULL DEFAULT 1,
-    file_size_bytes BIGINT,
-    generated_by VARCHAR(150) DEFAULT 'Admin HQ',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ==============================================================================
--- 7. Automated updated_at Triggers
--- ==============================================================================
-CREATE OR REPLACE FUNCTION public.handle_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS tr_cadets_updated_at ON public.cadets;
-CREATE TRIGGER tr_cadets_updated_at
-    BEFORE UPDATE ON public.cadets
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
-
-DROP TRIGGER IF EXISTS tr_attendance_logs_updated_at ON public.attendance_logs;
-CREATE TRIGGER tr_attendance_logs_updated_at
-    BEFORE UPDATE ON public.attendance_logs
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
-
-DROP TRIGGER IF EXISTS tr_system_settings_updated_at ON public.system_settings;
-CREATE TRIGGER tr_system_settings_updated_at
-    BEFORE UPDATE ON public.system_settings
-    FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
-
--- ==============================================================================
--- 8. Row Level Security (RLS) Policies
--- Public Read & Authenticated/Service Role Write Access
+-- 6. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cadets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.excel_reports_history ENABLE ROW LEVEL SECURITY;
 
 -- Allow read access to all users (scanner devices & desktop dashboard)
 CREATE POLICY "Allow public read access on system_settings" ON public.system_settings FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on cadets" ON public.cadets FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_sessions" ON public.attendance_sessions FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_logs" ON public.attendance_logs FOR SELECT USING (true);
-CREATE POLICY "Allow public read access on excel_reports_history" ON public.excel_reports_history FOR SELECT USING (true);
 
--- Allow insert/update/delete for all operations (or configure for anon/authenticated roles)
+-- Allow all write operations (anon & authenticated)
 CREATE POLICY "Allow all operations on system_settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on cadets" ON public.cadets FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_sessions" ON public.attendance_sessions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_logs" ON public.attendance_logs FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow all operations on excel_reports_history" ON public.excel_reports_history FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
--- 9. Insert Initial Default System Settings
+-- 7. INITIAL SEED: DEFAULT SYSTEM SETTINGS
 -- ==============================================================================
 INSERT INTO public.system_settings (
     formation_cutoff_time,
@@ -230,7 +188,7 @@ INSERT INTO public.system_settings (
     '07:30',
     15,
     37,
-    'LTC RYAN L MARCELO INF (GSC) PA',
+    'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     'Commandant, CSU ROTC Unit',
     '1501st CDC ROTC Unit',
     '15th RCDG, ARESCOM, Philippine Army',

@@ -18,17 +18,30 @@ import {
   getActiveFormationCutoff,
   normalizeBattalion,
   normalizeCompany,
-  normalizePlatoon
+  normalizePlatoon,
+  formatDisplayTime
 } from '../utils/attendanceStatus';
 import { useAttendanceData } from '../hooks/useAttendanceData';
-import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase } from '../utils/supabaseClient';
+import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, fetchSettingsFromSupabase } from '../utils/supabaseClient';
+
+function formatDisplayTimeFallback(timestamp) {
+  if (!timestamp) return null;
+  try {
+    const d = new Date(timestamp);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+  } catch (_) {}
+  return String(timestamp);
+}
 
 function toDateKey(dateInput) {
   if (!dateInput) return '';
-  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}/.test(dateInput)) {
-    return dateInput.slice(0, 10);
+  const str = String(dateInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
   }
-  let d = new Date(dateInput);
+  let d = new Date(str);
   if (isNaN(d.getTime()) && typeof dateInput === 'string') {
     d = new Date(`${dateInput} ${new Date().getFullYear()}`);
   }
@@ -44,7 +57,7 @@ const DEFAULT_UNIT_STRUCTURE = [
     id: 'bn-1',
     name: '1st Battalion',
     shortCode: '1BN',
-    targetQuota: 296,
+    targetQuota: 148,
     companies: [
       {
         id: 'co-1-alpha',
@@ -65,26 +78,6 @@ const DEFAULT_UNIT_STRUCTURE = [
           { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
           { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
-      },
-      {
-        id: 'co-1-charlie',
-        name: 'Charlie Company',
-        shortCode: 'CHARLIE',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-1-delta',
-        name: 'Delta Company',
-        shortCode: 'DELTA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
       }
     ]
   },
@@ -92,28 +85,8 @@ const DEFAULT_UNIT_STRUCTURE = [
     id: 'bn-2',
     name: '2nd Battalion',
     shortCode: '2BN',
-    targetQuota: 296,
+    targetQuota: 148,
     companies: [
-      {
-        id: 'co-2-alpha',
-        name: 'Alpha Company',
-        shortCode: 'ALPHA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-2-bravo',
-        name: 'Bravo Company',
-        shortCode: 'BRAVO',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
       {
         id: 'co-2-charlie',
         name: 'Charlie Company',
@@ -189,20 +162,50 @@ export default function DashboardView({
     };
   }, [refreshFromStorage, onRefresh]);
 
-  // Strict Date Filter: Command dashboard strictly observes today's session_date
+  // Resilient Date Filter: Command dashboard strictly observes today's session_date
   const attendanceLogs = useMemo(() => {
     if (!Array.isArray(rawMasterLogs)) return [];
     return rawMasterLogs.filter(log => {
-      const rawDate = log.date || log.timestamp || log.receivedAt;
+      const rawDate = log.date || log.session_date || log.sessionDate || log.scanned_at || log.scannedAt || log.timestamp || log.time_in || log.timeIn || log.received_at || log.receivedAt || log.created_at;
       if (!rawDate) return false;
       const key = toDateKey(rawDate);
-      return key === todayKey;
+      if (key === todayKey) return true;
+      // Also match UTC date prefix in case of ISO string
+      if (typeof rawDate === 'string' && rawDate.length >= 10 && rawDate.slice(0, 10) === todayKey) return true;
+      return false;
     });
   }, [rawMasterLogs, todayKey]);
 
   const hasTodayScans = attendanceLogs.length > 0;
-  const formationCutoff = activeCutoff || getActiveFormationCutoff();
-  const unitStructure = hookSettings?.unitStructure?.length > 0 ? hookSettings.unitStructure : DEFAULT_UNIT_STRUCTURE;
+  const formationCutoff = activeCutoff || hookSettings?.formation_cutoff_time || hookSettings?.morningCutoffTime || hookSettings?.formationCutoffTime || getActiveFormationCutoff() || '07:30';
+  
+  const [cloudStructure, setCloudStructure] = useState(null);
+
+  // Sync latest unit structure from Supabase on mount
+  useEffect(() => {
+    let isMounted = true;
+    async function syncCloudSettings() {
+      try {
+        const sb = await fetchSettingsFromSupabase();
+        if (sb && isMounted) {
+          const struct = sb.unit_structure || sb.unitStructure;
+          if (Array.isArray(struct) && struct.length > 0) {
+            setCloudStructure(struct);
+          }
+        }
+      } catch (_) {}
+    }
+    syncCloudSettings();
+    return () => { isMounted = false; };
+  }, []);
+
+  const unitStructure = (cloudStructure && Array.isArray(cloudStructure) && cloudStructure.length > 0)
+    ? cloudStructure
+    : ((hookSettings?.unit_structure && Array.isArray(hookSettings.unit_structure) && hookSettings.unit_structure.length > 0)
+        ? hookSettings.unit_structure
+        : ((hookSettings?.unitStructure && Array.isArray(hookSettings.unitStructure) && hookSettings.unitStructure.length > 0)
+            ? hookSettings.unitStructure
+            : DEFAULT_UNIT_STRUCTURE));
 
   // Cascading Selection State for drill-downs
   const [selectedBattalion, setSelectedBattalion] = useState(null);
@@ -223,11 +226,15 @@ export default function DashboardView({
   const dynamicHierarchy = useMemo(() => {
     const allCadetsMap = new Map();
     (propsCadets || []).forEach(c => {
-      const cid = String(c.id || c.cadetId || '').trim().toUpperCase();
-      if (cid) allCadetsMap.set(cid, c);
+      const cid = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+      if (cid) allCadetsMap.set(cid, {
+        ...c,
+        id: cid,
+        cadetId: cid
+      });
     });
     (rawMasterLogs || []).forEach(l => {
-      const cid = String(l.cadetId || l.id || '').trim().toUpperCase();
+      const cid = String(l.cadetId || l.cadet_id || l.id || l.i || '').trim().toUpperCase();
       if (cid && !allCadetsMap.has(cid)) {
         allCadetsMap.set(cid, {
           id: cid,
@@ -446,6 +453,9 @@ export default function DashboardView({
 
   const getSelectedCompanyDisplay = () => {
     if (!selectedCompany) return '';
+    if (selectedCompany.toUpperCase().includes('COY') || selectedCompany.toUpperCase().includes('COMPANY')) {
+      return selectedCompany;
+    }
     return `${selectedCompany} Company`;
   };
 
@@ -458,7 +468,7 @@ export default function DashboardView({
             COMMAND DASHBOARD
           </h2>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-            Live formation attendance, echelon hierarchy drill-down, and master unit records for {formatHumanDate(todayKey)}.
+            Live formation attendance and master unit records for {formatHumanDate(todayKey)}.
           </div>
         </div>
       </div>
@@ -603,6 +613,7 @@ export default function DashboardView({
         setSelectedCompany={setSelectedCompany}
         selectedPlatoon={selectedPlatoon}
         setSelectedPlatoon={setSelectedPlatoon}
+        unitStructure={unitStructure}
       />
 
       {/* Master Attendance Records Table */}
@@ -614,53 +625,43 @@ export default function DashboardView({
               <span>Master Attendance Records ({tableFilteredCadets.length} Cadets)</span>
             </div>
             {isAnyFilterActive ? (
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '3px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-dark)', marginTop: '4px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                 <Filter size={13} color="var(--rotc-green-dark)" />
                 <span style={{ color: 'var(--text-muted)' }}>Active filters:</span>
                 {selectedBattalion && (
-                  <strong
-                    onClick={() => { setSelectedBattalion(null); setSelectedCompany(null); setSelectedPlatoon(null); }}
-                    style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Click to clear battalion filter"
+                  <span
+                    style={{ background: '#dbeafe', color: '#1e40af', border: '1px solid #93c5fd', padding: '3px 9px', borderRadius: '5px', fontWeight: 700, fontSize: '0.76rem' }}
                   >
-                    {selectedBattalion} ×
-                  </strong>
+                    {selectedBattalion}
+                  </span>
                 )}
                 {selectedCompany && (
-                  <strong
-                    onClick={() => { setSelectedCompany(null); setSelectedPlatoon(null); }}
-                    style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Click to clear company filter"
+                  <span
+                    style={{ background: '#d1fae5', color: '#065f46', border: '1px solid #6ee7b7', padding: '3px 9px', borderRadius: '5px', fontWeight: 700, fontSize: '0.76rem' }}
                   >
-                    {getSelectedCompanyDisplay()} ×
-                  </strong>
+                    {getSelectedCompanyDisplay()}
+                  </span>
                 )}
                 {selectedPlatoon && (
-                  <strong
-                    onClick={() => setSelectedPlatoon(null)}
-                    style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Click to clear platoon filter"
+                  <span
+                    style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d', padding: '3px 9px', borderRadius: '5px', fontWeight: 700, fontSize: '0.76rem' }}
                   >
-                    {selectedPlatoon} ×
-                  </strong>
+                    {selectedPlatoon}
+                  </span>
                 )}
                 {statusFilter && (
-                  <strong
-                    onClick={() => setStatusFilter(null)}
-                    style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Click to clear status filter"
+                  <span
+                    style={{ background: '#fef9c3', color: '#854d0e', border: '1px solid #fde047', padding: '3px 9px', borderRadius: '5px', fontWeight: 700, fontSize: '0.76rem' }}
                   >
-                    Status: {statusFilter} ×
-                  </strong>
+                    Status: {statusFilter}
+                  </span>
                 )}
                 {searchQuery.trim() && (
-                  <strong
-                    onClick={() => setSearchQuery('')}
-                    style={{ background: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer' }}
-                    title="Click to clear search filter"
+                  <span
+                    style={{ background: '#f3e8ff', color: '#6b21a8', border: '1px solid #d8b4fe', padding: '3px 9px', borderRadius: '5px', fontWeight: 700, fontSize: '0.76rem' }}
                   >
-                    Search: "{searchQuery.trim()}" ×
-                  </strong>
+                    Search: "{searchQuery.trim()}"
+                  </span>
                 )}
               </div>
             ) : (
@@ -670,18 +671,19 @@ export default function DashboardView({
             )}
           </div>
 
-          {/* Search Input Bar & Action Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
-            <div style={{ position: 'relative', minWidth: '260px', maxWidth: '340px' }}>
+          {/* Search Input Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', flex: '1 1 340px', justifyContent: 'flex-end' }}>
+            <div style={{ position: 'relative', width: '100%', minWidth: '320px', maxWidth: '460px' }}>
               <Search
-                size={16}
+                size={18}
                 style={{
                   position: 'absolute',
-                  left: '10px',
+                  left: '12px',
                   top: '50%',
                   transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                  pointerEvents: 'none'
+                  color: 'var(--rotc-green-dark, #064e2e)',
+                  pointerEvents: 'none',
+                  opacity: 0.85
                 }}
               />
               <input
@@ -691,22 +693,24 @@ export default function DashboardView({
                 placeholder="Search Cadet ID or Name..."
                 style={{
                   width: '100%',
-                  padding: '0.45rem 2rem 0.45rem 2rem',
-                  fontSize: '0.82rem',
-                  borderRadius: '8px',
-                  border: '1.5px solid var(--border-light)',
-                  background: '#f8fafc',
-                  color: 'var(--text-dark)',
+                  padding: '0.62rem 2.4rem 0.62rem 2.6rem',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  borderRadius: '10px',
+                  border: '2px solid #cbd5e1',
+                  background: '#ffffff',
+                  color: 'var(--text-dark, #0f172a)',
+                  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
                   outline: 'none',
-                  transition: 'all 0.15s ease'
+                  transition: 'all 0.2s ease'
                 }}
                 onFocus={(e) => {
-                  e.target.style.borderColor = 'var(--rotc-green-dark)';
-                  e.target.style.background = '#ffffff';
+                  e.target.style.borderColor = 'var(--rotc-green-dark, #064e2e)';
+                  e.target.style.boxShadow = '0 0 0 3px rgba(6, 78, 46, 0.12)';
                 }}
                 onBlur={(e) => {
-                  e.target.style.borderColor = 'var(--border-light)';
-                  if (!searchQuery) e.target.style.background = '#f8fafc';
+                  e.target.style.borderColor = '#cbd5e1';
+                  e.target.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.05)';
                 }}
               />
               {searchQuery && (
@@ -715,34 +719,24 @@ export default function DashboardView({
                   onClick={() => setSearchQuery('')}
                   style={{
                     position: 'absolute',
-                    right: '8px',
+                    right: '10px',
                     top: '50%',
                     transform: 'translateY(-50%)',
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
-                    color: 'var(--text-muted)',
-                    padding: '2px',
+                    color: 'var(--text-muted, #64748b)',
+                    padding: '4px',
                     display: 'flex',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    borderRadius: '4px'
                   }}
                   title="Clear search"
                 >
-                  <X size={14} />
+                  <X size={16} />
                 </button>
               )}
             </div>
-
-            {isAnyFilterActive && (
-              <button
-                className="btn btn-secondary btn-sm"
-                onClick={handleClearAllFilters}
-                style={{ fontSize: '0.78rem', padding: '0.45rem 0.75rem', color: '#dc2626', borderColor: '#fca5a5', background: '#fee2e2', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                title="Reset all echelon filters and search query"
-              >
-                <XCircle size={14} /> Clear All
-              </button>
-            )}
           </div>
         </div>
 
@@ -782,26 +776,7 @@ export default function DashboardView({
               No attendance scans have been logged for <strong>{formatHumanDate(todayKey)}</strong>. Master roster rows are hidden on non-formation days to keep the dashboard clean.
             </p>
 
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-              {onNavigateToHistory && (
-                <button
-                  type="button"
-                  onClick={onNavigateToHistory}
-                  className="btn btn-primary"
-                  style={{
-                    padding: '0.55rem 1.25rem',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    borderRadius: '8px',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <Archive size={15} /> View Attendance History & Past Formations
-                </button>
-              )}
-            </div>
+
           </div>
         ) : tableFilteredCadets.length === 0 ? (
           <div style={{ textTransform: 'uppercase', padding: '2.5rem 1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
@@ -833,12 +808,8 @@ export default function DashboardView({
               </thead>
               <tbody>
                 {tableFilteredCadets.map((cadet, idx) => {
-                  const timeInDisplay = cadet.timeIn
-                    ? new Date(cadet.timeIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : null;
-                  const timeOutDisplay = cadet.timeOut
-                    ? new Date(cadet.timeOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : null;
+                  const timeInDisplay = cadet.timeInDisplay || formatDisplayTime(cadet.timeIn || cadet.time_in);
+                  const timeOutDisplay = cadet.timeOutDisplay || formatDisplayTime(cadet.timeOut || cadet.time_out);
                   const finalStatus = cadet.finalDailyStatus || 'ABSENT';
 
                   return (

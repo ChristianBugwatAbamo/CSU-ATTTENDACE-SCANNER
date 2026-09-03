@@ -76,6 +76,81 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
+/**
+ * Resolves the appropriate Duty Officer for a specific cadet by matching:
+ * 1. The cadet's direct scan log record for the selected date (if available and specific)
+ * 2. The session record matching both DATE and CADET'S PLATOON / COMPANY (e.g. "1st Platoon")
+ * 3. Fallback to the general date session if no platoon-specific session exists
+ */
+export function getDutyOfficerForCadet(cadet, sessions = [], logs = [], selectedDate = '') {
+  if (!cadet) return '—';
+
+  const cadetId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim();
+  const cadetPlatoon = String(cadet.platoon || '').toLowerCase().trim();
+  const cadetCompany = String(cadet.company || '').toLowerCase().trim();
+
+  // 1. Direct scan record check (if this cadet was scanned on this formation date)
+  const scanLog = cadet.timeInScan || cadet.timeOutScan || (Array.isArray(logs) ? logs.find(l => {
+    const lId = String(l.cadetId || l.cadet_id || l.id || '').trim();
+    const lDate = toDateKey(l.timestamp || l.date || l.receivedAt);
+    return lId && lId === cadetId && (!selectedDate || lDate === selectedDate);
+  }) : null);
+
+  const directOfficer = scanLog?.dutyOfficer || scanLog?.duty_officer || cadet.dutyOfficer || cadet.duty_officer;
+  if (directOfficer && directOfficer !== 'Duty Officer' && directOfficer !== 'HQ Duty Officer' && !directOfficer.includes(',')) {
+    return directOfficer;
+  }
+
+  // 2. Filter sessions for the selected formation date
+  const dateSessions = (sessions || []).filter(s => {
+    const sDate = s.session_date || s.sessionDate || s.dateKey;
+    return !selectedDate || sDate === selectedDate;
+  });
+
+  if (dateSessions.length > 0) {
+    // 2a. Match both Platoon and Company if platoon is present
+    if (cadetPlatoon) {
+      const matchPlatoonCompany = dateSessions.find(s => {
+        const sName = String(s.session_name || s.sessionName || '').toLowerCase();
+        const hasPlat = sName.includes(cadetPlatoon);
+        const hasComp = cadetCompany ? sName.includes(cadetCompany) : true;
+        return hasPlat && hasComp && (s.duty_officer || s.dutyOfficer);
+      });
+      if (matchPlatoonCompany) {
+        return matchPlatoonCompany.duty_officer || matchPlatoonCompany.dutyOfficer;
+      }
+
+      // 2b. Match Platoon alone
+      const matchPlatoon = dateSessions.find(s => {
+        const sName = String(s.session_name || s.sessionName || '').toLowerCase();
+        return sName.includes(cadetPlatoon) && (s.duty_officer || s.dutyOfficer);
+      });
+      if (matchPlatoon) {
+        return matchPlatoon.duty_officer || matchPlatoon.dutyOfficer;
+      }
+    }
+
+    // 2c. Match Company alone
+    if (cadetCompany) {
+      const matchCompany = dateSessions.find(s => {
+        const sName = String(s.session_name || s.sessionName || '').toLowerCase();
+        return sName.includes(cadetCompany) && (s.duty_officer || s.dutyOfficer);
+      });
+      if (matchCompany) {
+        return matchCompany.duty_officer || matchCompany.dutyOfficer;
+      }
+    }
+
+    // 2d. Fallback to the first session with a valid duty officer for this date
+    const fallbackSession = dateSessions.find(s => s.duty_officer || s.dutyOfficer);
+    if (fallbackSession) {
+      return fallbackSession.duty_officer || fallbackSession.dutyOfficer;
+    }
+  }
+
+  return (directOfficer && !directOfficer.includes(',')) ? directOfficer : '—';
+}
+
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import {
   fetchAttendanceSessionsFromSupabase,
@@ -85,8 +160,7 @@ import {
 export default function AttendanceHistory({
   cadets = [],
   attendanceLogs = [],
-  onRefresh,
-  onNavigateToSyncLogs
+  onRefresh
 }) {
   const { records: hookLogs = [], cadets: hookCadets = [] } = useAttendanceData();
   const effectiveLogs = Array.isArray(attendanceLogs) && attendanceLogs.length > 0 ? attendanceLogs : hookLogs;
@@ -238,6 +312,15 @@ export default function AttendanceHistory({
     return new Date();
   });
 
+  // Synchronize active calendar selected formation date to localStorage for letterhead and report generators
+  useEffect(() => {
+    if (selectedDate) {
+      try {
+        localStorage.setItem('csu_rotc_selected_formation_date', selectedDate);
+      } catch (_) {}
+    }
+  }, [selectedDate]);
+
   // Keep calendar month aligned with selected date when opening
   const handleToggleCalendar = () => {
     if (!isCalendarOpen && selectedDate) {
@@ -338,23 +421,27 @@ export default function AttendanceHistory({
 
     return reconciledRoster.filter((cadet) => {
       // 1. Status Filter
-      if (statusFilter === 'PRESENT' && !(cadet.finalDailyStatus === 'PRESENT' || cadet.finalDailyStatus === 'PRESENT (Complete)' || (cadet.hasTimeIn && !cadet.finalDailyStatus?.includes('ABSENT')))) {
-        return false;
+      if (statusFilter === 'PRESENT') {
+        const isPresentOnTime = (cadet.finalDailyStatus === 'PRESENT' || cadet.finalDailyStatus === 'PRESENT (Complete)') && !cadet.isLate && !cadet.finalDailyStatus?.includes('LATE');
+        if (!isPresentOnTime) return false;
       }
-      if (statusFilter === 'LATE' && !(cadet.finalDailyStatus === 'LATE' || cadet.finalDailyStatus === 'LATE (Complete)' || cadet.finalDailyStatus?.includes('LATE') || cadet.isLate)) {
-        return false;
+      if (statusFilter === 'LATE') {
+        const isCadetLate = cadet.finalDailyStatus === 'LATE' || cadet.finalDailyStatus === 'LATE (Complete)' || cadet.finalDailyStatus?.includes('LATE') || cadet.isLate;
+        if (!isCadetLate) return false;
       }
-      if ((statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') && !(
-        cadet.finalDailyStatus?.includes('NO TIME-OUT') ||
-        cadet.finalDailyStatus?.includes('NO TIME-IN') ||
-        cadet.finalDailyStatus?.includes('INCOMPLETE') ||
-        (cadet.hasTimeIn && !cadet.hasTimeOut) ||
-        (!cadet.hasTimeIn && cadet.hasTimeOut)
-      )) {
-        return false;
+      if ((statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT')) {
+        const isIncomplete = (
+          cadet.finalDailyStatus?.includes('NO TIME-OUT') ||
+          cadet.finalDailyStatus?.includes('NO TIME-IN') ||
+          cadet.finalDailyStatus?.includes('INCOMPLETE') ||
+          (cadet.hasTimeIn && !cadet.hasTimeOut) ||
+          (!cadet.hasTimeIn && cadet.hasTimeOut)
+        );
+        if (!isIncomplete) return false;
       }
-      if (statusFilter === 'ABSENT' && !(cadet.finalDailyStatus === 'ABSENT' || cadet.finalDailyStatus?.includes('ABSENT'))) {
-        return false;
+      if (statusFilter === 'ABSENT') {
+        const isAbsent = cadet.finalDailyStatus === 'ABSENT' || cadet.finalDailyStatus?.includes('ABSENT') || (!cadet.hasTimeIn && !cadet.hasTimeOut);
+        if (!isAbsent) return false;
       }
 
       // 2. Battalion Filter
@@ -420,26 +507,35 @@ export default function AttendanceHistory({
 
     setIsExporting(true);
     try {
-      const recordsToExport = reconciledRoster.map(r => ({
-        cadetId: r.cadetId,
-        name: r.name,
-        rank: r.rank,
-        battalion: r.battalion,
-        company: r.company,
-        platoon: r.platoon,
-        timeIn: r.timeIn,
-        timeOut: r.timeOut,
-        scanMode: r.hasTimeOut ? 'Time-Out' : 'Time-In',
-        finalStatus: r.finalDailyStatus,
-        status: r.finalDailyStatus,
-        dutyOfficer: r.dutyOfficer || (selectedDateMeta.dutyOfficers.size > 0 ? Array.from(selectedDateMeta.dutyOfficers).join(', ') : 'Duty Officer'),
-        sessionName: `Historical Formation (${formatHumanDate(selectedDate)})`,
-        timestamp: r.timeIn || r.timeOut || `${selectedDate}T07:00:00.000Z`
-      }));
+      const recordsToExport = (reconciledRoster || []).map(r => {
+        const timeInVal = r.timeInDisplay || (r.timeInScan ? formatDisplayTime(r.timeInScan.timestamp) : null) || r.timeIn || '—';
+        const timeOutVal = r.timeOutDisplay || (r.timeOutScan ? formatDisplayTime(r.timeOutScan.timestamp) : null) || r.timeOut || '—';
+
+        return {
+          cadetId: r.cadetId || r.id || 'N/A',
+          name: r.name || 'Cadet',
+          rank: r.rank || 'Cadet',
+          battalion: r.battalion || '1st Battalion',
+          company: r.company || 'Alpha Company',
+          platoon: r.platoon || '1st Platoon',
+          timeIn: timeInVal,
+          timeOut: timeOutVal,
+          timeInDisplay: r.timeInDisplay || timeInVal,
+          timeOutDisplay: r.timeOutDisplay || timeOutVal,
+          scanMode: r.hasTimeOut ? 'Time-Out' : 'Time-In',
+          finalStatus: r.finalDailyStatus || 'ABSENT',
+          status: r.finalDailyStatus || 'ABSENT',
+          dutyOfficer: getDutyOfficerForCadet(r, dbSessions, effectiveLogs, selectedDate) || 'HQ Duty Officer',
+          sessionName: `Historical Formation (${formatHumanDate(selectedDate)})`,
+          timestamp: r.timeInScan?.timestamp || r.timeOutScan?.timestamp || r.timestamp || `${selectedDate}T07:00:00.000Z`
+        };
+      });
 
       const res = await exportAttendanceToExcel(
         recordsToExport,
-        `Historical Formation (${formatHumanDate(selectedDate)})`
+        `Historical Formation (${formatHumanDate(selectedDate)})`,
+        null,
+        selectedDate
       );
 
       setExportNotice({
@@ -450,7 +546,7 @@ export default function AttendanceHistory({
       console.error('Error exporting historical attendance:', err);
       setExportNotice({
         type: 'error',
-        text: 'Failed to generate Excel export file.'
+        text: `Failed to generate Excel export file: ${err?.message || 'Check browser permissions'}`
       });
     } finally {
       setIsExporting(false);
@@ -1414,8 +1510,8 @@ export default function AttendanceHistory({
                             )}
                           </td>
 
-                          <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                            {cadet.dutyOfficer || (selectedDateMeta.dutyOfficers.size > 0 ? Array.from(selectedDateMeta.dutyOfficers).join(', ') : 'Duty Officer')}
+                          <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--text-dark)', fontWeight: 600 }}>
+                            {getDutyOfficerForCadet(cadet, dbSessions, effectiveLogs, selectedDate)}
                           </td>
                         </tr>
                       );
@@ -1432,6 +1528,7 @@ export default function AttendanceHistory({
       <LetterheadSettingsModal
         isOpen={isLetterheadModalOpen}
         onClose={() => setIsLetterheadModalOpen(false)}
+        selectedDate={selectedDate}
         onSaved={() => {
           setExportNotice({
             type: 'success',

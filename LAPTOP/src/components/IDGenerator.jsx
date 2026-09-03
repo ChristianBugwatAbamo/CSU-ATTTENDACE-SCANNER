@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2, AlertTriangle, Users, X, Info } from 'lucide-react';
+import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2, AlertTriangle, Users, X, Info, Building, GraduationCap } from 'lucide-react';
 import IDCardPreview from './IDCardPreview';
 import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
 import { getSupabaseClient, supabase, MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity } from '../utils/supabaseClient';
@@ -332,7 +332,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const [lastName, setLastName] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).lastName || '';
+      if (saved) {
+        const val = JSON.parse(saved).lastName;
+        if (val && val !== 'ABAMO') return val;
+      }
     } catch (_) { }
     return '';
   });
@@ -340,7 +343,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const [firstName, setFirstName] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).firstName || '';
+      if (saved) {
+        const val = JSON.parse(saved).firstName;
+        if (val && val !== 'CHRISTIAN') return val;
+      }
     } catch (_) { }
     return '';
   });
@@ -348,7 +354,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const [middleInitial, setMiddleInitial] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).middleInitial || '';
+      if (saved) {
+        const val = JSON.parse(saved).middleInitial;
+        if (val && val !== 'B') return val;
+      }
     } catch (_) { }
     return '';
   });
@@ -357,7 +366,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const [cadetId, setCadetId] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).cadetId || '';
+      if (saved) {
+        const val = JSON.parse(saved).cadetId;
+        if (val && val !== '221-01231') return val;
+      }
     } catch (_) { }
     return '';
   });
@@ -370,10 +382,45 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     return 'Cadet';
   });
 
+  const [dynamicBattalions, setDynamicBattalions] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const struct = parsed.unitStructure || parsed.unit_structure;
+        if (Array.isArray(struct) && struct.length > 0) {
+          return struct.map(b => b.name);
+        }
+      }
+    } catch (_) {}
+    return ['1st Battalion', '2nd Battalion'];
+  });
+
+  useEffect(() => {
+    const handleUpdate = (e) => {
+      const s = e?.detail || (() => {
+        try { return JSON.parse(localStorage.getItem('csu_rotc_admin_settings') || '{}'); } catch (_) { return {}; }
+      })();
+      const struct = s.unitStructure || s.unit_structure;
+      if (Array.isArray(struct) && struct.length > 0) {
+        setDynamicBattalions(struct.map(b => b.name));
+      }
+    };
+    window.addEventListener('csu_settings_updated', handleUpdate);
+    window.addEventListener('storage', handleUpdate);
+    return () => {
+      window.removeEventListener('csu_settings_updated', handleUpdate);
+      window.removeEventListener('storage', handleUpdate);
+    };
+  }, []);
+
   const [battalion, setBattalion] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).battalion || '1st Battalion';
+      if (saved) {
+        const b = JSON.parse(saved).battalion;
+        if (b) return b;
+      }
     } catch (_) { }
     return '1st Battalion';
   });
@@ -401,6 +448,34 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     } catch (_) { }
     return 'None';
   });
+
+  // Demographic & Academic Details (Direct to DB only, not on ID card)
+  const [gender, setGender] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).gender || 'Male';
+    } catch (_) { }
+    return 'Male';
+  });
+
+  const [department, setDepartment] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).department || 'CCIS';
+    } catch (_) { }
+    return 'CCIS';
+  });
+
+  const [academicProgram, setAcademicProgram] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_id_gen_form');
+      if (saved) return JSON.parse(saved).academicProgram || '';
+    } catch (_) { }
+    return '';
+  });
+
+  // Validation errors map for required fields
+  const [formErrors, setFormErrors] = useState({});
 
   // Batch Cards Queue with LocalStorage Persistence
   const [printQueue, setPrintQueue] = useState(() => {
@@ -483,11 +558,14 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         battalion,
         company,
         platoon,
-        designation
+        designation,
+        gender,
+        department,
+        academicProgram
       };
       localStorage.setItem('csu_rotc_id_gen_form', JSON.stringify(formData));
     } catch (_) { }
-  }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation]);
+  }, [category, lastName, firstName, middleInitial, cadetId, rank, battalion, company, platoon, designation, gender, department, academicProgram]);
 
   // Synchronize Batch Print Queue to LocalStorage
   useEffect(() => {
@@ -520,28 +598,29 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     }
   };
 
-  // Helper to format full display name: "LASTNAME, FIRSTNAME M"
+  // Helper to format full display name: "LASTNAME, FIRSTNAME M.I."
   const fullName = (() => {
     const l = lastName.trim().toUpperCase();
     const f = firstName.trim().toUpperCase();
     const m = middleInitial.trim().toUpperCase().replace(/\./g, '');
-    if (!l && !f) return 'CADET FULL NAME';
-    let formatted = l || 'LASTNAME';
-    if (f) formatted += `, ${f}`;
-    if (m) formatted += ` ${m}`;
-    return formatted;
+    if (!l && !f) return 'LASTNAME, FIRSTNAME M.I.';
+    if (l && !f) return m ? `${l} ${m}.` : l;
+    if (!l && f) return m ? `${f} ${m}.` : f;
+    return m ? `${l}, ${f} ${m}.` : `${l}, ${f}`;
   })();
 
   const handleLastNameChange = (val) => {
     // Strictly block numbers and special characters; permit letters, spaces, hyphens, and ñ/Ñ
     const sanitized = val.replace(/[0-9]/g, '').replace(/[^a-zA-Z\s\-ñÑ']/g, '').toUpperCase();
     setLastName(sanitized);
+    if (formErrors.lastName) setFormErrors(prev => ({ ...prev, lastName: '' }));
   };
 
   const handleFirstNameChange = (val) => {
     // Strictly block numbers and special characters; permit letters, spaces, hyphens, and ñ/Ñ
     const sanitized = val.replace(/[0-9]/g, '').replace(/[^a-zA-Z\s\-ñÑ']/g, '').toUpperCase();
     setFirstName(sanitized);
+    if (formErrors.firstName) setFormErrors(prev => ({ ...prev, firstName: '' }));
   };
 
   const handleMiddleInitialChange = (val) => {
@@ -558,6 +637,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       formatted = `${digits.slice(0, 3)}-${digits.slice(3)}`;
     }
     setCadetId(formatted);
+    if (formErrors.cadetId) setFormErrors(prev => ({ ...prev, cadetId: '' }));
   };
 
   // 1. Add New Card to Queue (Strict 37 Cadets Max Guardrail)
@@ -566,38 +646,57 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       e.preventDefault();
     }
 
-    if (!lastName.trim() || !firstName.trim() || !cadetId.trim()) {
+    const NAME_VALIDATION_REGEX = /^[A-Z\s\-Ñ']+$/i;
+    const CADET_ID_REGEX = /^\d{3}-\d{5}$/;
+
+    const cleanLast = lastName.trim();
+    const cleanFirst = firstName.trim();
+    const cleanCid = cadetId.trim();
+    const cleanProg = academicProgram.trim();
+
+    const errors = {};
+
+    if (!cleanLast) {
+      errors.lastName = 'Last Name is required';
+    } else if (!NAME_VALIDATION_REGEX.test(cleanLast)) {
+      errors.lastName = 'Letters only (no numbers or symbols)';
+    }
+
+    if (!cleanFirst) {
+      errors.firstName = 'First Name is required';
+    } else if (!NAME_VALIDATION_REGEX.test(cleanFirst)) {
+      errors.firstName = 'Letters only (no numbers or symbols)';
+    }
+
+    if (!cleanCid) {
+      errors.cadetId = 'Cadet ID is required';
+    } else if (!CADET_ID_REGEX.test(cleanCid)) {
+      errors.cadetId = 'Format must be XXX-XXXXX (e.g. 221-00000)';
+    }
+
+    if (!gender || !gender.trim()) {
+      errors.gender = 'Gender is required';
+    }
+
+    if (!department || !department.trim()) {
+      errors.department = 'Department is required';
+    }
+
+    if (!cleanProg) {
+      errors.program = 'Academic Program is required (e.g., BSCS)';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       showAlert({
         type: 'warning',
         title: 'Missing Required Fields',
-        message: 'Please fill in Last Name, First Name, and Cadet ID before adding to the queue.'
+        message: 'Please complete all highlighted required fields before adding to queue.'
       });
       return;
     }
 
-    // Strict Name Validation: Prohibit numeric characters
-    const NAME_VALIDATION_REGEX = /^[A-Z\s\-Ñ']+$/i;
-    if (!NAME_VALIDATION_REGEX.test(lastName.trim()) || !NAME_VALIDATION_REGEX.test(firstName.trim())) {
-      showAlert({
-        type: 'warning',
-        title: 'Invalid Characters in Name',
-        message: 'Last Name and First Name cannot contain numeric digits or invalid symbols. Please use letters only.'
-      });
-      return;
-    }
-
-    const cleanCid = cadetId.trim();
-
-    // Strict Cadet ID Validation: Must strictly match XXX-XXXXX format (3 digits - 5 digits)
-    const CADET_ID_REGEX = /^\d{3}-\d{5}$/;
-    if (!CADET_ID_REGEX.test(cleanCid)) {
-      showAlert({
-        type: 'warning',
-        title: 'Invalid Cadet ID Format',
-        message: 'Cadet ID must strictly follow the format XXX-XXXXX (3 digits, hyphen, 5 digits — e.g., 221-01231).'
-      });
-      return;
-    }
+    setFormErrors({});
 
     // --------------------------------------------------------------------------
     // GUARDRAIL: Strict 37 Cadets Max Capacity Limit per Platoon
@@ -688,11 +787,15 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
       middleInitial: middleInitial.trim().toUpperCase(),
       name: fullName,
       rank: 'Cadet',
-      battalion: battalion,
+      battalion: battalion || '1st Battalion',
       company: normalizeCompany(company),
       platoon: platoon,
       designation: 'None',
       type: 'Basic Cadet',
+      gender: gender || 'Male',
+      department: department || 'CCIS',
+      program: academicProgram.trim().toUpperCase() || null,
+      course: academicProgram.trim().toUpperCase() || null,
       is_active: true,
       queueId: Date.now()
     };
@@ -708,6 +811,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     setFirstName('');
     setMiddleInitial('');
     setCadetId('');
+    setAcademicProgram('');
 
     setToastMessage({
       type: 'SUCCESS',
@@ -766,6 +870,10 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
         platoon: cadet.platoon || '1st Platoon',
         type: normalizeCadetType(cadet.type, cadet.rank),
         designation: cadet.designation || 'N/A',
+        gender: cadet.gender || 'Male',
+        department: cadet.department || 'CCIS',
+        program: cadet.program || cadet.course || null,
+        course: cadet.course || cadet.program || null,
         is_active: true
       }));
 
@@ -835,6 +943,38 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
   const handleSaveBatchToDatabase = handleSaveToDatabase;
 
+  // Real-time dynamic form cadet object for Live ID Preview
+  const currentFormCadet = {
+    id: cadetId.trim() ? cadetId.trim() : '221-00000',
+    cadetId: cadetId.trim() ? cadetId.trim() : '221-00000',
+    cadet_id: cadetId.trim() ? cadetId.trim() : '221-00000',
+    lastName: lastName.trim() || 'LASTNAME',
+    firstName: firstName.trim() || 'FIRSTNAME',
+    middleInitial: middleInitial.trim() || 'M.I.',
+    name: fullName,
+    rank: category === 'officer'
+      ? (rank || 'RANK / POSITION')
+      : (rank || 'Cadet'),
+    battalion: category === 'officer'
+      ? 'CADET OFFICERS'
+      : (battalion || '1st Battalion'),
+    company: category === 'officer'
+      ? (company || '1CL')
+      : normalizeCompany(company || 'Alpha'),
+    platoon: category === 'officer'
+      ? (designation && designation !== 'None' ? designation : (platoon || 'RANK / POSITION'))
+      : (platoon || '1st Platoon'),
+    designation: category === 'officer'
+      ? (designation && designation !== 'None' ? designation : (platoon || 'RANK / POSITION'))
+      : (designation || 'None'),
+    type: category === 'officer' ? 'Cadet Officer' : 'Basic Cadet',
+    isOfficer: category === 'officer',
+    gender: gender || 'Male',
+    department: department || 'CCIS',
+    program: academicProgram || 'BSCS',
+    is_active: true
+  };
+
   const cardsToPrint = batchQueue;
 
   return (
@@ -865,10 +1005,16 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <input
                   type="text"
                   className="custom-input"
+                  style={formErrors.lastName ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
                   placeholder="e.g., DELA CRUZ"
                   value={lastName}
                   onChange={(e) => handleLastNameChange(e.target.value)}
                 />
+                {formErrors.lastName && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.lastName}
+                  </span>
+                )}
               </div>
 
               <div className="form-field-group">
@@ -876,10 +1022,16 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <input
                   type="text"
                   className="custom-input"
+                  style={formErrors.firstName ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
                   placeholder="e.g., JUAN"
                   value={firstName}
                   onChange={(e) => handleFirstNameChange(e.target.value)}
                 />
+                {formErrors.firstName && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.firstName}
+                  </span>
+                )}
               </div>
 
               <div className="form-field-group">
@@ -892,23 +1044,101 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                   value={middleInitial}
                   onChange={(e) => handleMiddleInitialChange(e.target.value)}
                 />
-                <span style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '2px', display: 'block' }}>Single letter only (no period)</span>
+              </div>
+            </div>
+
+            {/* Gender, Department & Academic Program */}
+            <div style={{ display: 'grid', gridTemplateColumns: '110px 140px 1fr', gap: '0.65rem' }}>
+              <div className="form-field-group">
+                <label>Gender </label>
+                <select
+                  className="custom-select"
+                  style={formErrors.gender ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
+                  value={gender}
+                  onChange={(e) => {
+                    setGender(e.target.value);
+                    if (formErrors.gender) setFormErrors(prev => ({ ...prev, gender: '' }));
+                  }}
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+                {formErrors.gender && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.gender}
+                  </span>
+                )}
+              </div>
+
+              <div className="form-field-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Building size={12} color="var(--rotc-green-dark, #047857)" /> Department
+                </label>
+                <select
+                  className="custom-select"
+                  style={formErrors.department ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
+                  value={department}
+                  onChange={(e) => {
+                    setDepartment(e.target.value);
+                    if (formErrors.department) setFormErrors(prev => ({ ...prev, department: '' }));
+                  }}
+                >
+                  <option value="CCIS">CCIS</option>
+                  <option value="CEGS">CEGS</option>
+                  <option value="CHASS">CHASS</option>
+                  <option value="CAA">CAA</option>
+                  <option value="CMNS">CMNS</option>
+                  <option value="CED">CED</option>
+                  <option value="COFES">COFES</option>
+                </select>
+                {formErrors.department && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.department}
+                  </span>
+                )}
+              </div>
+
+              <div className="form-field-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <GraduationCap size={12} color="var(--rotc-green-dark, #047857)" /> Program
+                </label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  style={formErrors.program ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
+                  placeholder="e.g., BSCS, BSIT"
+                  value={academicProgram}
+                  onChange={(e) => {
+                    setAcademicProgram(e.target.value.toUpperCase());
+                    if (formErrors.program) setFormErrors(prev => ({ ...prev, program: '' }));
+                  }}
+                />
+                {formErrors.program && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.program}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Cadet ID & Rank (Locked to Cadet) */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <div className="form-field-group">
-                <label>Cadet ID</label>
+                <label>Cadet ID </label>
                 <input
                   type="text"
                   className="custom-input"
-                  placeholder="e.g., 221-01231"
+                  style={formErrors.cadetId ? { borderColor: '#ef4444', backgroundColor: '#fef2f2', boxShadow: '0 0 0 2px rgba(239, 68, 68, 0.15)' } : {}}
+                  placeholder="e.g., 221-00000"
                   maxLength={9}
                   value={cadetId}
                   onChange={(e) => handleIdChange(e.target.value)}
                 />
-
+                {formErrors.cadetId && (
+                  <span style={{ fontSize: '0.68rem', color: '#ef4444', fontWeight: 700, marginTop: '2px', display: 'block' }}>
+                    ⚠️ {formErrors.cadetId}
+                  </span>
+                )}
               </div>
 
               <div className="form-field-group">
@@ -923,6 +1153,8 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
               </div>
             </div>
 
+
+
             {/* Basic Cadet Echelon Hierarchy Assignment */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem' }}>
               <div className="form-field-group">
@@ -932,8 +1164,9 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                   value={battalion}
                   onChange={(e) => setBattalion(e.target.value)}
                 >
-                  <option value="1st Battalion">1st Battalion</option>
-                  <option value="2nd Battalion">2nd Battalion</option>
+                  {dynamicBattalions.map(b => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
                 </select>
               </div>
 
@@ -1206,10 +1439,18 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
 
           <div className="preview-display-wrapper">
             {cardsToPrint.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#94a3b8', fontSize: '0.88rem' }}>
-                <Layers size={36} style={{ margin: '0 auto 0.75rem', display: 'block', opacity: 0.4 }} />
-                <p style={{ fontWeight: 700, color: '#64748b', marginBottom: '0.25rem' }}>No cards in batch queue</p>
-                <span style={{ fontSize: '0.78rem' }}>Fill in cadet details and click "Add Form Cadet to Batch Queue" to preview cards.</span>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', padding: '0.45rem 0.85rem', background: '#ecfdf5', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#065f46' }}>
+                    ⚡ Real-Time Form Preview (Fill form & click "Add to Batch Print Queue")
+                  </span>
+                  <span style={{ fontSize: '0.7rem', fontWeight: 700, color: '#047857' }}>
+                    Queue: 0 Cards
+                  </span>
+                </div>
+                <div className="batch-print-grid">
+                  <IDCardPreview card={currentFormCadet} />
+                </div>
               </div>
             ) : (
               <div className="batch-print-grid">

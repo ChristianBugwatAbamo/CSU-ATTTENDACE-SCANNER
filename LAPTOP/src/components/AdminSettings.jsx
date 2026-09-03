@@ -42,16 +42,17 @@ import {
   saveSettingsToSupabase,
   syncSessionCutoffTime,
   clearCadetsFromSupabase,
-  clearAttendanceFromSupabase
+  clearAttendanceFromSupabase,
+  reassignCadetsCompany
 } from '../utils/supabaseClient';
 
 // Standard CSU ROTC Unit Structure Template (4 Companies, 2 Platoons each)
-const DEFAULT_UNIT_STRUCTURE = [
+export const DEFAULT_UNIT_STRUCTURE = [
   {
     id: 'bn-1',
     name: '1st Battalion',
     shortCode: '1BN',
-    targetQuota: 296,
+    targetQuota: 148,
     companies: [
       {
         id: 'co-1-alpha',
@@ -72,26 +73,6 @@ const DEFAULT_UNIT_STRUCTURE = [
           { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
           { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
         ]
-      },
-      {
-        id: 'co-1-charlie',
-        name: 'Charlie Company',
-        shortCode: 'CHARLIE',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-1-delta',
-        name: 'Delta Company',
-        shortCode: 'DELTA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
       }
     ]
   },
@@ -99,28 +80,8 @@ const DEFAULT_UNIT_STRUCTURE = [
     id: 'bn-2',
     name: '2nd Battalion',
     shortCode: '2BN',
-    targetQuota: 296,
+    targetQuota: 148,
     companies: [
-      {
-        id: 'co-2-alpha',
-        name: 'Alpha Company',
-        shortCode: 'ALPHA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-2-bravo',
-        name: 'Bravo Company',
-        shortCode: 'BRAVO',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
       {
         id: 'co-2-charlie',
         name: 'Charlie Company',
@@ -187,7 +148,7 @@ const DEFAULT_SETTINGS = {
 
   // Tab 3: Unit Branding
   unitName: "1501st CDC ROTC Unit",
-  commandingOfficer: "LTC CHRISTIAN B ABAMO INF (GSC) PA",
+  commandingOfficer: "COL CHARIS J ABAMO INF (GSC) PA",
   commandingOfficerTitle: "Commandant, CSU ROTC Unit",
   parentCommand: "15th RCDG, ARESCOM, Philippine Army",
   hostInstitution: "Caraga State University (CSU Main Campus, Ampayon, Butuan City)",
@@ -201,7 +162,7 @@ const DEFAULT_SETTINGS = {
   autoBackupEnabled: true,
 
   // Tab 5: ID Printing Setup
-  signatoryName: "LTC CHRISTIAN B ABAMO INF (GSC) PA",
+  signatoryName: "COL CHARIS J ABAMO INF (GSC) PA",
   signatoryDesignation: "Commandant, CSU ROTC Unit",
   signatureImageUrl: "",
   cardOrientation: "vertical", // 'vertical' | 'horizontal'
@@ -245,6 +206,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     parentId: null,
     item: { id: '', name: '' }
   });
+  const [reassignTargetCompany, setReassignTargetCompany] = useState('');
+  const [isReassigningOrphans, setIsReassigningOrphans] = useState(false);
 
   // Modals & Security Verification
   const [isResetRosterModalOpen, setIsResetRosterModalOpen] = useState(false);
@@ -274,87 +237,150 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         const sbSettings = await fetchSettingsFromSupabase();
         if (sbSettings) {
           const loadedCutoff = sbSettings.formation_cutoff_time || DEFAULT_SETTINGS.morningCutoffTime;
-          finalSettings = {
-            ...DEFAULT_SETTINGS,
-            ...sbSettings,
-            morningCutoffTime: loadedCutoff,
-            formationCutoffTime: loadedCutoff,
-            formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
-            cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
-            totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
-            unitStructure: (Array.isArray(sbSettings.unit_structure) && sbSettings.unit_structure.length > 0) ? sbSettings.unit_structure : (sbSettings.unitStructure || DEFAULT_UNIT_STRUCTURE),
-            unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
-            commandingOfficer: sbSettings.commanding_officer || DEFAULT_SETTINGS.commandingOfficer,
-            commandingOfficerTitle: sbSettings.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle,
-            parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
-            hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution,
-            rotcSealUrl: sbSettings.rotc_seal_url || DEFAULT_SETTINGS.rotcSealUrl,
-            universityLogoUrl: sbSettings.university_logo_url || DEFAULT_SETTINGS.universityLogoUrl,
-            exportDirectory: sbSettings.excel_export_path || DEFAULT_SETTINGS.exportDirectory,
-            letterheadConfig: sbSettings.letterhead_config || DEFAULT_SETTINGS.letterheadConfig,
-            autoBackupEnabled: sbSettings.auto_backup_enabled !== false,
-            signatoryName: sbSettings.id_signatory_name || sbSettings.commanding_officer || DEFAULT_SETTINGS.signatoryName,
-            signatoryDesignation: sbSettings.id_signatory_title || sbSettings.commanding_officer_title || DEFAULT_SETTINGS.signatoryDesignation,
-            signatureImageUrl: sbSettings.id_signature_url || DEFAULT_SETTINGS.signatureImageUrl,
-            cardOrientation: sbSettings.id_card_orientation || DEFAULT_SETTINGS.cardOrientation,
-            officerRanks: (Array.isArray(sbSettings.officer_ranks_list) && sbSettings.officer_ranks_list.length > 0) ? sbSettings.officer_ranks_list : (sbSettings.officerRanks || DEFAULT_OFFICER_RANKS),
-            officerDesignations: (Array.isArray(sbSettings.officer_roles_list) && sbSettings.officer_roles_list.length > 0) ? sbSettings.officer_roles_list : (sbSettings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS)
-          };
-        }
-      } catch (_) {}
+          const loadedUnitStructure = (Array.isArray(sbSettings.unit_structure) && sbSettings.unit_structure.length > 0)
+            ? sbSettings.unit_structure
+            : (Array.isArray(sbSettings.unitStructure) && sbSettings.unitStructure.length > 0 ? sbSettings.unitStructure : DEFAULT_UNIT_STRUCTURE);
+          const loadedCommandingOfficer = sbSettings.commanding_officer || DEFAULT_SETTINGS.commandingOfficer;
+          const loadedOfficerTitle = sbSettings.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle;
+          const loadedSignatoryName = sbSettings.id_signatory_name || loadedCommandingOfficer;
+          const loadedSignatoryTitle = sbSettings.id_signatory_title || loadedOfficerTitle;
 
-      // 2. Local fallback if Supabase not yet populated
-      if (!finalSettings || Object.keys(finalSettings).length <= 5) {
-        try {
-          const res = await fetch('/api/settings');
-          if (res.ok) {
-            const data = await res.json();
-            finalSettings = {
+          finalSettings = {
               ...DEFAULT_SETTINGS,
-              ...data,
-              morningCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.morningCutoffTime,
-              formationCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.formationCutoffTime,
-              unitStructure: data.unitStructure && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE,
-              officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
-              officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
+              ...sbSettings,
+              morningCutoffTime: loadedCutoff,
+              formationCutoffTime: loadedCutoff,
+              formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
+              cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
+              totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
+              unitStructure: loadedUnitStructure,
+              unit_structure: loadedUnitStructure,
+              unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
+              commandingOfficer: loadedCommandingOfficer,
+              commanding_officer: loadedCommandingOfficer,
+              commandingOfficerTitle: loadedOfficerTitle,
+              commanding_officer_title: loadedOfficerTitle,
+              parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
+              hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution,
+              rotcSealUrl: sbSettings.rotc_seal_url || DEFAULT_SETTINGS.rotcSealUrl,
+              universityLogoUrl: sbSettings.university_logo_url || DEFAULT_SETTINGS.universityLogoUrl,
+              exportDirectory: sbSettings.excel_export_path || DEFAULT_SETTINGS.exportDirectory,
+              letterheadConfig: sbSettings.letterhead_config || DEFAULT_SETTINGS.letterheadConfig,
+              autoBackupEnabled: sbSettings.auto_backup_enabled !== false,
+              signatoryName: loadedSignatoryName,
+              id_signatory_name: loadedSignatoryName,
+              signatoryDesignation: loadedSignatoryTitle,
+              id_signatory_title: loadedSignatoryTitle,
+              signatureImageUrl: sbSettings.id_signature_url || DEFAULT_SETTINGS.signatureImageUrl,
+              cardOrientation: sbSettings.id_card_orientation || DEFAULT_SETTINGS.cardOrientation,
+              officerRanks: (Array.isArray(sbSettings.officer_ranks_list) && sbSettings.officer_ranks_list.length > 0) ? sbSettings.officer_ranks_list : (sbSettings.officerRanks || DEFAULT_OFFICER_RANKS),
+              officerDesignations: (Array.isArray(sbSettings.officer_roles_list) && sbSettings.officer_roles_list.length > 0) ? sbSettings.officer_roles_list : (sbSettings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS)
             };
           }
-        } catch (_) {}
-      }
+        } catch (_) { }
 
-      setSettings(finalSettings);
-      setSavedSettings(finalSettings);
+        // 2. Local fallback if Supabase not yet populated
+        if (!finalSettings || Object.keys(finalSettings).length <= 5) {
+          try {
+            const res = await fetch('/api/settings');
+            if (res.ok) {
+              const data = await res.json();
+              const loadedLocalStructure = (Array.isArray(data.unit_structure) && data.unit_structure.length > 0)
+                ? data.unit_structure
+                : (Array.isArray(data.unitStructure) && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE);
+              const localOfficer = data.commandingOfficer || data.commanding_officer || DEFAULT_SETTINGS.commandingOfficer;
+              const localTitle = data.commandingOfficerTitle || data.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle;
+              const localSignatory = data.signatoryName || data.id_signatory_name || localOfficer;
+              const localSignatoryTitle = data.signatoryDesignation || data.id_signatory_title || localTitle;
+              finalSettings = {
+                ...DEFAULT_SETTINGS,
+                ...data,
+                morningCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.morningCutoffTime,
+                formationCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.formationCutoffTime,
+                unitStructure: loadedLocalStructure,
+                unit_structure: loadedLocalStructure,
+                commandingOfficer: localOfficer,
+                commanding_officer: localOfficer,
+                commandingOfficerTitle: localTitle,
+                commanding_officer_title: localTitle,
+                signatoryName: localSignatory,
+                id_signatory_name: localSignatory,
+                signatoryDesignation: localSignatoryTitle,
+                id_signatory_title: localSignatoryTitle,
+                officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
+                officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
+              };
+            }
+          } catch (_) { }
+        }
+
+        setSettings(finalSettings);
+        setSavedSettings(finalSettings);
+      };
+      loadSettings();
+    }, []);
+
+    // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
+    useEffect(() => {
+      const handleKeyDown = (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+          e.preventDefault();
+          handleSaveSettings();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+      return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [settings]);
+
+    const handleChange = (field, value) => {
+      setSettings(prev => {
+        const next = { ...prev, [field]: value };
+        // 👈 Automatically sync ID Signatory name & title whenever Commanding Officer is modified
+        if (field === 'commandingOfficer') {
+          next.commanding_officer = value;
+          next.signatoryName = value;
+          next.id_signatory_name = value;
+        } else if (field === 'commandingOfficerTitle') {
+          next.commanding_officer_title = value;
+          next.signatoryDesignation = value;
+          next.id_signatory_title = value;
+        } else if (field === 'signatoryName') {
+          next.id_signatory_name = value;
+        } else if (field === 'signatoryDesignation') {
+          next.id_signatory_title = value;
+        }
+        return next;
+      });
     };
-    loadSettings();
-  }, []);
 
-  // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        handleSaveSettings();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings]);
+    // Save Settings Handler (Centralized for all 4 tabs)
+    const handleSaveSettings = async (e, customSettings = null) => {
+      if (e) e.preventDefault();
+      setIsSaving(true);
+      const rawToSave = customSettings || settings;
+      const newCutoff = rawToSave.morningCutoffTime || rawToSave.formationCutoffTime || (rawToSave.musterAndUnit && rawToSave.musterAndUnit.timeInCutoff) || '07:30';
+      const activeUnitStructure = rawToSave.unit_structure || rawToSave.unitStructure || currentStructure || DEFAULT_UNIT_STRUCTURE;
+      const activeCommandingOfficer = rawToSave.commandingOfficer || rawToSave.commanding_officer || 'COL CHARIS J ABAMO INF (GSC) PA';
+      const activeOfficerTitle = rawToSave.commandingOfficerTitle || rawToSave.commanding_officer_title || 'Commandant, CSU ROTC Unit';
+      const activeSignatoryName = rawToSave.signatoryName || activeCommandingOfficer;
+      const activeSignatoryTitle = rawToSave.signatoryDesignation || activeOfficerTitle;
 
-  const handleChange = (field, value) => {
-    setSettings(prev => ({ ...prev, [field]: value }));
-  };
-
-  // Save Settings Handler (Centralized for all 4 tabs)
-  const handleSaveSettings = async (e, customSettings = null) => {
-    if (e) e.preventDefault();
-    setIsSaving(true);
-    const rawToSave = customSettings || settings;
-    const newCutoff = rawToSave.morningCutoffTime || rawToSave.formationCutoffTime || (rawToSave.musterAndUnit && rawToSave.musterAndUnit.timeInCutoff) || '07:30';
-    const toSave = {
-      ...rawToSave,
-      morningCutoffTime: newCutoff,
-      formationCutoffTime: newCutoff
-    };
+      const toSave = {
+        ...rawToSave,
+        commandingOfficer: activeCommandingOfficer,
+        commanding_officer: activeCommandingOfficer,
+        commandingOfficerTitle: activeOfficerTitle,
+        commanding_officer_title: activeOfficerTitle,
+        signatoryName: activeSignatoryName,
+        id_signatory_name: activeSignatoryName, // 👈 Keep explicitly synced
+        signatoryDesignation: activeSignatoryTitle,
+        id_signatory_title: activeSignatoryTitle, // 👈 Keep explicitly synced
+        morningCutoffTime: newCutoff,
+        formationCutoffTime: newCutoff,
+        unitStructure: activeUnitStructure,
+        unit_structure: activeUnitStructure,
+        updated_at: new Date().toISOString()
+      };
 
     try {
       // 1. Re-evaluate and update all master attendance records against the new cutoff setting
@@ -375,8 +401,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: toSave }));
 
       // 2. Save directly to Supabase Cloud system_settings and propagate to attendance_sessions
+      let cloudResult = null;
       try {
-        await saveSettingsToSupabase(toSave);
+        cloudResult = await saveSettingsToSupabase(toSave);
         await syncSessionCutoffTime(newCutoff);
       } catch (errCloud) {
         console.warn('Supabase save settings error:', errCloud);
@@ -389,10 +416,14 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(toSave)
         });
-      } catch (_) {}
+      } catch (_) { }
 
       setSavedSettings(toSave);
-      setSaveSuccessToast('All settings & unit configurations saved to Cloud Database successfully!');
+      if (cloudResult?.missingUnitStructure) {
+        setSaveSuccessToast('Settings saved locally. Note: Run the SQL migration in Supabase SQL Editor to enable Cloud sync for Unit Structure.');
+      } else {
+        setSaveSuccessToast('All settings & unit configurations saved to Cloud Database successfully!');
+      }
     } catch (err) {
       setSavedSettings(toSave);
       setSaveSuccessToast('Settings saved.');
@@ -850,7 +881,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       }
     }
 
-    const newSettings = { ...settings, unitStructure: updatedStructure };
+    const newSettings = { ...settings, unitStructure: updatedStructure, unit_structure: updatedStructure };
     setSettings(newSettings);
     setIsEchelonModalOpen(false);
   };
@@ -858,11 +889,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   // Open Delete Confirmation
   const handleOpenDeleteEchelon = (level, item, parentId = null) => {
     setEchelonDeleteConfig({ level, item, parentId });
+    if (level === 'company') {
+      const bn = currentStructure.find(b => b.id === (parentId || selectedBnId));
+      const remainingCompanies = (bn?.companies || []).filter(c => c.id !== item.id);
+      setReassignTargetCompany(remainingCompanies[0]?.name || '');
+    } else {
+      setReassignTargetCompany('');
+    }
     setIsEchelonDeleteModalOpen(true);
   };
 
   // Confirm Delete Echelon
-  const handleConfirmDeleteEchelon = () => {
+  const handleConfirmDeleteEchelon = async () => {
     const { level, item, parentId } = echelonDeleteConfig;
     let updatedStructure = JSON.parse(JSON.stringify(currentStructure));
 
@@ -880,11 +918,22 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     } else if (level === 'company') {
       const bnIdx = updatedStructure.findIndex(b => b.id === (parentId || selectedBnId));
       if (bnIdx !== -1) {
-        if (updatedStructure[bnIdx].companies.length <= 1) {
+        const bnObj = updatedStructure[bnIdx];
+        if (bnObj.companies.length <= 1) {
           alert('Cannot delete the only remaining Company in this Battalion.');
           setIsEchelonDeleteModalOpen(false);
           return;
         }
+
+        // Reassign existing cadets and attendance logs if a target company is chosen
+        if (reassignTargetCompany) {
+          try {
+            await reassignCadetsCompany(bnObj.name, item.name, reassignTargetCompany);
+          } catch (e) {
+            console.error('Cadet reassignment error:', e);
+          }
+        }
+
         updatedStructure[bnIdx].companies = updatedStructure[bnIdx].companies.filter(c => c.id !== item.id);
         if (selectedCoId === item.id) {
           setSelectedCoId(updatedStructure[bnIdx].companies[0]?.id || null);
@@ -914,15 +963,34 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       }
     }
 
-    const newSettings = { ...settings, unitStructure: updatedStructure };
+    const newSettings = { ...settings, unitStructure: updatedStructure, unit_structure: updatedStructure };
     setSettings(newSettings);
     setIsEchelonDeleteModalOpen(false);
+  };
+
+  // One-click helper to reassign orphaned cadets (e.g. 2nd Bn Alpha -> Charlie Company)
+  const handleFixOrphanedCadets = async () => {
+    setIsReassigningOrphans(true);
+    try {
+      const res = await reassignCadetsCompany('2nd Battalion', 'Alpha Company', 'Charlie Company');
+      let msg = 'Cadet assignments checked!\n\n';
+      if (res.localCadetsCount > 0 || res.supabaseUpdatedCount > 0) {
+        msg += `✓ Successfully reassigned ${Math.max(res.localCadetsCount, res.supabaseUpdatedCount)} cadets from 2nd Bn Alpha Company to Charlie Company.\n`;
+      } else {
+        msg += '✓ Local records checked. To ensure all cloud records in Supabase are updated, run supabase_reassign_orphaned_cadets.sql in Supabase SQL Editor.\n';
+      }
+      alert(msg);
+    } catch (err) {
+      alert(`Error reassigning cadets: ${err.message}`);
+    } finally {
+      setIsReassigningOrphans(false);
+    }
   };
 
   // Restore Default 1,184 Echelon Structure
   const handleRestoreDefaultStructure = () => {
     if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)? (Click "SAVE ALL SETTINGS" to commit)')) {
-      const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE };
+      const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE, unit_structure: DEFAULT_UNIT_STRUCTURE };
       setSettings(newSettings);
       setSelectedBnId('bn-1');
       setSelectedCoId('co-1-alpha');
@@ -1143,18 +1211,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   Default morning muster deadline (e.g., 07:30 AM). Scans on or before this are marked Present; scans after this are marked Late.
                 </span>
 
-                {/* Status Transition Legend */}
-                <div style={{ marginTop: '0.85rem', padding: '0.75rem 0.9rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.78rem' }}>
-                  <div style={{ fontWeight: 700, color: 'var(--text-dark)', marginBottom: '6px' }}>Automatic Scan Status Transition (Exact Cutoff):</div>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ color: '#065f46', fontWeight: 700, background: '#d1fae5', padding: '4px 10px', borderRadius: '4px' }}>
-                      🟢 On or Before {settings.morningCutoffTime || '07:30'} → PRESENT
-                    </span>
-                    <span style={{ color: '#991b1b', fontWeight: 700, background: '#fee2e2', padding: '4px 10px', borderRadius: '4px' }}>
-                      🔴 After {settings.morningCutoffTime || '07:30'} → LATE
-                    </span>
-                  </div>
-                </div>
+
               </div>
             </div>
           </div>
@@ -1175,6 +1232,27 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  onClick={handleFixOrphanedCadets}
+                  disabled={isReassigningOrphans}
+                  className="btn btn-secondary"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    padding: '0.45rem 0.85rem',
+                    color: '#92400e',
+                    backgroundColor: '#fef3c7',
+                    borderColor: '#fde68a'
+                  }}
+                  title="Reassign cadets from removed companies (e.g. 2nd Bn Alpha -> Charlie Company)"
+                >
+                  <Users size={14} /> {isReassigningOrphans ? 'Reassigning...' : 'Fix Orphaned Cadets (2nd Bn Alpha → Charlie)'}
+                </button>
+
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
@@ -2441,6 +2519,41 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               {echelonDeleteConfig.level === 'battalion' && ' All child companies and platoons belonging to this battalion will also be removed.'}
               {echelonDeleteConfig.level === 'company' && ' All child platoons under this company will also be removed.'}
             </p>
+
+            {echelonDeleteConfig.level === 'company' && (() => {
+              const bn = currentStructure.find(b => b.id === (echelonDeleteConfig.parentId || selectedBnId));
+              const remaining = (bn?.companies || []).filter(c => c.id !== echelonDeleteConfig.item.id);
+              if (remaining.length === 0) return null;
+              return (
+                <div style={{ marginBottom: '1.25rem', padding: '0.85rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#334155', marginBottom: '0.4rem' }}>
+                    Automatically Reassign Existing Cadets To:
+                  </label>
+                  <select
+                    value={reassignTargetCompany}
+                    onChange={(e) => setReassignTargetCompany(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.55rem',
+                      borderRadius: '6px',
+                      border: '1px solid #cbd5e1',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      backgroundColor: '#ffffff'
+                    }}
+                  >
+                    {remaining.map(c => (
+                      <option key={c.id || c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <p style={{ margin: '0.4rem 0 0 0', fontSize: '0.72rem', color: '#64748b' }}>
+                    Cadets currently in {echelonDeleteConfig.item.name} and their attendance logs will be automatically moved to this company.
+                  </p>
+                </div>
+              );
+            })()}
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
               <button

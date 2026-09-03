@@ -6,13 +6,81 @@ import { generateQrPayload } from './IDGenerator';
 export default function IDCardPreview({ card }) {
   if (!card) return null;
 
-  const isOfficer = card.type === 'officer' || card.battalion === 'CADET OFFICERS' || card.battalion === 'Brigade HQ';
-  const rawDesignation = (card.designation && card.designation !== 'None')
-    ? card.designation
-    : (card.platoon && card.platoon !== '1st Platoon' ? card.platoon : 'Corps Command Staff');
+  // Directly feed selected battalion to badge text
+  const selectedBattalion = (
+    card.battalion && card.battalion !== 'CADET OFFICERS' && card.battalion !== 'None'
+      ? card.battalion
+      : (card.unit || '1st Battalion')
+  ).toUpperCase();
 
-  const cleanName = (card.name || 'SANTOS, MARIA L').replace(/\.$/, '');
-  const cleanId = card.id || '221-11101';
+  const formattedCompany = (
+    card.company
+      ? (card.company.includes('Coy') || card.company.includes('Company') ? card.company : `${card.company} Company`)
+      : 'Alpha Company'
+  ).toUpperCase();
+
+  const formattedPlatoon = (card.platoon || '1st Platoon').toUpperCase()
+
+  const unitLine1 = `${selectedBattalion} • ${formattedCompany}`;
+  const unitLine2 = formattedPlatoon;
+  const fullUnitBadge = `${unitLine1} • ${unitLine2}`;
+
+  const currentSettings = (() => {
+    try {
+      const raw = localStorage.getItem('csu_rotc_admin_settings');
+      return raw ? JSON.parse(raw) : null;
+    } catch (_) { return null; }
+  })();
+  const activeSignatoryName = card.signatoryName || currentSettings?.id_signatory_name || currentSettings?.signatoryName || currentSettings?.commanding_officer || currentSettings?.commandingOfficer || 'COL CHARIS J ABAMO INF (GSC) PA';
+  const activeSignatoryTitle = card.signatoryTitle || currentSettings?.id_signatory_title || currentSettings?.signatoryDesignation || currentSettings?.commanding_officer_title || currentSettings?.commandingOfficerTitle || 'Commandant, CSU ROTC Unit';
+  const activeSignatureUrl = card.signatureUrl || currentSettings?.id_signature_url || currentSettings?.signatureImageUrl || '';
+
+
+
+  const cleanName = (card.name || 'LASTNAME, FIRSTNAME M.I.').replace(/\.$/, '');
+  const cleanId = card.id || card.cadetId || '221-00000';
+
+  // Derive Officer status and designation directly from card rank, type, battalion, and designation
+  const isOfficer = Boolean(
+    card.isOfficer ||
+    card.type === 'Cadet Officer' ||
+    card.battalion === 'CADET OFFICERS' ||
+    String(card.rank || '').toUpperCase().includes('1CL') ||
+    String(card.rank || '').toUpperCase().includes('2CL') ||
+    String(card.rank || '').toUpperCase().includes('3CL') ||
+    String(card.rank || '').toUpperCase().includes('4CL') ||
+    String(card.rank || '').toUpperCase().includes('COL') ||
+    String(card.rank || '').toUpperCase().includes('MAJ') ||
+    String(card.rank || '').toUpperCase().includes('CPT') ||
+    String(card.rank || '').toUpperCase().includes('LT') ||
+    String(card.rank || '').toLowerCase().includes('officer')
+  );
+
+  const rawDesignation = String(
+    card.designation && card.designation !== 'None'
+      ? card.designation
+      : (card.platoon || (isOfficer ? 'RANK / POSITION' : '1ST PLATOON'))
+  ).trim().toUpperCase();
+
+  // Dynamic font scaling & tracking for Cadet Name to enforce single-line layout
+  const getNameStyles = (nameStr) => {
+    const len = (nameStr || '').length;
+    if (len > 28) {
+      return { fontSize: '0.62rem', letterSpacing: '-0.4px' };
+    }
+    if (len > 24) {
+      return { fontSize: '0.68rem', letterSpacing: '-0.3px' };
+    }
+    if (len > 20) {
+      return { fontSize: '0.74rem', letterSpacing: '-0.2px' };
+    }
+    if (len > 16) {
+      return { fontSize: '0.82rem', letterSpacing: '-0.1px' };
+    }
+    return { fontSize: '0.94rem', letterSpacing: '0px' };
+  };
+
+  const nameStyles = getNameStyles(cleanName);
 
   // S7 Specific 2-Line Split Rule
   const isS7CivilMilitary = isOfficer && rawDesignation.toLowerCase().includes('s7') && rawDesignation.toLowerCase().includes('civil military');
@@ -54,9 +122,23 @@ export default function IDCardPreview({ card }) {
           </div>
 
           {/* Cadet Details */}
-          <div className="cr80-info">
-            <div className="cr80-name">{cleanName}</div>
-            <div className="cr80-rank">{card.rank || 'Cadet'}</div>
+          <div className="cr80-info" style={{ minWidth: 0 }}>
+            <div
+              className="cr80-name"
+              title={cleanName}
+              style={{
+                fontSize: nameStyles.fontSize,
+                letterSpacing: nameStyles.letterSpacing,
+                whiteSpace: 'nowrap',
+                maxWidth: '100%',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                lineHeight: 1.15
+              }}
+            >
+              {cleanName}
+            </div>
+            <div className="cr80-rank">CADET</div>
 
             {/* Echelon Badge Container */}
             {isOfficer ? (
@@ -88,7 +170,7 @@ export default function IDCardPreview({ card }) {
                 </div>
               ) : (
                 <div className="cr80-echelon-badge" style={{
-                  fontSize: rawDesignation.length > 22 ? '0.54rem' : '0.62rem',
+                  fontSize: rawDesignation.length > 28 ? '0.49rem' : rawDesignation.length > 20 ? '0.54rem' : '0.62rem',
                   fontWeight: 800,
                   color: 'var(--rotc-green-dark)',
                   background: 'rgba(6, 78, 46, 0.08)',
@@ -112,24 +194,30 @@ export default function IDCardPreview({ card }) {
               )
             ) : (
               <div className="cr80-echelon-badge cr80-echelon-badge-basic" style={{
-                fontSize: '0.60rem',
+                fontSize: '0.52rem',
                 fontWeight: 800,
                 color: 'var(--rotc-green-dark)',
                 background: 'rgba(6, 78, 46, 0.08)',
                 border: '1px solid rgba(6, 78, 46, 0.18)',
-                padding: '2px 5px',
+                padding: '2px 6px',
                 borderRadius: '5px',
                 display: 'inline-flex',
                 flexDirection: 'column',
-                gap: '1px',
+                alignItems: 'flex-start',
+                justifyContent: 'center',
+                textAlign: 'left',
                 margin: '2px 0',
-                lineHeight: 1.2
+                lineHeight: 1.18,
+                letterSpacing: '0.2px',
+                textTransform: 'uppercase',
+                maxWidth: '100%',
+                width: 'fit-content'
               }}>
-                <div>
-                  {`${card.battalion || '1st Battalion'} • ${card.company ? (card.company.includes('Coy') || card.company.includes('Company') ? card.company : `${card.company} Coy`) : 'Alpha Coy'}`}
+                <div style={{ whiteSpace: 'nowrap', fontSize: '0.50rem', textAlign: 'left' }}>
+                  {unitLine1}
                 </div>
-                <div style={{ color: '#047857', fontWeight: 700 }}>
-                  {`${card.platoon || '1st Platoon'}`}
+                <div style={{ color: '#047857', fontWeight: 800, fontSize: '0.49rem', whiteSpace: 'nowrap', textAlign: 'left', alignSelf: 'flex-start' }}>
+                  {unitLine2}
                 </div>
               </div>
             )}
@@ -178,9 +266,29 @@ export default function IDCardPreview({ card }) {
             <div className="emerg-detail">Unit Strength: 1,184 Cadets • 1501st CDC</div>
           </div>
 
-          <div className="back-signature-box">
+          <div className="back-signature-box" style={{ position: 'relative', textAlign: 'center' }}>
+            {activeSignatureUrl && (
+              <img
+                src={activeSignatureUrl}
+                alt="Signature"
+                style={{
+                  position: 'absolute',
+                  bottom: '22px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  maxHeight: '44px',
+                  pointerEvents: 'none',
+                  filter: 'contrast(1.2)'
+                }}
+              />
+            )}
             <div className="sig-line"></div>
-            <div className="sig-label">ROTC COMMANDANT SIGNATURE</div>
+            <div className="sig-label" style={{ fontWeight: 800, fontSize: '0.66rem', letterSpacing: '0.03em', color: '#0f172a' }}>
+              {activeSignatoryName}
+            </div>
+            <div className="sig-sublabel" style={{ fontSize: '0.55rem', fontWeight: 600, color: '#64748b', textTransform: 'uppercase', marginTop: '1px' }}>
+              {activeSignatoryTitle}
+            </div>
           </div>
         </div>
 

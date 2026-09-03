@@ -65,9 +65,11 @@ export default function BatchScannerModal({
       const sessionName = raw.s || `${bn} - ${co} (${pl})`;
       const rawMode = String(raw.m || '').toUpperCase();
       const resolvedScanMode = rawMode.includes('OUT') ? 'Time-Out' : 'Time-In';
+      const batchId = raw.b || raw.bid || raw.batchId || null;
 
       return {
         type: 'ROTC_BATCH_SYNC',
+        batchId: batchId,
         dutyOfficer: dutyOfficer,
         sessionName: sessionName,
         battalion: bn,
@@ -79,30 +81,83 @@ export default function BatchScannerModal({
         totalPages: raw.n || 1,
         records: (raw.r || []).map((rec) => {
           if (typeof rec === 'string') {
+            // Support string format with optional embedded timestamp "ID@epoch"
+            let cId = rec.trim();
+            let parsedTime = null;
+            if (cId.includes('@')) {
+              const parts = cId.split('@');
+              cId = parts[0].trim();
+              const num = Number(parts[1]);
+              if (!isNaN(num) && num > 0) {
+                parsedTime = num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString();
+              }
+            }
             return {
-              cadetId: rec.trim(),
+              cadetId: cId,
               name: '',
               battalion: bn,
               company: co,
               platoon: pl,
               rank: 'Cadet',
               scanMode: resolvedScanMode,
-              timestamp: new Date().toISOString()
+              timestamp: parsedTime || new Date().toISOString()
             };
           }
+
           if (Array.isArray(rec)) {
+            const cid = String(rec[0] || '').trim();
+            let itemMode = resolvedScanMode;
+            let itemTimestamp = null;
+
+            if (rec.length === 2) {
+              // Format: [cadetId, epochSeconds]
+              const tVal = rec[1];
+              if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
+                itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
+              } else if (typeof tVal === 'string' && tVal.trim()) {
+                const num = Number(tVal);
+                itemTimestamp = !isNaN(num) && num > 0
+                  ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+                  : tVal;
+              }
+            } else if (rec.length >= 3) {
+              // Format: [cadetId, mode, epochSeconds]
+              itemMode = rec[1] === 0 || String(rec[1]).toUpperCase().includes('OUT') ? 'Time-Out' : resolvedScanMode;
+              const tVal = rec[2];
+              if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
+                itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
+              } else if (typeof tVal === 'string' && tVal.trim()) {
+                const num = Number(tVal);
+                itemTimestamp = !isNaN(num) && num > 0
+                  ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+                  : tVal;
+              }
+            }
+
             return {
-              cadetId: String(rec[0] || '').trim(),
+              cadetId: cid,
               name: '',
               battalion: bn,
               company: co,
               platoon: pl,
               rank: 'Cadet',
-              scanMode: rec[1] === 0 || String(rec[1]).toUpperCase().includes('OUT') ? 'Time-Out' : resolvedScanMode,
-              timestamp: rec[2] ? new Date(rec[2] * 1000).toISOString() : new Date().toISOString()
+              scanMode: itemMode,
+              timestamp: itemTimestamp || new Date().toISOString()
             };
           }
+
           const itemMode = rec.m !== undefined ? (rec.m === 0 || String(rec.m).toUpperCase().includes('OUT') ? 'Time-Out' : 'Time-In') : resolvedScanMode;
+          const rawT = rec.t !== undefined ? rec.t : rec.timestamp;
+          let objTimestamp = null;
+          if (typeof rawT === 'number' && !isNaN(rawT) && rawT > 0) {
+            objTimestamp = rawT > 1e11 ? new Date(rawT).toISOString() : new Date(rawT * 1000).toISOString();
+          } else if (typeof rawT === 'string' && rawT.trim()) {
+            const num = Number(rawT);
+            objTimestamp = !isNaN(num) && num > 0
+              ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+              : rawT;
+          }
+
           return {
             cadetId: rec.i || rec.cadetId || rec.id,
             name: rec.n || rec.name || '',
@@ -111,7 +166,7 @@ export default function BatchScannerModal({
             platoon: rec.pl || pl,
             rank: rec.rk || 'Cadet',
             scanMode: itemMode,
-            timestamp: rec.t ? new Date(rec.t * 1000).toISOString() : rec.timestamp || new Date().toISOString()
+            timestamp: objTimestamp || new Date().toISOString()
           };
         })
       };
@@ -287,14 +342,32 @@ export default function BatchScannerModal({
       const pageNum = payload.page;
       const total = payload.totalPages;
       const echelonKey = `${payload.dutyOfficer}__${payload.battalion}__${payload.company}__${payload.platoon}`;
+      const batchId = payload.batchId || raw.b || raw.bid || null;
+      const batchAccumulatorKey = batchId
+        ? `${echelonKey}__${batchId}`
+        : `${echelonKey}__total${total}`;
 
-      // Reset accumulation if different officer/echelon is presented
-      if (activeBatchKeyRef.current && activeBatchKeyRef.current !== echelonKey) {
+      // Reset accumulation if different officer/echelon OR different batch session is presented
+      if (activeBatchKeyRef.current && activeBatchKeyRef.current !== batchAccumulatorKey) {
         pagesScannedRef.current = [];
         collectedRecordsRef.current = [];
         totalPagesRef.current = null;
       }
-      activeBatchKeyRef.current = echelonKey;
+      activeBatchKeyRef.current = batchAccumulatorKey;
+
+      // If total page count changed, reset immediately to prevent stale page merge
+      if (totalPagesRef.current !== null && totalPagesRef.current !== total) {
+        pagesScannedRef.current = [];
+        collectedRecordsRef.current = [];
+        totalPagesRef.current = null;
+      }
+
+      // If Page 1 is scanned again after previously scanning other pages, treat as intentional batch restart
+      if (pageNum === 1 && pagesScannedRef.current.includes(1) && pagesScannedRef.current.length > 1) {
+        pagesScannedRef.current = [];
+        collectedRecordsRef.current = [];
+        totalPagesRef.current = null;
+      }
 
       if (pagesScannedRef.current.includes(pageNum)) {
         isProcessingRef.current = true;

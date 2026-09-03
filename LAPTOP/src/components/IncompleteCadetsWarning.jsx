@@ -8,7 +8,7 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
     const isMissingProgram = !cadet.program && !cadet.course && !cadet.degree;
     const isMissingContact = !cadet.contact_number && !cadet.contactNumber;
     const isMissingGender = !cadet.gender;
-    const isMissingAddress = !cadet.province && !cadet.city && !cadet.barangay && !cadet.address;
+    const isMissingAddress = !cadet.address && (!cadet.province || !cadet.city || !cadet.barangay);
     const isMissingReligion = !cadet.religion;
 
     return (
@@ -106,14 +106,14 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
           if (!cadet.department) missing.push('Department');
           if (!cadet.program && !cadet.course && !cadet.degree) missing.push('Program');
           if (!cadet.contact_number && !cadet.contactNumber) missing.push('Contact #');
-          if (!cadet.province && !cadet.city && !cadet.barangay && !cadet.address) missing.push('Address');
+          if (!cadet.address && (!cadet.province || !cadet.city || !cadet.barangay)) missing.push('Address');
           if (!cadet.religion) missing.push('Religion');
 
           return (
             <button
               key={cadet.id}
               type="button"
-              onClick={() => onEditCadet(cadet)}
+              onClick={() => onEditCadet({ ...cadet, _highlightMissing: true })}
               className="flex items-center justify-between p-3 bg-white hover:bg-amber-100/50 border border-amber-200/80 hover:border-amber-400 rounded-xl transition-all text-left group shadow-2xs"
               style={{
                 display: 'flex',
@@ -167,7 +167,12 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
                   {missing.map((item, idx) => (
                     <span
                       key={idx}
-                      className="text-[9.5px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md border border-rose-200"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onEditCadet({ ...cadet, _highlightMissing: true, focusField: item });
+                      }}
+                      title={`Click to edit missing ${item}`}
+                      className="text-[9.5px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md border border-rose-200 hover:bg-rose-200 transition-colors cursor-pointer"
                       style={{
                         fontSize: '0.6rem',
                         fontWeight: 900,
@@ -177,7 +182,8 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
                         color: '#9f1239',
                         padding: '0.125rem 0.375rem',
                         borderRadius: '0.375rem',
-                        border: '1px solid #fecdd3'
+                        border: '1px solid #fecdd3',
+                        cursor: 'pointer'
                       }}
                     >
                       Missing {item}
