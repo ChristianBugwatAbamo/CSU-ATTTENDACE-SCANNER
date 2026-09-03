@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useUnitStructure } from '../context/UnitContext';
 import {
   Settings,
   Shield,
@@ -175,6 +176,7 @@ const DEFAULT_SETTINGS = {
 };
 
 export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefresh, serverOnline }) {
+  const { updateUnitStructure } = useUnitStructure();
   // Active top tab: 'structure' | 'branding' | 'storage' | 'idprinting'
   const [activeTab, setActiveTab] = useState('structure');
 
@@ -246,141 +248,141 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           const loadedSignatoryTitle = sbSettings.id_signatory_title || loadedOfficerTitle;
 
           finalSettings = {
+            ...DEFAULT_SETTINGS,
+            ...sbSettings,
+            morningCutoffTime: loadedCutoff,
+            formationCutoffTime: loadedCutoff,
+            formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
+            cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
+            totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
+            unitStructure: loadedUnitStructure,
+            unit_structure: loadedUnitStructure,
+            unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
+            commandingOfficer: loadedCommandingOfficer,
+            commanding_officer: loadedCommandingOfficer,
+            commandingOfficerTitle: loadedOfficerTitle,
+            commanding_officer_title: loadedOfficerTitle,
+            parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
+            hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution,
+            rotcSealUrl: sbSettings.rotc_seal_url || DEFAULT_SETTINGS.rotcSealUrl,
+            universityLogoUrl: sbSettings.university_logo_url || DEFAULT_SETTINGS.universityLogoUrl,
+            exportDirectory: sbSettings.excel_export_path || DEFAULT_SETTINGS.exportDirectory,
+            letterheadConfig: sbSettings.letterhead_config || DEFAULT_SETTINGS.letterheadConfig,
+            autoBackupEnabled: sbSettings.auto_backup_enabled !== false,
+            signatoryName: loadedSignatoryName,
+            id_signatory_name: loadedSignatoryName,
+            signatoryDesignation: loadedSignatoryTitle,
+            id_signatory_title: loadedSignatoryTitle,
+            signatureImageUrl: sbSettings.id_signature_url || DEFAULT_SETTINGS.signatureImageUrl,
+            cardOrientation: sbSettings.id_card_orientation || DEFAULT_SETTINGS.cardOrientation,
+            officerRanks: (Array.isArray(sbSettings.officer_ranks_list) && sbSettings.officer_ranks_list.length > 0) ? sbSettings.officer_ranks_list : (sbSettings.officerRanks || DEFAULT_OFFICER_RANKS),
+            officerDesignations: (Array.isArray(sbSettings.officer_roles_list) && sbSettings.officer_roles_list.length > 0) ? sbSettings.officer_roles_list : (sbSettings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS)
+          };
+        }
+      } catch (_) { }
+
+      // 2. Local fallback if Supabase not yet populated
+      if (!finalSettings || Object.keys(finalSettings).length <= 5) {
+        try {
+          const res = await fetch('/api/settings');
+          if (res.ok) {
+            const data = await res.json();
+            const loadedLocalStructure = (Array.isArray(data.unit_structure) && data.unit_structure.length > 0)
+              ? data.unit_structure
+              : (Array.isArray(data.unitStructure) && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE);
+            const localOfficer = data.commandingOfficer || data.commanding_officer || DEFAULT_SETTINGS.commandingOfficer;
+            const localTitle = data.commandingOfficerTitle || data.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle;
+            const localSignatory = data.signatoryName || data.id_signatory_name || localOfficer;
+            const localSignatoryTitle = data.signatoryDesignation || data.id_signatory_title || localTitle;
+            finalSettings = {
               ...DEFAULT_SETTINGS,
-              ...sbSettings,
-              morningCutoffTime: loadedCutoff,
-              formationCutoffTime: loadedCutoff,
-              formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
-              cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
-              totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
-              unitStructure: loadedUnitStructure,
-              unit_structure: loadedUnitStructure,
-              unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
-              commandingOfficer: loadedCommandingOfficer,
-              commanding_officer: loadedCommandingOfficer,
-              commandingOfficerTitle: loadedOfficerTitle,
-              commanding_officer_title: loadedOfficerTitle,
-              parentCommand: sbSettings.parent_command || DEFAULT_SETTINGS.parentCommand,
-              hostInstitution: sbSettings.host_institution || DEFAULT_SETTINGS.hostInstitution,
-              rotcSealUrl: sbSettings.rotc_seal_url || DEFAULT_SETTINGS.rotcSealUrl,
-              universityLogoUrl: sbSettings.university_logo_url || DEFAULT_SETTINGS.universityLogoUrl,
-              exportDirectory: sbSettings.excel_export_path || DEFAULT_SETTINGS.exportDirectory,
-              letterheadConfig: sbSettings.letterhead_config || DEFAULT_SETTINGS.letterheadConfig,
-              autoBackupEnabled: sbSettings.auto_backup_enabled !== false,
-              signatoryName: loadedSignatoryName,
-              id_signatory_name: loadedSignatoryName,
-              signatoryDesignation: loadedSignatoryTitle,
-              id_signatory_title: loadedSignatoryTitle,
-              signatureImageUrl: sbSettings.id_signature_url || DEFAULT_SETTINGS.signatureImageUrl,
-              cardOrientation: sbSettings.id_card_orientation || DEFAULT_SETTINGS.cardOrientation,
-              officerRanks: (Array.isArray(sbSettings.officer_ranks_list) && sbSettings.officer_ranks_list.length > 0) ? sbSettings.officer_ranks_list : (sbSettings.officerRanks || DEFAULT_OFFICER_RANKS),
-              officerDesignations: (Array.isArray(sbSettings.officer_roles_list) && sbSettings.officer_roles_list.length > 0) ? sbSettings.officer_roles_list : (sbSettings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS)
+              ...data,
+              morningCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.morningCutoffTime,
+              formationCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.formationCutoffTime,
+              unitStructure: loadedLocalStructure,
+              unit_structure: loadedLocalStructure,
+              commandingOfficer: localOfficer,
+              commanding_officer: localOfficer,
+              commandingOfficerTitle: localTitle,
+              commanding_officer_title: localTitle,
+              signatoryName: localSignatory,
+              id_signatory_name: localSignatory,
+              signatoryDesignation: localSignatoryTitle,
+              id_signatory_title: localSignatoryTitle,
+              officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
+              officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
             };
           }
         } catch (_) { }
+      }
 
-        // 2. Local fallback if Supabase not yet populated
-        if (!finalSettings || Object.keys(finalSettings).length <= 5) {
-          try {
-            const res = await fetch('/api/settings');
-            if (res.ok) {
-              const data = await res.json();
-              const loadedLocalStructure = (Array.isArray(data.unit_structure) && data.unit_structure.length > 0)
-                ? data.unit_structure
-                : (Array.isArray(data.unitStructure) && data.unitStructure.length > 0 ? data.unitStructure : DEFAULT_UNIT_STRUCTURE);
-              const localOfficer = data.commandingOfficer || data.commanding_officer || DEFAULT_SETTINGS.commandingOfficer;
-              const localTitle = data.commandingOfficerTitle || data.commanding_officer_title || DEFAULT_SETTINGS.commandingOfficerTitle;
-              const localSignatory = data.signatoryName || data.id_signatory_name || localOfficer;
-              const localSignatoryTitle = data.signatoryDesignation || data.id_signatory_title || localTitle;
-              finalSettings = {
-                ...DEFAULT_SETTINGS,
-                ...data,
-                morningCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.morningCutoffTime,
-                formationCutoffTime: data.morningCutoffTime || data.formationCutoffTime || DEFAULT_SETTINGS.formationCutoffTime,
-                unitStructure: loadedLocalStructure,
-                unit_structure: loadedLocalStructure,
-                commandingOfficer: localOfficer,
-                commanding_officer: localOfficer,
-                commandingOfficerTitle: localTitle,
-                commanding_officer_title: localTitle,
-                signatoryName: localSignatory,
-                id_signatory_name: localSignatory,
-                signatoryDesignation: localSignatoryTitle,
-                id_signatory_title: localSignatoryTitle,
-                officerRanks: data.officerRanks && data.officerRanks.length > 0 ? data.officerRanks : DEFAULT_OFFICER_RANKS,
-                officerDesignations: data.officerDesignations && data.officerDesignations.length > 0 ? data.officerDesignations : DEFAULT_OFFICER_DESIGNATIONS
-              };
-            }
-          } catch (_) { }
-        }
-
-        setSettings(finalSettings);
-        setSavedSettings(finalSettings);
-      };
-      loadSettings();
-    }, []);
-
-    // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
-    useEffect(() => {
-      const handleKeyDown = (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-          e.preventDefault();
-          handleSaveSettings();
-        }
-      };
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [settings]);
-
-    const handleChange = (field, value) => {
-      setSettings(prev => {
-        const next = { ...prev, [field]: value };
-        // 👈 Automatically sync ID Signatory name & title whenever Commanding Officer is modified
-        if (field === 'commandingOfficer') {
-          next.commanding_officer = value;
-          next.signatoryName = value;
-          next.id_signatory_name = value;
-        } else if (field === 'commandingOfficerTitle') {
-          next.commanding_officer_title = value;
-          next.signatoryDesignation = value;
-          next.id_signatory_title = value;
-        } else if (field === 'signatoryName') {
-          next.id_signatory_name = value;
-        } else if (field === 'signatoryDesignation') {
-          next.id_signatory_title = value;
-        }
-        return next;
-      });
+      setSettings(finalSettings);
+      setSavedSettings(finalSettings);
     };
+    loadSettings();
+  }, []);
 
-    // Save Settings Handler (Centralized for all 4 tabs)
-    const handleSaveSettings = async (e, customSettings = null) => {
-      if (e) e.preventDefault();
-      setIsSaving(true);
-      const rawToSave = customSettings || settings;
-      const newCutoff = rawToSave.morningCutoffTime || rawToSave.formationCutoffTime || (rawToSave.musterAndUnit && rawToSave.musterAndUnit.timeInCutoff) || '07:30';
-      const activeUnitStructure = rawToSave.unit_structure || rawToSave.unitStructure || currentStructure || DEFAULT_UNIT_STRUCTURE;
-      const activeCommandingOfficer = rawToSave.commandingOfficer || rawToSave.commanding_officer || 'COL CHARIS J ABAMO INF (GSC) PA';
-      const activeOfficerTitle = rawToSave.commandingOfficerTitle || rawToSave.commanding_officer_title || 'Commandant, CSU ROTC Unit';
-      const activeSignatoryName = rawToSave.signatoryName || activeCommandingOfficer;
-      const activeSignatoryTitle = rawToSave.signatoryDesignation || activeOfficerTitle;
+  // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSaveSettings();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [settings]);
 
-      const toSave = {
-        ...rawToSave,
-        commandingOfficer: activeCommandingOfficer,
-        commanding_officer: activeCommandingOfficer,
-        commandingOfficerTitle: activeOfficerTitle,
-        commanding_officer_title: activeOfficerTitle,
-        signatoryName: activeSignatoryName,
-        id_signatory_name: activeSignatoryName, // 👈 Keep explicitly synced
-        signatoryDesignation: activeSignatoryTitle,
-        id_signatory_title: activeSignatoryTitle, // 👈 Keep explicitly synced
-        morningCutoffTime: newCutoff,
-        formationCutoffTime: newCutoff,
-        unitStructure: activeUnitStructure,
-        unit_structure: activeUnitStructure,
-        updated_at: new Date().toISOString()
-      };
+  const handleChange = (field, value) => {
+    setSettings(prev => {
+      const next = { ...prev, [field]: value };
+      // 👈 Automatically sync ID Signatory name & title whenever Commanding Officer is modified
+      if (field === 'commandingOfficer') {
+        next.commanding_officer = value;
+        next.signatoryName = value;
+        next.id_signatory_name = value;
+      } else if (field === 'commandingOfficerTitle') {
+        next.commanding_officer_title = value;
+        next.signatoryDesignation = value;
+        next.id_signatory_title = value;
+      } else if (field === 'signatoryName') {
+        next.id_signatory_name = value;
+      } else if (field === 'signatoryDesignation') {
+        next.id_signatory_title = value;
+      }
+      return next;
+    });
+  };
+
+  // Save Settings Handler (Centralized for all 4 tabs)
+  const handleSaveSettings = async (e, customSettings = null) => {
+    if (e) e.preventDefault();
+    setIsSaving(true);
+    const rawToSave = customSettings || settings;
+    const newCutoff = rawToSave.morningCutoffTime || rawToSave.formationCutoffTime || (rawToSave.musterAndUnit && rawToSave.musterAndUnit.timeInCutoff) || '07:30';
+    const activeUnitStructure = rawToSave.unit_structure || rawToSave.unitStructure || currentStructure || DEFAULT_UNIT_STRUCTURE;
+    const activeCommandingOfficer = rawToSave.commandingOfficer || rawToSave.commanding_officer || 'COL CHARIS J ABAMO INF (GSC) PA';
+    const activeOfficerTitle = rawToSave.commandingOfficerTitle || rawToSave.commanding_officer_title || 'Commandant, CSU ROTC Unit';
+    const activeSignatoryName = rawToSave.signatoryName || activeCommandingOfficer;
+    const activeSignatoryTitle = rawToSave.signatoryDesignation || activeOfficerTitle;
+
+    const toSave = {
+      ...rawToSave,
+      commandingOfficer: activeCommandingOfficer,
+      commanding_officer: activeCommandingOfficer,
+      commandingOfficerTitle: activeOfficerTitle,
+      commanding_officer_title: activeOfficerTitle,
+      signatoryName: activeSignatoryName,
+      id_signatory_name: activeSignatoryName, // 👈 Keep explicitly synced
+      signatoryDesignation: activeSignatoryTitle,
+      id_signatory_title: activeSignatoryTitle, // 👈 Keep explicitly synced
+      morningCutoffTime: newCutoff,
+      formationCutoffTime: newCutoff,
+      unitStructure: activeUnitStructure,
+      unit_structure: activeUnitStructure,
+      updated_at: new Date().toISOString()
+    };
 
     try {
       // 1. Re-evaluate and update all master attendance records against the new cutoff setting
@@ -883,6 +885,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
     const newSettings = { ...settings, unitStructure: updatedStructure, unit_structure: updatedStructure };
     setSettings(newSettings);
+    if (updateUnitStructure) updateUnitStructure(updatedStructure);
     setIsEchelonModalOpen(false);
   };
 
@@ -965,6 +968,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
     const newSettings = { ...settings, unitStructure: updatedStructure, unit_structure: updatedStructure };
     setSettings(newSettings);
+    if (updateUnitStructure) updateUnitStructure(updatedStructure);
     setIsEchelonDeleteModalOpen(false);
   };
 
@@ -992,6 +996,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)? (Click "SAVE ALL SETTINGS" to commit)')) {
       const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE, unit_structure: DEFAULT_UNIT_STRUCTURE };
       setSettings(newSettings);
+      if (updateUnitStructure) updateUnitStructure(DEFAULT_UNIT_STRUCTURE);
       setSelectedBnId('bn-1');
       setSelectedCoId('co-1-alpha');
     }
@@ -1793,43 +1798,91 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           TAB 4: DATA MANAGEMENT & EXPORTS
           ========================================================================= */}
       {activeTab === 'storage' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-          {/* Storage Paths & Sync */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Database size={20} />
-                <span>Data Directories & Backups</span>
-              </div>
-              <span className="badge badge-present">STORAGE ENGINE</span>
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem', width: '100%' }}>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+          {/* Top 2-Column Equal-Width Row (50% / 50% Stretched on Desktop) */}
+          <div
+            className="storage-grid-container"
+            style={{
+              display: 'grid',
+              gap: '1.75rem',
+              width: '100%',
+              alignItems: 'stretch'
+            }}
+          >
+            {/* 1. Data Directories & Backups Card */}
+            <div
+              className="card"
+              style={{
+                backgroundColor: 'rgba(248, 250, 252, 0.85)',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: '16px',
+                padding: '2rem',
+                margin: 0,
+                boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.05)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '1.5rem',
+                width: '100%'
+              }}
+            >
               <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                  Excel Export Directory
-                </label>
-                <input
-                  type="text"
-                  className="form-control"
-                  value={settings.exportDirectory}
-                  onChange={(e) => handleChange('exportDirectory', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Location where periodic master .xlsx reports are generated.
-                </span>
+                <div className="card-header" style={{ marginBottom: '1.25rem', paddingBottom: '0.85rem' }}>
+                  <div className="card-title" style={{ fontSize: '1.1rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Database size={22} color="var(--rotc-green-dark)" />
+                    <span>Data Directories & Backups</span>
+                  </div>
+                  <span className="badge badge-present" style={{ fontSize: '0.72rem', letterSpacing: '0.04em' }}>STORAGE ENGINE</span>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.86rem', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '0.45rem' }}>
+                      Excel Export Directory
+                    </label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={settings.exportDirectory}
+                      onChange={(e) => handleChange('exportDirectory', e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '0.85rem 1rem',
+                        borderRadius: '10px',
+                        border: '1.5px solid #cbd5e1',
+                        fontSize: '0.95rem',
+                        background: '#ffffff',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
+                      }}
+                      placeholder="e.g., C:/Users/.../Desktop/ROTC ATTENDANCE/EXPORTS"
+                    />
+                    <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '6px', display: 'block' }}>
+                      Designated local storage path where periodic master and platoon <code>.xlsx</code> attendance reports are saved.
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* JSON Backup & Restore Actions */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.5rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.85rem', paddingTop: '1.25rem', borderTop: '1px solid #e2e8f0' }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
                   onClick={handleDownloadBackup}
-                  style={{ padding: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem' }}
+                  style={{
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    borderRadius: '10px',
+                    width: '100%'
+                  }}
                 >
-                  <Download size={16} />
+                  <Download size={17} />
                   <span>Download Backup JSON</span>
                 </button>
 
@@ -1844,134 +1897,187 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="button"
                   className="btn btn-secondary"
                   onClick={() => backupFileInputRef.current?.click()}
-                  style={{ padding: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', fontSize: '0.85rem' }}
+                  style={{
+                    padding: '0.85rem 1rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    fontSize: '0.88rem',
+                    fontWeight: 700,
+                    borderRadius: '10px',
+                    width: '100%'
+                  }}
                 >
-                  <Upload size={16} />
+                  <Upload size={17} />
                   <span>Restore from Backup</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Official Excel Report Letterhead & Signatories Card */}
+            <div
+              className="card"
+              style={{
+                backgroundColor: 'rgba(248, 250, 252, 0.85)',
+                border: '1.5px solid #cbd5e1',
+                borderRadius: '16px',
+                padding: '2rem',
+                margin: 0,
+                boxShadow: '0 4px 16px -2px rgba(0, 0, 0, 0.05)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '1.5rem',
+                width: '100%'
+              }}
+            >
+              <div>
+                <div className="card-header" style={{ marginBottom: '1.25rem', paddingBottom: '0.85rem' }}>
+                  <div className="card-title" style={{ fontSize: '1.1rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <FileSpreadsheet size={22} color="var(--rotc-green-dark)" />
+                    <span>Official Excel Report Letterhead & Signatories</span>
+                  </div>
+                  <span className="badge badge-present" style={{ fontSize: '0.72rem', letterSpacing: '0.04em' }}>EXCEL LETTERHEAD</span>
+                </div>
+
+                <div style={{ background: '#ffffff', borderRadius: '12px', border: '1px solid #e2e8f0', padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>
+                    Military Form Header Template
+                  </div>
+                  <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.55 }}>
+                    Configure the official military letterhead text (Motto, Headquarters, Parent Command, Unit Name, Location, and Commandant / Signatory titles) automatically printed on every <code>[Company] - [Platoon]</code> sheet when saving attendance to Excel.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-gold"
+                  onClick={() => setIsLetterheadModalOpen(true)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
+                    fontWeight: 800,
+                    padding: '0.85rem 1.5rem',
+                    fontSize: '0.9rem',
+                    borderRadius: '10px',
+                    width: '100%',
+                    boxShadow: '0 2px 8px rgba(229, 169, 0, 0.25)'
+                  }}
+                >
+                  <Settings size={18} />
+                  <span>Open Letterhead & Signatories Editor</span>
                 </button>
               </div>
             </div>
           </div>
 
-          {/* Official Excel Report Letterhead & Signatories Card */}
-          <div className="card" style={{ border: '1px solid var(--border-light)' }}>
-            <div className="card-header">
-              <div className="card-title">
-                <FileSpreadsheet size={20} style={{ color: 'var(--rotc-green-dark)' }} />
-                <span>Official Excel Report Letterhead & Signatories</span>
-              </div>
-              <span className="badge badge-present">EXCEL LETTERHEAD</span>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>
-                Configure the official military letterhead text (Motto, Headquarters, Parent Command, Unit Name, Location, and Commandant / Signatory titles) automatically printed on every <code>[Company] - [Platoon]</code> sheet when saving attendance to Excel.
-              </p>
-
-              <button
-                type="button"
-                className="btn btn-gold"
-                onClick={() => setIsLetterheadModalOpen(true)}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  fontWeight: 800,
-                  padding: '0.65rem 1rem'
-                }}
-              >
-                <Settings size={16} /> Open Letterhead & Signatories Editor
-              </button>
-            </div>
-          </div>
-
-          {/* Card 3: Database & Cloud Roster Management */}
-          <div className="card" style={{ border: '1px solid #fca5a5', background: '#fffafb', gridColumn: '1 / -1' }}>
-            <div className="card-header">
-              <div className="card-title" style={{ color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Trash2 size={20} color="#dc2626" />
+          {/* 3. Database & Cloud Roster Maintenance (Full Width) */}
+          <div
+            className="card"
+            style={{
+              border: '1.5px solid #fca5a5',
+              background: '#fffafb',
+              borderRadius: '16px',
+              padding: '2rem',
+              margin: 0,
+              boxShadow: '0 4px 16px -2px rgba(220, 38, 38, 0.06)',
+              width: '100%'
+            }}
+          >
+            <div className="card-header" style={{ marginBottom: '1.25rem', paddingBottom: '0.85rem', borderColor: '#fecaca' }}>
+              <div className="card-title" style={{ color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
+                <Trash2 size={22} color="#dc2626" />
                 <span>Database & Cloud Roster Maintenance</span>
               </div>
-              <span className="badge badge-absent">ADMIN PURGE</span>
+              <span className="badge badge-absent" style={{ fontSize: '0.72rem', letterSpacing: '0.04em' }}>ADMIN PURGE</span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <p style={{ fontSize: '0.84rem', color: '#7f1d1d', margin: 0, lineHeight: 1.5 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              <p style={{ fontSize: '0.85rem', color: '#7f1d1d', margin: 0, lineHeight: 1.55 }}>
                 Manage or wipe database records stored in Supabase and local browser cache. Use caution when wiping master cadets or attendance logs.
               </p>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
                 {/* Clear Cadets */}
-                <div style={{ background: '#ffffff', padding: '1rem', borderRadius: '10px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#991b1b', marginBottom: '4px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#991b1b', marginBottom: '4px' }}>
                       Clear Cadets Directory
                     </div>
-                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
                       Deletes all registered cadets from Supabase <code>cadets</code> table and clears local cadet roster cache.
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     onClick={handleClearCadetsFromApp}
                     disabled={isClearingCadets}
                     style={{
                       background: '#ef4444',
                       color: '#ffffff',
-                      fontWeight: 700,
-                      borderRadius: '7px',
-                      padding: '0.55rem',
+                      fontWeight: 800,
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.84rem',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '6px',
+                      gap: '8px',
                       border: 'none',
+                      width: '100%',
                       cursor: isClearingCadets ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={16} />
                     <span>{isClearingCadets ? 'Clearing Cadets...' : 'Clear All Cadets in Supabase & Local'}</span>
                   </button>
                 </div>
 
                 {/* Clear Attendance */}
-                <div style={{ background: '#ffffff', padding: '1rem', borderRadius: '10px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#991b1b', marginBottom: '4px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#991b1b', marginBottom: '4px' }}>
                       Clear Attendance Logs
                     </div>
-                    <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
                       Deletes all scan history from Supabase <code>attendance_logs</code> table and clears local attendance records.
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="btn btn-sm"
+                    className="btn"
                     onClick={handleClearAttendanceFromApp}
                     disabled={isClearingAttendance}
                     style={{
                       background: '#b91c1c',
                       color: '#ffffff',
-                      fontWeight: 700,
-                      borderRadius: '7px',
-                      padding: '0.55rem',
+                      fontWeight: 800,
+                      borderRadius: '8px',
+                      padding: '0.7rem 1rem',
+                      fontSize: '0.84rem',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      gap: '6px',
+                      gap: '8px',
                       border: 'none',
+                      width: '100%',
                       cursor: isClearingAttendance ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    <Trash2 size={15} />
+                    <Trash2 size={16} />
                     <span>{isClearingAttendance ? 'Clearing Logs...' : 'Clear All Attendance in Supabase & Local'}</span>
                   </button>
                 </div>
               </div>
             </div>
           </div>
+
         </div>
       )}
 
@@ -2120,171 +2226,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             </div>
           </div>
 
-          {/* Card 3: Dynamic Cadet Ranks & Officer Designations */}
-          <div className="card">
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Award size={20} />
-                <span>Manage Ranks & Officer Designations</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
 
-                <span className="badge badge-present">DYNAMIC OPTIONS</span>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem' }}>
-              {/* Section A: Cadet / Officer Ranks */}
-              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Shield size={16} color="var(--rotc-green-dark)" />
-                    <span>Cadet Officer Ranks ({(settings.officerRanks || DEFAULT_OFFICER_RANKS).length})</span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Shown on ID Generator</span>
-                </div>
-
-                {/* Add Rank Input Form */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g., Cadet COL (ROTC) 1CL"
-                    value={newRankInput}
-                    onChange={(e) => setNewRankInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddRank(); }}
-                    style={{ flex: 1, padding: '0.55rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', border: '1px solid var(--border-light)' }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleAddRank}
-                    style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', padding: '0.55rem 0.85rem' }}
-                  >
-                    <Plus size={14} /> Add Rank
-                  </button>
-                </div>
-
-                {/* Ranks Tag List / Pills */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '180px', overflowY: 'auto', padding: '2px' }}>
-                  {(settings.officerRanks || DEFAULT_OFFICER_RANKS).map((r, idx) => (
-                    <span
-                      key={`${r}-${idx}`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: '#ffffff',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '20px',
-                        padding: '4px 10px',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        color: 'var(--text-dark)',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                      }}
-                    >
-                      <span>{r}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRank(r)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: '#94a3b8',
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: 0,
-                          transition: 'color 0.15s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
-                        onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
-                        title={`Delete ${r}`}
-                      >
-                        <X size={13} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Section B: Officer Designations */}
-              <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border-light)', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Award size={16} color="var(--rotc-green-dark)" />
-                    <span>Officer Designations / Roles ({(settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS).length})</span>
-                  </div>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Shown on ID Generator</span>
-                </div>
-
-                {/* Add Designation Input Form */}
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <input
-                    type="text"
-                    className="form-control"
-                    placeholder="e.g., S3 Assistant (Operations)"
-                    value={newDesignationInput}
-                    onChange={(e) => setNewDesignationInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') handleAddDesignation(); }}
-                    style={{ flex: 1, padding: '0.55rem 0.75rem', borderRadius: '8px', fontSize: '0.85rem', border: '1px solid var(--border-light)' }}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={handleAddDesignation}
-                    style={{ whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.82rem', padding: '0.55rem 0.85rem' }}
-                  >
-                    <Plus size={14} /> Add Designation
-                  </button>
-                </div>
-
-                {/* Designations Tag List / Pills */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '180px', overflowY: 'auto', padding: '2px' }}>
-                  {(settings.officerDesignations || DEFAULT_OFFICER_DESIGNATIONS).map((d, idx) => (
-                    <span
-                      key={`${d}-${idx}`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: '#ffffff',
-                        border: '1px solid #cbd5e1',
-                        borderRadius: '20px',
-                        padding: '4px 10px',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        color: 'var(--rotc-green-dark)',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
-                      }}
-                    >
-                      <span>{d}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDesignation(d)}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: '#94a3b8',
-                          display: 'flex',
-                          alignItems: 'center',
-                          padding: 0,
-                          transition: 'color 0.15s'
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.color = '#dc2626'}
-                        onMouseLeave={(e) => e.currentTarget.style.color = '#94a3b8'}
-                        title={`Delete ${d}`}
-                      >
-                        <X size={13} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       )}
 

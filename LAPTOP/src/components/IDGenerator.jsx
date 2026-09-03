@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Printer, Shield, Award, User, Sparkles, Plus, Trash2, Layers, Database, CheckCircle2, AlertTriangle, Users, X, Info, Building, GraduationCap } from 'lucide-react';
 import IDCardPreview from './IDCardPreview';
-import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS } from './AdminSettings';
-import { getSupabaseClient, supabase, MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity } from '../utils/supabaseClient';
+import { DEFAULT_OFFICER_RANKS, DEFAULT_OFFICER_DESIGNATIONS, DEFAULT_UNIT_STRUCTURE } from './AdminSettings';
+import { getSupabaseClient, supabase, MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity, fetchSettingsFromSupabase } from '../utils/supabaseClient';
+import { useUnitStructure } from '../context/UnitContext';
 
 export { MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity };
 export const OFFICER_DESIGNATIONS = DEFAULT_OFFICER_DESIGNATIONS;
@@ -289,9 +290,9 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   });
 
   useEffect(() => {
-    const syncOptions = () => {
+    const syncOptions = async () => {
       try {
-        const local = localStorage.getItem('csu_rotc_admin_settings');
+        const local = localStorage.getItem('csu_rotc_admin_settings') || localStorage.getItem('csu_rotc_system_settings');
         if (local) {
           const parsed = JSON.parse(local);
           if (parsed.officerRanks && parsed.officerRanks.length > 0) {
@@ -300,31 +301,46 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
           if (parsed.officerDesignations && parsed.officerDesignations.length > 0) {
             setOfficerDesignations(parsed.officerDesignations);
           }
+          const struct = parsed.unitStructure || parsed.unit_structure;
+          if (Array.isArray(struct) && struct.length > 0) {
+            setUnitStructure(struct);
+          }
+        }
+
+        const sb = await fetchSettingsFromSupabase();
+        if (sb) {
+          const sbStruct = sb.unit_structure || sb.unitStructure;
+          if (Array.isArray(sbStruct) && sbStruct.length > 0) {
+            setUnitStructure(sbStruct);
+          }
+          if (sb.officer_ranks_list && sb.officer_ranks_list.length > 0) {
+            setOfficerRanks(sb.officer_ranks_list);
+          }
+          if (sb.officer_roles_list && sb.officer_roles_list.length > 0) {
+            setOfficerDesignations(sb.officer_roles_list);
+          }
         }
       } catch (e) { }
     };
 
-    const fetchSettings = async () => {
-      try {
-        const res = await fetch('/api/settings');
-        if (res.ok) {
-          const data = await res.json();
-          if (data.officerRanks && data.officerRanks.length > 0) {
-            setOfficerRanks(data.officerRanks);
-          }
-          if (data.officerDesignations && data.officerDesignations.length > 0) {
-            setOfficerDesignations(data.officerDesignations);
-          }
-        }
-      } catch (e) { }
+    const handleCustomUpdate = (e) => {
+      const s = e?.detail || (() => {
+        try { return JSON.parse(localStorage.getItem('csu_rotc_admin_settings') || '{}'); } catch (_) { return {}; }
+      })();
+      const struct = s.unitStructure || s.unit_structure;
+      if (Array.isArray(struct) && struct.length > 0) {
+        setUnitStructure(struct);
+      }
+      if (s.officerRanks && s.officerRanks.length > 0) setOfficerRanks(s.officerRanks);
+      if (s.officerDesignations && s.officerDesignations.length > 0) setOfficerDesignations(s.officerDesignations);
     };
 
-    fetchSettings();
+    syncOptions();
     window.addEventListener('storage', syncOptions);
-    window.addEventListener('csu_settings_updated', syncOptions);
+    window.addEventListener('csu_settings_updated', handleCustomUpdate);
     return () => {
       window.removeEventListener('storage', syncOptions);
-      window.removeEventListener('csu_settings_updated', syncOptions);
+      window.removeEventListener('csu_settings_updated', handleCustomUpdate);
     };
   }, []);
 
@@ -382,37 +398,17 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     return 'Cadet';
   });
 
-  const [dynamicBattalions, setDynamicBattalions] = useState(() => {
-    try {
-      const saved = localStorage.getItem('csu_rotc_admin_settings');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const struct = parsed.unitStructure || parsed.unit_structure;
-        if (Array.isArray(struct) && struct.length > 0) {
-          return struct.map(b => b.name);
-        }
-      }
-    } catch (_) {}
-    return ['1st Battalion', '2nd Battalion'];
-  });
+  const { unitStructure: contextStructure } = useUnitStructure();
+  const unitStructure = (contextStructure && Array.isArray(contextStructure) && contextStructure.length > 0)
+    ? contextStructure
+    : DEFAULT_UNIT_STRUCTURE;
 
-  useEffect(() => {
-    const handleUpdate = (e) => {
-      const s = e?.detail || (() => {
-        try { return JSON.parse(localStorage.getItem('csu_rotc_admin_settings') || '{}'); } catch (_) { return {}; }
-      })();
-      const struct = s.unitStructure || s.unit_structure;
-      if (Array.isArray(struct) && struct.length > 0) {
-        setDynamicBattalions(struct.map(b => b.name));
-      }
-    };
-    window.addEventListener('csu_settings_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-    return () => {
-      window.removeEventListener('csu_settings_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-    };
-  }, []);
+  const dynamicBattalions = useMemo(() => {
+    if (Array.isArray(unitStructure) && unitStructure.length > 0) {
+      return unitStructure.map(b => b.name);
+    }
+    return ['1st Battalion', '2nd Battalion'];
+  }, [unitStructure]);
 
   const [battalion, setBattalion] = useState(() => {
     try {
@@ -428,9 +424,9 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const [company, setCompany] = useState(() => {
     try {
       const saved = localStorage.getItem('csu_rotc_id_gen_form');
-      if (saved) return JSON.parse(saved).company || 'Alpha';
+      if (saved) return JSON.parse(saved).company || 'Alpha Company';
     } catch (_) { }
-    return 'Alpha';
+    return 'Alpha Company';
   });
 
   const [platoon, setPlatoon] = useState(() => {
@@ -448,6 +444,112 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
     } catch (_) { }
     return 'None';
   });
+
+  // Selected Battalion Echelon Object from active unit structure
+  const selectedBattalionObj = useMemo(() => {
+    if (!Array.isArray(unitStructure) || unitStructure.length === 0) return null;
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '');
+    const currentNorm = norm(battalion);
+    return unitStructure.find(b => {
+      const bNorm = norm(b.name);
+      const bCode = norm(b.shortCode || b.code || '');
+      return bNorm === currentNorm || bCode === currentNorm || (currentNorm.includes('1') && bNorm.includes('1')) || (currentNorm.includes('2') && bNorm.includes('2'));
+    }) || unitStructure[0];
+  }, [unitStructure, battalion]);
+
+  // Companies belonging strictly to the currently selected Battalion
+  const availableCompanies = useMemo(() => {
+    if (selectedBattalionObj && Array.isArray(selectedBattalionObj.companies) && selectedBattalionObj.companies.length > 0) {
+      return selectedBattalionObj.companies;
+    }
+    const norm = String(battalion || '').toLowerCase();
+    if (norm.includes('2')) {
+      return [
+        { id: 'co-2-charlie', name: 'Charlie Company', shortCode: 'CHARLIE' },
+        { id: 'co-2-delta', name: 'Delta Company', shortCode: 'DELTA' }
+      ];
+    }
+    return [
+      { id: 'co-1-alpha', name: 'Alpha Company', shortCode: 'ALPHA' },
+      { id: 'co-1-bravo', name: 'Bravo Company', shortCode: 'BRAVO' }
+    ];
+  }, [selectedBattalionObj, battalion]);
+
+  // Selected Company Echelon Object within the selected Battalion
+  const selectedCompanyObj = useMemo(() => {
+    if (!Array.isArray(availableCompanies) || availableCompanies.length === 0) return null;
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/company|coy|\s+/gi, '');
+    const currentNorm = norm(company);
+    return availableCompanies.find(c => {
+      const cName = typeof c === 'string' ? c : (c.name || c.id || '');
+      const cNorm = norm(cName);
+      return cNorm === currentNorm || cName.toLowerCase().includes(currentNorm) || currentNorm.includes(cNorm);
+    }) || availableCompanies[0];
+  }, [availableCompanies, company]);
+
+  // Platoons belonging strictly to the currently selected Company
+  const availablePlatoons = useMemo(() => {
+    if (selectedCompanyObj && Array.isArray(selectedCompanyObj.platoons) && selectedCompanyObj.platoons.length > 0) {
+      return selectedCompanyObj.platoons.map(p => typeof p === 'string' ? p : (p.name || p.id));
+    }
+    return ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
+  }, [selectedCompanyObj]);
+
+  // Handler: When Battalion changes, update company & platoon to valid children
+  const handleBattalionChange = (newBn) => {
+    setBattalion(newBn);
+
+    const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '');
+    const currentNorm = norm(newBn);
+    const targetBn = (Array.isArray(unitStructure) ? unitStructure : []).find(b => {
+      const bNorm = norm(b.name);
+      const bCode = norm(b.shortCode || b.code || '');
+      return bNorm === currentNorm || bCode === currentNorm || (currentNorm.includes('1') && bNorm.includes('1')) || (currentNorm.includes('2') && bNorm.includes('2'));
+    }) || (Array.isArray(unitStructure) ? unitStructure[0] : null);
+
+    const comps = (targetBn && Array.isArray(targetBn.companies) && targetBn.companies.length > 0)
+      ? targetBn.companies
+      : (currentNorm.includes('2')
+          ? [{ name: 'Charlie Company' }, { name: 'Delta Company' }]
+          : [{ name: 'Alpha Company' }, { name: 'Bravo Company' }]);
+
+    const compNorm = (s) => String(s || '').trim().toLowerCase().replace(/company|coy|\s+/gi, '');
+    const matchingComp = comps.find(c => compNorm(typeof c === 'string' ? c : c.name) === compNorm(company));
+
+    let nextCompany = company;
+    if (!matchingComp) {
+      nextCompany = typeof comps[0] === 'string' ? comps[0] : (comps[0].name || comps[0].id);
+      setCompany(nextCompany);
+    }
+
+    const targetCompObj = matchingComp || comps[0];
+    const plats = (targetCompObj && Array.isArray(targetCompObj.platoons) && targetCompObj.platoons.length > 0)
+      ? targetCompObj.platoons.map(p => typeof p === 'string' ? p : (p.name || p.id))
+      : ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
+
+    const platNorm = (s) => String(s || '').toLowerCase().replace(/platoon|pltn|\s+/gi, '');
+    const platExists = plats.some(p => platNorm(p) === platNorm(platoon));
+    if (!platExists) {
+      setPlatoon(plats[0]);
+    }
+  };
+
+  // Handler: When Company changes, update platoon if needed
+  const handleCompanyChange = (newCo) => {
+    setCompany(newCo);
+
+    const compNorm = (s) => String(s || '').trim().toLowerCase().replace(/company|coy|\s+/gi, '');
+    const targetCompObj = availableCompanies.find(c => compNorm(typeof c === 'string' ? c : c.name) === compNorm(newCo));
+    const plats = (targetCompObj && Array.isArray(targetCompObj.platoons) && targetCompObj.platoons.length > 0)
+      ? targetCompObj.platoons.map(p => typeof p === 'string' ? p : (p.name || p.id))
+      : ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
+
+    const platNorm = (s) => String(s || '').toLowerCase().replace(/platoon|pltn|\s+/gi, '');
+    const platExists = plats.some(p => platNorm(p) === platNorm(platoon));
+    if (!platExists) {
+      setPlatoon(plats[0]);
+    }
+  };
 
   // Demographic & Academic Details (Direct to DB only, not on ID card)
   const [gender, setGender] = useState(() => {
@@ -582,10 +684,9 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
   const handleCategorySwitch = (newCat) => {
     setCategory(newCat);
     if (newCat === 'basic') {
+      const firstBn = dynamicBattalions[0] || '1st Battalion';
       setRank('Cadet');
-      setBattalion('1st Battalion');
-      setCompany('Alpha');
-      setPlatoon('1st Platoon');
+      handleBattalionChange(firstBn);
       setDesignation('None');
     } else {
       const firstRank = officerRanks && officerRanks.length > 0 ? officerRanks[0] : '1CL Cadet Col';
@@ -1162,7 +1263,7 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <select
                   className="custom-select"
                   value={battalion}
-                  onChange={(e) => setBattalion(e.target.value)}
+                  onChange={(e) => handleBattalionChange(e.target.value)}
                 >
                   {dynamicBattalions.map(b => (
                     <option key={b} value={b}>{b}</option>
@@ -1174,13 +1275,15 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <label>Company</label>
                 <select
                   className="custom-select"
-                  value={company}
-                  onChange={(e) => setCompany(e.target.value)}
+                  value={selectedCompanyObj ? (typeof selectedCompanyObj === 'string' ? selectedCompanyObj : (selectedCompanyObj.name || selectedCompanyObj.id)) : company}
+                  onChange={(e) => handleCompanyChange(e.target.value)}
                 >
-                  <option value="Alpha">Alpha</option>
-                  <option value="Bravo">Bravo</option>
-                  <option value="Charlie">Charlie</option>
-                  <option value="Delta">Delta</option>
+                  {availableCompanies.map(c => {
+                    const cName = typeof c === 'string' ? c : (c.name || c.id);
+                    return (
+                      <option key={cName} value={cName}>{cName}</option>
+                    );
+                  })}
                 </select>
               </div>
 
@@ -1188,11 +1291,12 @@ export default function IDGenerator({ cadets = [], onRefresh, refreshCadetsRoste
                 <label>Platoon</label>
                 <select
                   className="custom-select"
-                  value={platoon}
+                  value={availablePlatoons.includes(platoon) ? platoon : (availablePlatoons[0] || platoon)}
                   onChange={(e) => setPlatoon(e.target.value)}
                 >
-                  <option value="1st Platoon">1st Pltn</option>
-                  <option value="2nd Platoon">2nd Pltn</option>
+                  {availablePlatoons.map(pName => (
+                    <option key={pName} value={pName}>{pName}</option>
+                  ))}
                 </select>
               </div>
             </div>

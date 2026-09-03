@@ -10,6 +10,8 @@ import AdminSettings from './components/AdminSettings';
 import LoginPage from './components/LoginPage';
 import PublicLandingPage from './components/PublicLandingPage';
 import CadetRosterHierarchy from './components/CadetRosterHierarchy';
+import CadetLogin from './components/CadetLogin';
+import CadetPortal from './components/CadetPortal';
 import {
   fetchCadetsFromSupabase,
   fetchAttendanceFromSupabase,
@@ -41,11 +43,28 @@ export default function App() {
     return null;
   });
 
-  // Top-Level Route Navigation: 'home' (Public Landing /) | 'login' (/login) | 'portal' (/dashboard/*)
+  // Cadet Authentication Session State
+  const [cadetUser, setCadetUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_cadet_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.cadet) return parsed.cadet;
+      }
+    } catch (_) { }
+    return null;
+  });
+
+  // Top-Level Route Navigation: 'home' (/) | 'login' (/login) | 'portal' (/dashboard/*) | 'cadet-login' (/cadet-login) | 'cadet-portal' (/cadet-portal)
   const [currentRoute, setCurrentRoute] = useState(() => {
     try {
       const hash = window.location.hash.replace('#', '').trim().toLowerCase();
       if (hash === 'login') return 'login';
+      if (hash === 'cadet-login') return 'cadet-login';
+      if (hash === 'cadet-portal') {
+        const savedCadet = localStorage.getItem('csu_rotc_cadet_session');
+        return savedCadet ? 'cadet-portal' : 'cadet-login';
+      }
       if (VALID_TABS.includes(hash)) {
         const savedSession = localStorage.getItem('csu_rotc_auth_session');
         return savedSession ? 'portal' : 'login';
@@ -81,6 +100,14 @@ export default function App() {
         if (window.location.hash !== '#login') {
           window.location.hash = 'login';
         }
+      } else if (currentRoute === 'cadet-login') {
+        if (window.location.hash !== '#cadet-login') {
+          window.location.hash = 'cadet-login';
+        }
+      } else if (currentRoute === 'cadet-portal') {
+        if (window.location.hash !== '#cadet-portal') {
+          window.location.hash = 'cadet-portal';
+        }
       } else if (currentRoute === 'portal') {
         localStorage.setItem('csu_rotc_active_tab', activeTab);
         if (window.location.hash.replace('#', '').trim() !== activeTab) {
@@ -98,6 +125,14 @@ export default function App() {
         setCurrentRoute('home');
       } else if (hash === 'login') {
         setCurrentRoute('login');
+      } else if (hash === 'cadet-login') {
+        setCurrentRoute('cadet-login');
+      } else if (hash === 'cadet-portal') {
+        if (cadetUser) {
+          setCurrentRoute('cadet-portal');
+        } else {
+          setCurrentRoute('cadet-login');
+        }
       } else if (VALID_TABS.includes(hash)) {
         if (currentUser) {
           setCurrentRoute('portal');
@@ -109,7 +144,7 @@ export default function App() {
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [currentUser]);
+  }, [currentUser, cadetUser]);
 
   // Hydrate Cadets & Master Attendance from localStorage on initial render
   const [cadets, setCadets] = useState(() => {
@@ -406,7 +441,8 @@ export default function App() {
             timeOutStatus: reconciled.timeOutStatus,
             finalDailyStatus: reconciled.finalDailyStatus,
             status: reconciled.finalDailyStatus,
-            dutyOfficer: rawRecord.dutyOfficer || rawRecord.duty_officer || 'Duty Officer',
+            dutyOfficer: rawRecord.dutyOfficer || rawRecord.duty_officer || rawRecord.d || 'Duty Officer',
+            duty_officer: rawRecord.duty_officer || rawRecord.dutyOfficer || rawRecord.d || 'Duty Officer',
             sessionName: rawRecord.sessionName || rawRecord.session_name || 'Formation Session',
             timestamp: rawRecord.timestamp || rawRecord.scanned_at || new Date().toISOString(),
             scanned_at: rawRecord.scanned_at || rawRecord.scannedAt || rawRecord.timestamp || new Date().toISOString(),
@@ -445,6 +481,7 @@ export default function App() {
     return (
       <PublicLandingPage
         onNavigateToLogin={() => setCurrentRoute('login')}
+        onNavigateToCadetLogin={() => setCurrentRoute('cadet-login')}
         onNavigateToDashboard={() => {
           if (currentUser) {
             setCurrentRoute('portal');
@@ -458,7 +495,45 @@ export default function App() {
     );
   }
 
-  // 2. Admin Authentication Route (/login)
+  // 2. Cadet Authentication Route (#cadet-login)
+  if (currentRoute === 'cadet-login') {
+    return (
+      <CadetLogin
+        onCadetLoginSuccess={(cadetData) => {
+          setCadetUser(cadetData);
+          setCurrentRoute('cadet-portal');
+        }}
+        onBackToHome={() => setCurrentRoute('home')}
+      />
+    );
+  }
+
+  // 3. Cadet Portal Route (#cadet-portal)
+  if (currentRoute === 'cadet-portal') {
+    if (!cadetUser) {
+      return (
+        <CadetLogin
+          onCadetLoginSuccess={(cadetData) => {
+            setCadetUser(cadetData);
+            setCurrentRoute('cadet-portal');
+          }}
+          onBackToHome={() => setCurrentRoute('home')}
+        />
+      );
+    }
+    return (
+      <CadetPortal
+        cadet={cadetUser}
+        onLogout={() => {
+          localStorage.removeItem('csu_rotc_cadet_session');
+          setCadetUser(null);
+          setCurrentRoute('home');
+        }}
+      />
+    );
+  }
+
+  // 4. Admin Authentication Route (/login)
   if (currentRoute === 'login') {
     return (
       <LoginPage
@@ -472,7 +547,7 @@ export default function App() {
     );
   }
 
-  // 3. Protected Admin Command Center Portal (/dashboard/*)
+  // 5. Protected Admin Command Center Portal (/dashboard/*)
   // If session expired or unauthenticated, redirect to Login
   if (!currentUser) {
     return (

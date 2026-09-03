@@ -35,7 +35,10 @@ import {
   getActiveFormationCutoff,
   normalizeBattalion,
   normalizeCompany,
-  normalizePlatoon
+  normalizePlatoon,
+  formatDisplayTime,
+  parseTimestampMinutes,
+  parseCutoffMinutes
 } from '../utils/attendanceStatus';
 import { exportAttendanceToExcel } from '../utils/excelExport';
 
@@ -85,13 +88,17 @@ const MONTH_NAMES = [
 export function getDutyOfficerForCadet(cadet, sessions = [], logs = [], selectedDate = '') {
   if (!cadet) return '—';
 
-  const cadetId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim();
-  const cadetPlatoon = String(cadet.platoon || '').toLowerCase().trim();
-  const cadetCompany = String(cadet.company || '').toLowerCase().trim();
+  // 1. Strict guard: If cadet was NOT scanned on this date, Duty Officer is always '—'
+  const hasScan = Boolean(cadet.hasTimeIn || cadet.hasTimeOut || cadet.timeInScan || cadet.timeOutScan);
+  if (!hasScan) {
+    return '—';
+  }
 
-  // 1. Direct scan record check (if this cadet was scanned on this formation date)
+  const cadetId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim().toUpperCase();
+
+  // 2. Direct scan record check: read the duty officer saved with THIS cadet's specific scan event
   const scanLog = cadet.timeInScan || cadet.timeOutScan || (Array.isArray(logs) ? logs.find(l => {
-    const lId = String(l.cadetId || l.cadet_id || l.id || '').trim();
+    const lId = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
     const lDate = toDateKey(l.timestamp || l.date || l.receivedAt);
     return lId && lId === cadetId && (!selectedDate || lDate === selectedDate);
   }) : null);
@@ -101,54 +108,27 @@ export function getDutyOfficerForCadet(cadet, sessions = [], logs = [], selected
     return directOfficer;
   }
 
-  // 2. Filter sessions for the selected formation date
+  // 3. If a cadet was scanned but their scan record doesn't have an explicit officer, check platoon session
   const dateSessions = (sessions || []).filter(s => {
     const sDate = s.session_date || s.sessionDate || s.dateKey;
     return !selectedDate || sDate === selectedDate;
   });
 
   if (dateSessions.length > 0) {
-    // 2a. Match both Platoon and Company if platoon is present
+    const cadetPlatoon = String(cadet.platoon || '').toLowerCase().trim();
     if (cadetPlatoon) {
-      const matchPlatoonCompany = dateSessions.find(s => {
-        const sName = String(s.session_name || s.sessionName || '').toLowerCase();
-        const hasPlat = sName.includes(cadetPlatoon);
-        const hasComp = cadetCompany ? sName.includes(cadetCompany) : true;
-        return hasPlat && hasComp && (s.duty_officer || s.dutyOfficer);
-      });
-      if (matchPlatoonCompany) {
-        return matchPlatoonCompany.duty_officer || matchPlatoonCompany.dutyOfficer;
-      }
-
-      // 2b. Match Platoon alone
       const matchPlatoon = dateSessions.find(s => {
         const sName = String(s.session_name || s.sessionName || '').toLowerCase();
         return sName.includes(cadetPlatoon) && (s.duty_officer || s.dutyOfficer);
       });
       if (matchPlatoon) {
-        return matchPlatoon.duty_officer || matchPlatoon.dutyOfficer;
+        const dof = matchPlatoon.duty_officer || matchPlatoon.dutyOfficer;
+        if (dof && dof !== 'Duty Officer' && dof !== 'HQ Duty Officer') return dof;
       }
-    }
-
-    // 2c. Match Company alone
-    if (cadetCompany) {
-      const matchCompany = dateSessions.find(s => {
-        const sName = String(s.session_name || s.sessionName || '').toLowerCase();
-        return sName.includes(cadetCompany) && (s.duty_officer || s.dutyOfficer);
-      });
-      if (matchCompany) {
-        return matchCompany.duty_officer || matchCompany.dutyOfficer;
-      }
-    }
-
-    // 2d. Fallback to the first session with a valid duty officer for this date
-    const fallbackSession = dateSessions.find(s => s.duty_officer || s.dutyOfficer);
-    if (fallbackSession) {
-      return fallbackSession.duty_officer || fallbackSession.dutyOfficer;
     }
   }
 
-  return (directOfficer && !directOfficer.includes(',')) ? directOfficer : '—';
+  return (directOfficer && directOfficer !== 'Duty Officer' && directOfficer !== 'HQ Duty Officer') ? directOfficer : '—';
 }
 
 import { useAttendanceData } from '../hooks/useAttendanceData';
@@ -367,12 +347,12 @@ export default function AttendanceHistory({
   // falling back to active global cutoff only if no session cutoff exists.
   const selectedSessionCutoff = useMemo(() => {
     if (!selectedDate) return formationCutoff;
-    const matchingSession = (dbSessions || []).find(s => s.dateKey === selectedDate && s.cutoffTime);
-    if (matchingSession && matchingSession.cutoffTime) {
-      return matchingSession.cutoffTime;
+    const matchingSession = (dbSessions || []).find(s => (s.dateKey === selectedDate || s.session_date === selectedDate || s.sessionDate === selectedDate) && (s.cutoffTime || s.cutoff_time));
+    if (matchingSession && (matchingSession.cutoffTime || matchingSession.cutoff_time)) {
+      return matchingSession.cutoffTime || matchingSession.cutoff_time;
     }
     const matchingLog = (effectiveLogs || []).find(l => {
-      const rawDate = l.timestamp || l.date || l.receivedAt;
+      const rawDate = l.timestamp || l.date || l.receivedAt || l.created_at;
       return toDateKey(rawDate) === selectedDate && (l.cutoff_time || l.cutoffTime);
     });
     if (matchingLog) {
@@ -380,6 +360,11 @@ export default function AttendanceHistory({
     }
     return formationCutoff;
   }, [selectedDate, dbSessions, effectiveLogs, formationCutoff]);
+
+  const activeCutoffMins = useMemo(() => {
+    const cutoff = selectedSessionCutoff || formationCutoff || '07:30';
+    return parseCutoffMinutes(cutoff);
+  }, [selectedSessionCutoff, formationCutoff]);
 
   // 2. Reconcile complete cadet roster ONLY if the date has recorded formation data
   // Empty State Guard: If unrecorded, return 0 counts to prevent false absentee generation
@@ -405,6 +390,65 @@ export default function AttendanceHistory({
     );
   }, [effectiveCadets, effectiveLogs, selectedDate, isRecordedDate, selectedSessionCutoff]);
 
+  // Dynamic summary derived directly from the reconciled roster to guarantee KPI card consistency
+  const displaySummary = useMemo(() => {
+    if (!selectedDate || !isRecordedDate) {
+      return {
+        totalStrength: 0,
+        presentCompleteCount: 0,
+        lateCompleteCount: 0,
+        incompleteCount: 0,
+        absentCount: 0
+      };
+    }
+
+    let presentCount = 0;
+    let lateCount = 0;
+    let incompleteCount = 0;
+    let absentCount = 0;
+
+    const isValidTimeVal = (val) => {
+      if (!val) return false;
+      const s = String(val).trim().toUpperCase();
+      return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+    };
+
+    reconciledRoster.forEach(c => {
+      const scanIn = c.timeInScan;
+      const scanOut = c.timeOutScan;
+      const rawIn = (c.hasTimeIn || scanIn) ? (scanIn?.timestamp || scanIn?.time_in) : null;
+      const rawOut = (c.hasTimeOut || scanOut) ? (scanOut?.timestamp || scanOut?.time_out) : null;
+
+      const hasIn = Boolean(c.hasTimeIn && isValidTimeVal(rawIn));
+      const hasOut = Boolean(c.hasTimeOut && isValidTimeVal(rawOut));
+
+      const inMins = rawIn ? parseTimestampMinutes(rawIn) : NaN;
+      const isLate = Boolean(c.isLate || (!isNaN(inMins) && inMins > activeCutoffMins));
+
+      if (hasIn && !hasOut) {
+        incompleteCount++;
+      } else if (!hasIn && hasOut) {
+        incompleteCount++;
+      } else if (hasIn && hasOut) {
+        if (isLate || String(c.finalDailyStatus || '').includes('LATE')) {
+          lateCount++;
+        } else {
+          presentCount++;
+        }
+      } else {
+        absentCount++;
+      }
+    });
+
+    return {
+      totalStrength: reconciledRoster.length,
+      presentCompleteCount: presentCount,
+      lateCompleteCount: lateCount,
+      incompleteCount: incompleteCount,
+      absentCount: absentCount
+    };
+  }, [reconciledRoster, selectedDate, isRecordedDate, activeCutoffMins]);
+
   // Selected date session metadata
   const selectedDateMeta = useMemo(() => {
     return historicalDatesMap.get(selectedDate) || {
@@ -420,28 +464,36 @@ export default function AttendanceHistory({
     if (!isRecordedDate) return [];
 
     return reconciledRoster.filter((cadet) => {
+      const isValidTimeVal = (val) => {
+        if (!val) return false;
+        const s = String(val).trim().toUpperCase();
+        return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+      };
+
+      const scanIn = cadet.timeInScan;
+      const scanOut = cadet.timeOutScan;
+      const rawIn = (cadet.hasTimeIn || scanIn) ? (cadet.timeIn || cadet.time_in || scanIn?.timestamp || scanIn?.time_in) : null;
+      const rawOut = (cadet.hasTimeOut || scanOut) ? (cadet.timeOut || cadet.time_out || scanOut?.timestamp || scanOut?.time_out) : null;
+
+      const hasIn = Boolean(cadet.hasTimeIn && isValidTimeVal(rawIn));
+      const hasOut = Boolean(cadet.hasTimeOut && isValidTimeVal(rawOut));
+
+      const inMins = rawIn ? parseTimestampMinutes(rawIn) : NaN;
+      const isCadetLate = Boolean(cadet.isLate || (!isNaN(inMins) && inMins > activeCutoffMins));
+
       // 1. Status Filter
       if (statusFilter === 'PRESENT') {
-        const isPresentOnTime = (cadet.finalDailyStatus === 'PRESENT' || cadet.finalDailyStatus === 'PRESENT (Complete)') && !cadet.isLate && !cadet.finalDailyStatus?.includes('LATE');
-        if (!isPresentOnTime) return false;
+        if (!hasIn || !hasOut || isCadetLate || String(cadet.finalDailyStatus || '').includes('LATE')) return false;
       }
       if (statusFilter === 'LATE') {
-        const isCadetLate = cadet.finalDailyStatus === 'LATE' || cadet.finalDailyStatus === 'LATE (Complete)' || cadet.finalDailyStatus?.includes('LATE') || cadet.isLate;
-        if (!isCadetLate) return false;
+        if (!hasIn || (!isCadetLate && !String(cadet.finalDailyStatus || '').includes('LATE'))) return false;
       }
       if ((statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT')) {
-        const isIncomplete = (
-          cadet.finalDailyStatus?.includes('NO TIME-OUT') ||
-          cadet.finalDailyStatus?.includes('NO TIME-IN') ||
-          cadet.finalDailyStatus?.includes('INCOMPLETE') ||
-          (cadet.hasTimeIn && !cadet.hasTimeOut) ||
-          (!cadet.hasTimeIn && cadet.hasTimeOut)
-        );
+        const isIncomplete = (hasIn && !hasOut) || (!hasIn && hasOut) || cadet.finalDailyStatus?.includes('NO TIME');
         if (!isIncomplete) return false;
       }
       if (statusFilter === 'ABSENT') {
-        const isAbsent = cadet.finalDailyStatus === 'ABSENT' || cadet.finalDailyStatus?.includes('ABSENT') || (!cadet.hasTimeIn && !cadet.hasTimeOut);
-        if (!isAbsent) return false;
+        if (hasIn || hasOut) return false;
       }
 
       // 2. Battalion Filter
@@ -508,8 +560,10 @@ export default function AttendanceHistory({
     setIsExporting(true);
     try {
       const recordsToExport = (reconciledRoster || []).map(r => {
-        const timeInVal = r.timeInDisplay || (r.timeInScan ? formatDisplayTime(r.timeInScan.timestamp) : null) || r.timeIn || '—';
-        const timeOutVal = r.timeOutDisplay || (r.timeOutScan ? formatDisplayTime(r.timeOutScan.timestamp) : null) || r.timeOut || '—';
+        const scanIn = r.timeInScan;
+        const scanOut = r.timeOutScan;
+        const timeInVal = (r.hasTimeIn || scanIn) ? (r.timeInDisplay || (scanIn ? formatDisplayTime(scanIn.timestamp) : null) || r.timeIn || '—') : '—';
+        const timeOutVal = (r.hasTimeOut || scanOut) ? (r.timeOutDisplay || (scanOut ? formatDisplayTime(scanOut.timestamp) : null) || r.timeOut || '—') : '—';
 
         return {
           cadetId: r.cadetId || r.id || 'N/A',
@@ -522,12 +576,12 @@ export default function AttendanceHistory({
           timeOut: timeOutVal,
           timeInDisplay: r.timeInDisplay || timeInVal,
           timeOutDisplay: r.timeOutDisplay || timeOutVal,
-          scanMode: r.hasTimeOut ? 'Time-Out' : 'Time-In',
+          scanMode: r.hasTimeOut ? 'Time-Out' : (r.hasTimeIn ? 'Time-In' : 'No Scan'),
           finalStatus: r.finalDailyStatus || 'ABSENT',
           status: r.finalDailyStatus || 'ABSENT',
-          dutyOfficer: getDutyOfficerForCadet(r, dbSessions, effectiveLogs, selectedDate) || 'HQ Duty Officer',
+          dutyOfficer: getDutyOfficerForCadet(r, dbSessions, effectiveLogs, selectedDate) || '—',
           sessionName: `Historical Formation (${formatHumanDate(selectedDate)})`,
-          timestamp: r.timeInScan?.timestamp || r.timeOutScan?.timestamp || r.timestamp || `${selectedDate}T07:00:00.000Z`
+          timestamp: r.timeInScan?.timestamp || r.timeOutScan?.timestamp || `${selectedDate}T07:00:00.000Z`
         };
       });
 
@@ -555,8 +609,8 @@ export default function AttendanceHistory({
   };
 
 
-  const turnoutRate = summary.totalStrength > 0
-    ? Math.round(((summary.presentCompleteCount + summary.lateCompleteCount) / summary.totalStrength) * 100)
+  const turnoutRate = displaySummary.totalStrength > 0
+    ? Math.round(((displaySummary.presentCompleteCount + displaySummary.lateCompleteCount + displaySummary.incompleteCount) / displaySummary.totalStrength) * 100)
     : 0;
 
   const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'ALL' || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
@@ -1166,7 +1220,7 @@ export default function AttendanceHistory({
                 <Users size={16} color="var(--rotc-green-dark)" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {summary.totalStrength}
+                {displaySummary.totalStrength}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', fontWeight: 600 }}>
                 {turnoutRate}% Turnout Rate
@@ -1194,7 +1248,7 @@ export default function AttendanceHistory({
                 <CheckCircle2 size={16} color="#059669" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#065f46' }}>
-                {summary.presentCompleteCount}
+                {displaySummary.presentCompleteCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                 On-time arrival
@@ -1222,7 +1276,7 @@ export default function AttendanceHistory({
                 <Clock size={16} color="#d97706" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
-                {summary.lateCompleteCount}
+                {displaySummary.lateCompleteCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                 After {selectedSessionCutoff || formationCutoff || '07:30'}
@@ -1250,7 +1304,7 @@ export default function AttendanceHistory({
                 <Activity size={16} color="#ea580c" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
-                {summary.incompleteCount}
+                {displaySummary.incompleteCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
                 Missing entry or exit scan
@@ -1278,7 +1332,7 @@ export default function AttendanceHistory({
                 <UserX size={16} color="#dc2626" />
               </div>
               <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#991b1b' }}>
-                {summary.absentCount}
+                {displaySummary.absentCount}
               </div>
               <div style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '2px', fontWeight: 700 }}>
                 {statusFilter === 'ABSENT' ? '● Active Filter' : 'Click to filter absentees'}
@@ -1398,12 +1452,25 @@ export default function AttendanceHistory({
                   </thead>
                   <tbody>
                     {filteredCadets.map((cadet, idx) => {
-                      const timeInDisplay = cadet.timeIn
-                        ? new Date(cadet.timeIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : null;
-                      const timeOutDisplay = cadet.timeOut
-                        ? new Date(cadet.timeOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                        : null;
+                      const isValidTimeVal = (val) => {
+                        if (!val) return false;
+                        const s = String(val).trim().toUpperCase();
+                        return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+                      };
+
+                      const scanIn = cadet.timeInScan;
+                      const scanOut = cadet.timeOutScan;
+                      const rawIn = (cadet.hasTimeIn || scanIn) ? (cadet.timeIn || cadet.time_in || scanIn?.timestamp || scanIn?.time_in) : null;
+                      const rawOut = (cadet.hasTimeOut || scanOut) ? (cadet.timeOut || cadet.time_out || scanOut?.timestamp || scanOut?.time_out) : null;
+
+                      const hasTimeIn = Boolean(cadet.hasTimeIn && isValidTimeVal(rawIn));
+                      const timeInDisplay = hasTimeIn ? (cadet.timeInDisplay || formatDisplayTime(rawIn)) : null;
+
+                      const hasTimeOut = Boolean(cadet.hasTimeOut && isValidTimeVal(rawOut));
+                      const timeOutDisplay = hasTimeOut ? (cadet.timeOutDisplay || formatDisplayTime(rawOut)) : null;
+
+                      const inMins = rawIn ? parseTimestampMinutes(rawIn) : NaN;
+                      const isCadetLate = Boolean(cadet.isLate || (!isNaN(inMins) && inMins > activeCutoffMins));
 
                       const status = cadet.finalDailyStatus;
 
@@ -1451,7 +1518,7 @@ export default function AttendanceHistory({
                           {/* Time-In */}
                           <td style={{ padding: '12px 16px' }}>
                             {timeInDisplay ? (
-                              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: cadet.isLate ? '#b45309' : '#065f46' }}>
+                              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isCadetLate ? '#d97706' : '#065f46' }}>
                                 {timeInDisplay}
                               </span>
                             ) : (
@@ -1467,7 +1534,7 @@ export default function AttendanceHistory({
                               </span>
                             ) : (
                               <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                                {cadet.hasTimeIn ? (
+                                {hasTimeIn ? (
                                   <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '2px 6px', borderRadius: '4px', background: '#fff7ed', color: '#ea580c', border: '1px solid #ffedd5' }}>
                                     NO TIME-OUT
                                   </span>
@@ -1478,34 +1545,27 @@ export default function AttendanceHistory({
 
                           {/* Daily Status */}
                           <td style={{ padding: '12px 16px' }}>
-                            {(status === 'PRESENT' || status === 'PRESENT (Complete)') && (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <CheckCircle2 size={11} /> PRESENT
+                            {hasTimeIn && !hasTimeOut ? (
+                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: isCadetLate ? '#fff7ed' : '#fff7ed', color: isCadetLate ? '#c2410c' : '#9a3412', border: `1px solid ${isCadetLate ? '#fdba74' : '#fed7aa'}`, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                <Activity size={11} /> {isCadetLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT'}
                               </span>
-                            )}
-                            {(status === 'LATE' || status === 'LATE (Complete)') && (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <Clock size={11} /> LATE
+                            ) : hasTimeIn && hasTimeOut ? (
+                              isCadetLate ? (
+                                <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                  <Clock size={11} /> LATE
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                  <CheckCircle2 size={11} /> PRESENT
+                                </span>
+                              )
+                            ) : !hasTimeIn && hasTimeOut ? (
+                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+                                <Activity size={11} /> NO TIME-IN
                               </span>
-                            )}
-                            {(status === 'NO TIME-OUT' || status === 'INCOMPLETE (No Time-Out)') && (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fff7ed', color: '#9a3412', border: '1px solid #fed7aa', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <Activity size={11} /> NO TIME-OUT
-                              </span>
-                            )}
-                            {(status === 'LATE / NO TIME-OUT' || status === 'INCOMPLETE (Late / No Time-Out)') && (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#991b1b', border: '1px solid #fecaca', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <Activity size={11} /> LATE / NO TIME-OUT
-                              </span>
-                            )}
-                            {status === 'ABSENT' && (
+                            ) : (
                               <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#991b1b', border: '1px solid #fca5a5', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
                                 <UserX size={11} /> ABSENT
-                              </span>
-                            )}
-                            {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT'].includes(status) && (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#334155', border: '1px solid #cbd5e1' }}>
-                                {status}
                               </span>
                             )}
                           </td>

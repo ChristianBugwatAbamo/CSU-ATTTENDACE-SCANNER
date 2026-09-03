@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { getActiveFormationCutoff, parseCutoffMinutes, parseTimeToMinutes } from './attendanceStatus.js';
+import { ACTIVE_FORMATION_DATES } from './attendanceRules';
 
 // Default Supabase project URL and anon public key
 const DEFAULT_SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://rsexdynexmqlitzscoip.supabase.co';
@@ -1483,4 +1484,186 @@ export async function reassignCadetsCompany(battalionName, oldCompanyName, targe
     localCadetsCount,
     error: supabaseError
   };
+}
+
+/**
+ * Fetches a single cadet profile by their Cadet ID (e.g. "211-11222")
+ * Checks Supabase first, falls back to local roster cache.
+ */
+export async function fetchCadetByCadetId(rawCadetId) {
+  if (!rawCadetId) return null;
+  const cleanId = String(rawCadetId).trim().toUpperCase();
+
+  // 1. Try Supabase
+  try {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('cadets')
+        .select('*')
+        .or(`cadet_id.ilike.%${cleanId}%,id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%`)
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        return {
+          id: data.id || data.cadet_id,
+          cadetId: data.cadet_id || data.id,
+          studentId: data.student_id || data.studentId || '',
+          name: data.name,
+          rank: data.rank || 'Cadet',
+          battalion: data.battalion,
+          company: data.company,
+          platoon: data.platoon,
+          course: data.course || data.program || '',
+          college: data.college || '',
+          yearLevel: data.year_level || data.yearLevel || '',
+          gender: data.gender || data.sex || '',
+          phone: data.phone || data.contact_number || '',
+          emergencyContact: data.emergency_contact || '',
+          photoUrl: data.photo_url || data.photoUrl || '',
+          status: data.status || 'ACTIVE',
+          ...data
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('fetchCadetByCadetId Supabase query error, checking local roster:', err);
+  }
+
+  // 2. Fallback to local storage roster
+  try {
+    const cached = localStorage.getItem('csu_rotc_cadets_roster');
+    if (cached) {
+      const roster = JSON.parse(cached);
+      if (Array.isArray(roster)) {
+        const found = roster.find(c => {
+          const cId = String(c.cadetId || c.cadet_id || c.id || '').trim().toUpperCase();
+          const sId = String(c.studentId || c.student_id || '').trim().toUpperCase();
+          const cleanInput = cleanId.replace(/[^A-Z0-9]/gi, '');
+          const cleanCId = cId.replace(/[^A-Z0-9]/gi, '');
+          return cId === cleanId || cleanCId === cleanInput || sId === cleanId;
+        });
+        if (found) return found;
+      }
+    }
+  } catch (_) {}
+
+  return null;
+}
+
+/**
+ * Fetches attendance history for a single cadet.
+ * Checks Supabase first, falls back to local master attendance cache.
+ */
+export async function fetchCadetAttendanceHistory(rawCadetId) {
+  if (!rawCadetId) return [];
+  const cleanId = String(rawCadetId).trim().toUpperCase();
+  const cleanNumOnly = cleanId.replace(/[^A-Z0-9]/gi, '');
+
+  let logs = [];
+
+  // 1. Try Supabase
+  try {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data, error } = await supabase
+        .from('attendance_logs')
+        .select('*')
+        .or(`cadet_id.ilike.%${cleanId}%,cadet_id.ilike.%${cleanNumOnly}%`)
+        .order('session_date', { ascending: false });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        logs = data;
+      }
+    }
+  } catch (err) {
+    console.warn('fetchCadetAttendanceHistory Supabase query error, checking local logs:', err);
+  }
+
+  // 2. Supplement / fallback from local master attendance
+  try {
+    const cached = localStorage.getItem('csu_rotc_master_attendance');
+    if (cached) {
+      const masterLogs = JSON.parse(cached);
+      if (Array.isArray(masterLogs)) {
+        const localMatches = masterLogs.filter(l => {
+          const cId = String(l.cadetId || l.cadet_id || l.id || l.i || '').trim().toUpperCase();
+          const cNum = cId.replace(/[^A-Z0-9]/gi, '');
+          return cId === cleanId || (cNum && cNum === cleanNumOnly);
+        });
+
+        if (logs.length === 0) {
+          logs = localMatches;
+        } else {
+          // Merge unique dates/sessions
+          const seen = new Set(logs.map(l => `${l.session_date || l.date}_${l.time_in || l.timeIn}`));
+          localMatches.forEach(ml => {
+            const key = `${ml.session_date || ml.date}_${ml.time_in || ml.timeIn}`;
+            if (!seen.has(key)) {
+              logs.push(ml);
+              seen.add(key);
+            }
+          });
+        }
+      }
+    }
+  } catch (_) {}
+
+  // Sort descending by date
+  return logs.sort((a, b) => {
+    const dateA = a.session_date || a.date || a.created_at || '';
+    const dateB = b.session_date || b.date || b.created_at || '';
+    return dateB.localeCompare(dateA);
+  });
+}
+
+/**
+ * Fetches all scheduled/recorded mandatory formation dates across sessions, logs, and default schedule.
+ */
+export async function fetchMandatoryFormationDates() {
+  const datesSet = new Set(ACTIVE_FORMATION_DATES);
+
+  // 1. Try Supabase attendance_sessions and attendance_logs
+  try {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const [sessionsRes, logsRes] = await Promise.allSettled([
+        supabase.from('attendance_sessions').select('session_date, date').limit(200),
+        supabase.from('attendance_logs').select('session_date, date').order('session_date', { ascending: false }).limit(500)
+      ]);
+
+      if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value.data)) {
+        sessionsRes.value.data.forEach(s => {
+          const dk = toDateKey(s.session_date || s.date);
+          if (dk) datesSet.add(dk);
+        });
+      }
+
+      if (logsRes.status === 'fulfilled' && Array.isArray(logsRes.value.data)) {
+        logsRes.value.data.forEach(l => {
+          const dk = toDateKey(l.session_date || l.date);
+          if (dk) datesSet.add(dk);
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('Error fetching formation dates from Supabase:', e);
+  }
+
+  // 2. Add local storage master attendance dates
+  try {
+    const localLogs = localStorage.getItem('csu_rotc_master_attendance');
+    if (localLogs) {
+      const parsed = JSON.parse(localLogs);
+      if (Array.isArray(parsed)) {
+        parsed.forEach(l => {
+          const dk = toDateKey(l.session_date || l.date || l.timestamp);
+          if (dk) datesSet.add(dk);
+        });
+      }
+    }
+  } catch (_) {}
+
+  return Array.from(datesSet).sort();
 }

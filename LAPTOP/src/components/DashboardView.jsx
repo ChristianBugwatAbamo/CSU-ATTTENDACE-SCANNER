@@ -21,8 +21,10 @@ import {
   normalizePlatoon,
   formatDisplayTime
 } from '../utils/attendanceStatus';
+import { getDutyOfficerForCadet } from './AttendanceHistory';
 import { useAttendanceData } from '../hooks/useAttendanceData';
-import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, fetchSettingsFromSupabase } from '../utils/supabaseClient';
+import { useUnitStructure } from '../context/UnitContext';
+import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, fetchSettingsFromSupabase, fetchAttendanceSessionsFromSupabase } from '../utils/supabaseClient';
 
 function formatDisplayTimeFallback(timestamp) {
   if (!timestamp) return null;
@@ -180,8 +182,9 @@ export default function DashboardView({
   const formationCutoff = activeCutoff || hookSettings?.formation_cutoff_time || hookSettings?.morningCutoffTime || hookSettings?.formationCutoffTime || getActiveFormationCutoff() || '07:30';
   
   const [cloudStructure, setCloudStructure] = useState(null);
+  const [dbSessions, setDbSessions] = useState([]);
 
-  // Sync latest unit structure from Supabase on mount
+  // Sync latest unit structure and sessions from Supabase on mount
   useEffect(() => {
     let isMounted = true;
     async function syncCloudSettings() {
@@ -193,19 +196,23 @@ export default function DashboardView({
             setCloudStructure(struct);
           }
         }
+        const sessions = await fetchAttendanceSessionsFromSupabase();
+        if (sessions && isMounted) {
+          setDbSessions(sessions);
+        }
       } catch (_) {}
     }
     syncCloudSettings();
     return () => { isMounted = false; };
-  }, []);
+  }, [hasTodayScans]);
 
-  const unitStructure = (cloudStructure && Array.isArray(cloudStructure) && cloudStructure.length > 0)
-    ? cloudStructure
-    : ((hookSettings?.unit_structure && Array.isArray(hookSettings.unit_structure) && hookSettings.unit_structure.length > 0)
-        ? hookSettings.unit_structure
-        : ((hookSettings?.unitStructure && Array.isArray(hookSettings.unitStructure) && hookSettings.unitStructure.length > 0)
-            ? hookSettings.unitStructure
-            : DEFAULT_UNIT_STRUCTURE));
+  const { unitStructure: contextUnitStructure } = useUnitStructure();
+
+  const unitStructure = (contextUnitStructure && Array.isArray(contextUnitStructure) && contextUnitStructure.length > 0)
+    ? contextUnitStructure
+    : (cloudStructure && Array.isArray(cloudStructure) && cloudStructure.length > 0
+        ? cloudStructure
+        : DEFAULT_UNIT_STRUCTURE);
 
   // Cascading Selection State for drill-downs
   const [selectedBattalion, setSelectedBattalion] = useState(null);
@@ -346,21 +353,6 @@ export default function DashboardView({
     );
   }, [dynamicHierarchy.allCadetsList, attendanceLogs, formationCutoff]);
 
-  const attendanceSummary = useMemo(() => {
-    if (!hasTodayScans) {
-      return {
-        totalStrength: dynamicHierarchy.totalUnitStrength,
-        presentCompleteCount: 0,
-        lateCompleteCount: 0,
-        incompleteCount: 0,
-        absentCount: 0,
-        totalScanned: 0,
-        presentOrLateCount: 0
-      };
-    }
-    return rawSummary;
-  }, [hasTodayScans, rawSummary, dynamicHierarchy.totalUnitStrength]);
-
   const reconciledRoster = useMemo(() => {
     if (!hasTodayScans) {
       return dynamicHierarchy.allCadetsList.map(cadet => ({
@@ -378,6 +370,59 @@ export default function DashboardView({
     }
     return rawReconciledRoster;
   }, [hasTodayScans, rawReconciledRoster, dynamicHierarchy.allCadetsList]);
+
+  const attendanceSummary = useMemo(() => {
+    if (!hasTodayScans) {
+      return {
+        totalStrength: dynamicHierarchy.totalUnitStrength,
+        presentCompleteCount: 0,
+        lateCompleteCount: 0,
+        incompleteCount: 0,
+        absentCount: 0,
+        totalScanned: 0,
+        presentOrLateCount: 0
+      };
+    }
+
+    let presentCount = 0;
+    let lateCount = 0;
+    let incompleteCount = 0;
+    let absentCount = 0;
+
+    reconciledRoster.forEach(cadet => {
+      const status = (cadet.finalDailyStatus || cadet.status || 'ABSENT').toUpperCase();
+      const isLate = Boolean(cadet.isLate || status.includes('LATE'));
+      const isIncomplete = (
+        status.includes('NO TIME-OUT') ||
+        status.includes('NO TIME-IN') ||
+        status.includes('INCOMPLETE') ||
+        (cadet.hasTimeIn && !cadet.hasTimeOut) ||
+        (!cadet.hasTimeIn && cadet.hasTimeOut)
+      );
+
+      if (isLate) {
+        lateCount++;
+      } else if (status.includes('PRESENT') || (cadet.hasTimeIn && cadet.hasTimeOut && !isLate)) {
+        presentCount++;
+      }
+
+      if (isIncomplete) {
+        incompleteCount++;
+      } else if (!cadet.hasTimeIn && !cadet.hasTimeOut && (status.includes('ABSENT') || status.includes('NO SCAN'))) {
+        absentCount++;
+      }
+    });
+
+    return {
+      totalStrength: reconciledRoster.length,
+      presentCompleteCount: presentCount,
+      lateCompleteCount: lateCount,
+      incompleteCount,
+      absentCount,
+      totalScanned: presentCount + lateCount + incompleteCount,
+      presentOrLateCount: presentCount + lateCount
+    };
+  }, [hasTodayScans, reconciledRoster, dynamicHierarchy.totalUnitStrength]);
 
   const handleClearAllFilters = () => {
     setSelectedBattalion(null);
@@ -824,18 +869,9 @@ export default function DashboardView({
                       {/* Time-In Column */}
                       <td>
                         {timeInDisplay ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{timeInDisplay}</span>
-                            {cadet.isLate ? (
-                              <span className="badge" style={{ background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a', fontWeight: 800, padding: '2px 6px', fontSize: '0.7rem' }}>
-                                <Clock size={10} /> LATE
-                              </span>
-                            ) : (
-                              <span className="badge badge-present" style={{ padding: '2px 6px', fontSize: '0.7rem' }}>
-                                <CheckCircle2 size={10} /> PRESENT
-                              </span>
-                            )}
-                          </div>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: (cadet.isLate || String(cadet.finalDailyStatus || '').includes('LATE')) ? '#d97706' : '#065f46' }}>
+                            {timeInDisplay}
+                          </span>
                         ) : (
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>No Scan</span>
                         )}
@@ -844,16 +880,13 @@ export default function DashboardView({
                       {/* Time-Out Column */}
                       <td>
                         {timeOutDisplay ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600 }}>{timeOutDisplay}</span>
-                            <span className="badge badge-present" style={{ padding: '2px 6px', fontSize: '0.7rem' }}>
-                              <CheckCircle2 size={10} /> PRESENT
-                            </span>
-                          </div>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#065f46' }}>
+                            {timeOutDisplay}
+                          </span>
                         ) : (
                           <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                             {cadet.hasTimeIn ? (
-                              <span className="badge" style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5', fontSize: '0.68rem', padding: '2px 6px' }}>
+                              <span className="badge" style={{ background: '#fff7ed', color: '#ea580c', border: '1px solid #ffedd5', fontSize: '0.68rem', padding: '2px 6px', fontWeight: 700 }}>
                                 NO TIME-OUT
                               </span>
                             ) : '—'}
@@ -903,7 +936,53 @@ export default function DashboardView({
                         )}
                       </td>
 
-                      <td>{cadet.dutyOfficer || (hasTodayScans ? 'Duty Officer' : '—')}</td>
+                      <td>
+                        {(() => {
+                          const isAbsentOrNoScan = (
+                            !hasTodayScans ||
+                            finalStatus === 'NO SCAN TODAY' ||
+                            finalStatus === 'ABSENT' ||
+                            (!cadet.hasTimeIn && !cadet.hasTimeOut && !cadet.timeInScan && !cadet.timeOutScan)
+                          );
+
+                          // If the cadet is ABSENT / No Scan, Duty Officer column renders —
+                          if (isAbsentOrNoScan) {
+                            return '—';
+                          }
+
+                          // If the cadet has scanned in (PRESENT / LATE), render the specific duty_officer recorded in that scan log payload
+                          const directOfficer = (
+                            cadet.timeInScan?.duty_officer ||
+                            cadet.timeInScan?.dutyOfficer ||
+                            cadet.timeOutScan?.duty_officer ||
+                            cadet.timeOutScan?.dutyOfficer ||
+                            cadet.duty_officer ||
+                            cadet.dutyOfficer
+                          );
+                          if (directOfficer && directOfficer !== 'Duty Officer' && directOfficer !== 'HQ Duty Officer' && !directOfficer.includes(',')) {
+                            return directOfficer;
+                          }
+
+                          // Lookup this specific cadet's scan log in today's attendance logs
+                          const cId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim().toUpperCase();
+                          const matchingLog = attendanceLogs.find(l => {
+                            const lId = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
+                            return lId && lId === cId;
+                          });
+                          const logOfficer = matchingLog?.duty_officer || matchingLog?.dutyOfficer;
+                          if (logOfficer && logOfficer !== 'Duty Officer' && logOfficer !== 'HQ Duty Officer' && !logOfficer.includes(',')) {
+                            return logOfficer;
+                          }
+
+                          // Unit session duty officer fallback for scanned cadet
+                          const resolvedOfficer = getDutyOfficerForCadet(cadet, dbSessions, attendanceLogs, todayKey);
+                          if (resolvedOfficer && resolvedOfficer !== '—' && resolvedOfficer !== 'Duty Officer' && resolvedOfficer !== 'HQ Duty Officer') {
+                            return resolvedOfficer;
+                          }
+
+                          return '—';
+                        })()}
+                      </td>
                     </tr>
                   );
                 })}

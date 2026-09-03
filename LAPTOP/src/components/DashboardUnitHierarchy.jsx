@@ -1,7 +1,7 @@
 import React from 'react';
 import { Users } from 'lucide-react';
 import { DEFAULT_UNIT_STRUCTURE } from './AdminSettings';
-import { fetchSettingsFromSupabase } from '../utils/supabaseClient';
+import { useUnitStructure } from '../context/UnitContext';
 
 export default function DashboardUnitHierarchy({
   selectedBattalion,
@@ -12,56 +12,11 @@ export default function DashboardUnitHierarchy({
   setSelectedPlatoon,
   unitStructure: propUnitStructure
 }) {
-  const [localStructure, setLocalStructure] = React.useState(() => {
-    try {
-      const saved = localStorage.getItem('csu_rotc_admin_settings');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return parsed.unit_structure || parsed.unitStructure || null;
-      }
-    } catch (_) {}
-    return null;
-  });
-
-  // Sync with cloud settings on mount
-  React.useEffect(() => {
-    let isMounted = true;
-    async function syncCloudStructure() {
-      try {
-        const sb = await fetchSettingsFromSupabase();
-        if (sb && isMounted) {
-          const struct = sb.unit_structure || sb.unitStructure;
-          if (Array.isArray(struct) && struct.length > 0) {
-            setLocalStructure(struct);
-          }
-        }
-      } catch (_) {}
-    }
-    syncCloudStructure();
-    return () => { isMounted = false; };
-  }, []);
-
-  React.useEffect(() => {
-    const handleUpdate = (e) => {
-      const s = e?.detail || (() => {
-        try { return JSON.parse(localStorage.getItem('csu_rotc_admin_settings') || '{}'); } catch (_) { return {}; }
-      })();
-      const struct = s.unit_structure || s.unitStructure;
-      if (struct && Array.isArray(struct) && struct.length > 0) {
-        setLocalStructure(struct);
-      }
-    };
-    window.addEventListener('csu_settings_updated', handleUpdate);
-    window.addEventListener('storage', handleUpdate);
-    return () => {
-      window.removeEventListener('csu_settings_updated', handleUpdate);
-      window.removeEventListener('storage', handleUpdate);
-    };
-  }, []);
+  const { unitStructure: contextStructure } = useUnitStructure();
 
   const activeStructure = (propUnitStructure && Array.isArray(propUnitStructure) && propUnitStructure.length > 0)
     ? propUnitStructure
-    : (localStructure && Array.isArray(localStructure) && localStructure.length > 0 ? localStructure : DEFAULT_UNIT_STRUCTURE);
+    : (contextStructure && Array.isArray(contextStructure) && contextStructure.length > 0 ? contextStructure : DEFAULT_UNIT_STRUCTURE);
 
   const battalions = activeStructure.map(b => (b.name || '').toUpperCase());
 

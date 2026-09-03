@@ -72,37 +72,56 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
     const log = cadetLogsByDate[formationDate];
 
     if (log) {
-      const st = (log.status || log.finalStatus || '').toUpperCase();
+      const st = (log.final_daily_status || log.finalDailyStatus || log.status || log.finalStatus || '').toUpperCase();
+      
+      const rawTimeIn = log.time_in || log.timeIn;
+      const rawTimeOut = log.time_out || log.timeOut;
+      
+      const isNullTimeOut = !rawTimeOut || String(rawTimeOut).trim() === '' || String(rawTimeOut).toUpperCase() === 'NO TIME-OUT';
+      const isNullTimeIn = !rawTimeIn || String(rawTimeIn).trim() === '' || String(rawTimeIn).toUpperCase() === 'NO TIME-IN';
+
+      const cleanTimeIn = isNullTimeIn ? ((log.scanMode === 'Time-In' || log.scan_mode === 'Time-In') ? log.timestamp : null) : rawTimeIn;
+      const cleanTimeOut = isNullTimeOut ? ((log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out') ? log.timestamp : null) : rawTimeOut;
+
+      const hasTimeIn = Boolean(cleanTimeIn);
+      const hasTimeOut = Boolean(cleanTimeOut);
+
       const hasMissingScan =
         st.includes('NO TIME-IN') ||
         st.includes('NO TIME-OUT') ||
         st.includes('INCOMPLETE') ||
-        (log.hasTimeIn && !log.hasTimeOut) ||
-        (!log.hasTimeIn && log.hasTimeOut) ||
-        (log.timeIn && !log.timeOut) ||
-        (!log.timeIn && log.timeOut);
+        (hasTimeIn && !hasTimeOut) ||
+        (!hasTimeIn && hasTimeOut);
 
       let penaltyLabel = 'Present & Verified';
       let dayType = 'PRESENT';
+      let entryStatus = 'PRESENT';
 
-      if (hasMissingScan) {
+      if (hasTimeIn && !hasTimeOut) {
         totalIntervalMissingScans += 1;
-        penaltyLabel = `Missing Scan (+1/4 Interval Penalty)`;
-        dayType = st.includes('NO TIME-IN') ? 'NO TIME-IN' : 'NO TIME-OUT';
-      }
-
-      if (st === 'ABSENT') {
+        dayType = 'NO TIME-OUT';
+        const isLate = st.includes('LATE') || Boolean(log.isLate || log.is_late);
+        entryStatus = isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
+        penaltyLabel = `Missing Time-Out Scan (+1/4 Interval Penalty)`;
+      } else if (!hasTimeIn && hasTimeOut) {
+        totalIntervalMissingScans += 1;
+        dayType = 'NO TIME-IN';
+        entryStatus = 'NO TIME-IN';
+        penaltyLabel = `Missing Time-In Scan (+1/4 Interval Penalty)`;
+      } else if (st === 'ABSENT' || (!hasTimeIn && !hasTimeOut)) {
         unexcusedAbsences += 1;
         consecutiveAbsences += 1;
         maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
         consecutiveLates = 0;
         penaltyLabel = `Official Absent (+1 Absent, Streak: ${consecutiveAbsences})`;
         dayType = 'ABSENT';
-      } else if (st === 'LATE') {
+        entryStatus = 'ABSENT';
+      } else if (st.includes('LATE')) {
         consecutiveAbsences = 0;
         consecutiveLates += 1;
         totalIntervalLates += 1;
         dayType = 'LATE';
+        entryStatus = 'LATE (Complete)';
 
         // Rule: 3 consecutive lates = 1 absent
         if (consecutiveLates === 3) {
@@ -117,23 +136,26 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
         consecutiveLates = 0;
         penaltyLabel = `Excused / Official Duty (No Penalty)`;
         dayType = 'EXCUSED';
+        entryStatus = 'EXCUSED';
       } else {
-        if (!hasMissingScan) {
-          consecutiveAbsences = 0;
-          consecutiveLates = 0;
-          penaltyLabel = `Present & Verified`;
-          dayType = 'PRESENT';
-        }
+        consecutiveAbsences = 0;
+        consecutiveLates = 0;
+        penaltyLabel = `Present & Verified`;
+        dayType = 'PRESENT';
+        entryStatus = 'PRESENT (Complete)';
       }
 
       dailyBreakdown.push({
         date: formationDate,
         dayType,
-        status: st || dayType,
-        timeIn: log.timeIn || log.time_in || (log.scanMode === 'Time-In' ? log.timestamp : null),
-        timeOut: log.timeOut || log.time_out || (log.scanMode === 'Time-Out' ? log.timestamp : null),
+        status: entryStatus,
+        timeIn: cleanTimeIn,
+        timeOut: cleanTimeOut,
+        hasTimeIn,
+        hasTimeOut,
         timestamp: log.timestamp,
         penaltyLabel,
+        cutoffTime: log.cutoff_time || log.cutoffTime || log.formation_cutoff_time || null,
         isRecorded: true
       });
     } else {

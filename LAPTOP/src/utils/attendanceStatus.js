@@ -139,11 +139,25 @@ export function getAttendanceStatus(log, cutoffTimeStr = '07:30') {
  * 5. Time-In No Scan   && Time-Out No Scan   => Time-In: ABSENT,  Time-Out: ABSENT,      Final: ABSENT
  */
 export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoffTimeStr = '07:30') {
-  const timeInRaw = typeof timeInScan === 'string' ? timeInScan : (timeInScan?.timestamp || timeInScan?.timeIn || timeInScan?.time_in || timeInScan?.scanned_at || timeInScan?.scannedAt || timeInScan?.timeInTime || null);
-  const timeOutRaw = typeof timeOutScan === 'string' ? timeOutScan : (timeOutScan?.timestamp || timeOutScan?.timeOut || timeOutScan?.time_out || timeOutScan?.scanned_at || timeOutScan?.scannedAt || timeOutScan?.timeOutTime || null);
+  const isValidTimeVal = (val) => {
+    if (!val) return false;
+    const s = String(val).trim().toUpperCase();
+    return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+  };
 
-  const hasTimeIn = Boolean(timeInRaw && String(timeInRaw).trim());
-  const hasTimeOut = Boolean(timeOutRaw && String(timeOutRaw).trim());
+  const rawIn = typeof timeInScan === 'string'
+    ? timeInScan
+    : (timeInScan?.time_in || timeInScan?.timeIn || timeInScan?.timestamp || timeInScan?.created_at || timeInScan?.scanned_at || timeInScan?.scannedAt || timeInScan?.received_at || timeInScan?.timeInTime || null);
+
+  const rawOut = typeof timeOutScan === 'string'
+    ? timeOutScan
+    : (timeOutScan?.time_out || timeOutScan?.timeOut || timeOutScan?.timeOutTime || null);
+
+  const timeInRaw = isValidTimeVal(rawIn) ? rawIn : null;
+  const timeOutRaw = isValidTimeVal(rawOut) ? rawOut : null;
+
+  const hasTimeIn = Boolean(timeInRaw);
+  const hasTimeOut = Boolean(timeOutRaw);
 
   let timeInStatus = 'ABSENT';
   let isLate = false;
@@ -175,7 +189,7 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
     }
   } else if (hasTimeIn && !hasTimeOut) {
     if (isLate) {
-      finalDailyStatus = 'LATE (No Time-Out)';
+      finalDailyStatus = 'LATE / NO TIME-OUT';
       finalStatusClass = 'status-late-notimeout';
     } else {
       finalDailyStatus = 'NO TIME-OUT';
@@ -195,19 +209,21 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
     cadetId: cadet.id || cadet.cadetId || cadet.cadet_id,
     hasTimeIn,
     hasTimeOut,
-    timeInScan,
-    timeOutScan,
-    dutyOfficer: timeInScan?.dutyOfficer || timeInScan?.duty_officer || timeOutScan?.dutyOfficer || timeOutScan?.duty_officer || cadet.dutyOfficer || cadet.duty_officer || null,
-    sessionName: timeInScan?.sessionName || timeInScan?.session_name || timeOutScan?.sessionName || timeOutScan?.session_name || cadet.sessionName || cadet.session_name || null,
-    timeInDisplay: formatDisplayTime(timeInRaw),
-    timeOutDisplay: formatDisplayTime(timeOutRaw),
+    timeIn: timeInRaw,
+    timeOut: timeOutRaw,
+    timeInDisplay: hasTimeIn ? formatDisplayTime(timeInRaw) : null,
+    timeOutDisplay: hasTimeOut ? formatDisplayTime(timeOutRaw) : null,
     timeInStatus,
     timeOutStatus,
     finalDailyStatus,
-    finalStatusClass,
+    status: finalDailyStatus,
     isComplete: hasTimeIn && hasTimeOut,
     isLate,
-    isAbsent: !hasTimeIn && !hasTimeOut
+    isAbsent: !hasTimeIn && !hasTimeOut,
+    dutyOfficer: timeInScan?.duty_officer || timeInScan?.dutyOfficer || timeOutScan?.duty_officer || timeOutScan?.dutyOfficer || cadet.duty_officer || cadet.dutyOfficer || null,
+    duty_officer: timeInScan?.duty_officer || timeInScan?.dutyOfficer || timeOutScan?.duty_officer || timeOutScan?.dutyOfficer || cadet.duty_officer || cadet.dutyOfficer || null,
+    timeInScan,
+    timeOutScan
   };
 }
 
@@ -251,10 +267,16 @@ export function normalizeDateKey(dateInput) {
 export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sessionDate = null, cutoffTimeStr = '07:30') {
   const targetDateKey = sessionDate ? normalizeDateKey(sessionDate) : null;
 
+  const isValidTimeVal = (val) => {
+    if (!val) return false;
+    const s = String(val).trim().toUpperCase();
+    return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+  };
+
   // Filter logs by date if a specific session date is provided
   const relevantLogs = targetDateKey
     ? attendanceLogs.filter(l => {
-        const rawDate = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in;
+        const rawDate = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in || l.created_at;
         return rawDate && normalizeDateKey(rawDate) === targetDateKey;
       })
     : attendanceLogs;
@@ -270,18 +292,31 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
     const group = cadetLogsMap.get(id);
     group.all.push(log);
 
-    // Check if the log itself carries explicit timeIn / timeOut properties (merged row model)
-    const rawTimeIn = log.timeIn || log.time_in || log.timeInTime || (log.timeInScan ? (log.timeInScan.timestamp || log.timeInScan.time_in || log.timeInScan.scanned_at) : null) || (log.scanMode === 'Time-In' || log.scan_mode === 'Time-In' ? (log.timestamp || log.scanned_at || log.scannedAt) : null);
-    const rawTimeOut = log.timeOut || log.time_out || log.timeOutTime || (log.timeOutScan ? (log.timeOutScan.timestamp || log.timeOutScan.time_out || log.timeOutScan.scanned_at) : null) || (log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out' ? (log.timestamp || log.scanned_at || log.scannedAt) : null);
+    // Check if the log carries explicit timeIn or fallback to timestamp/created_at
+    const candidateTimeIn = log.time_in || log.timeIn || log.timeInTime ||
+      (log.timeInScan ? (log.timeInScan.time_in || log.timeInScan.timestamp || log.timeInScan.created_at) : null) ||
+      (log.scanMode === 'Time-In' || log.scan_mode === 'Time-In' ? (log.timestamp || log.created_at || log.scanned_at || log.received_at) : null);
+
+    const rawTimeIn = isValidTimeVal(candidateTimeIn) ? candidateTimeIn : (
+      (!log.scanMode || log.scanMode === 'Time-In' || !log.scan_mode || log.scan_mode === 'Time-In') && isValidTimeVal(log.timestamp || log.created_at || log.scanned_at || log.received_at)
+        ? (log.timestamp || log.created_at || log.scanned_at || log.received_at)
+        : null
+    );
+
+    const candidateTimeOut = log.time_out || log.timeOut || log.timeOutTime ||
+      (log.timeOutScan ? (log.timeOutScan.time_out || log.timeOutScan.timestamp) : null) ||
+      (log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out' ? (log.timestamp || log.created_at || log.scanned_at) : null);
+
+    const rawTimeOut = isValidTimeVal(candidateTimeOut) ? candidateTimeOut : null;
 
     if (rawTimeIn) {
-      const timeInObj = log.timeInScan || { ...log, scanMode: 'Time-In', timestamp: rawTimeIn };
-      if (!group.timeIn || (rawTimeIn && new Date(rawTimeIn) < new Date(group.timeIn.timestamp || group.timeIn.timeIn || group.timeIn.time_in))) {
+      const timeInObj = log.timeInScan || { ...log, scanMode: 'Time-In', timestamp: rawTimeIn, time_in: rawTimeIn, timeIn: rawTimeIn };
+      if (!group.timeIn || (rawTimeIn && new Date(rawTimeIn) < new Date(group.timeIn.timestamp || group.timeIn.timeIn || group.timeIn.time_in || group.timeIn.created_at))) {
         group.timeIn = timeInObj;
       }
     }
     if (rawTimeOut) {
-      const timeOutObj = log.timeOutScan || { ...log, scanMode: 'Time-Out', timestamp: rawTimeOut };
+      const timeOutObj = log.timeOutScan || { ...log, scanMode: 'Time-Out', timestamp: rawTimeOut, time_out: rawTimeOut, timeOut: rawTimeOut };
       if (!group.timeOut || (rawTimeOut && new Date(rawTimeOut) > new Date(group.timeOut.timestamp || group.timeOut.timeOut || group.timeOut.time_out))) {
         group.timeOut = timeOutObj;
       }
@@ -290,13 +325,14 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
     // If neither explicit property is set, fall back to scanMode / status
     if (!rawTimeIn && !rawTimeOut) {
       const mode = log.scanMode || log.scan_mode || (String(log.status || '').toUpperCase().includes('TIME-OUT') ? 'Time-Out' : 'Time-In');
+      const fallbackTs = log.timestamp || log.created_at || log.scanned_at;
       if (mode === 'Time-Out') {
-        if (!group.timeOut || (log.timestamp && new Date(log.timestamp) > new Date(group.timeOut.timestamp))) {
-          group.timeOut = log;
+        if (!group.timeOut || (fallbackTs && new Date(fallbackTs) > new Date(group.timeOut.timestamp || group.timeOut.created_at))) {
+          group.timeOut = { ...log, timestamp: fallbackTs };
         }
       } else {
-        if (!group.timeIn || (log.timestamp && new Date(log.timestamp) < new Date(group.timeIn.timestamp))) {
-          group.timeIn = log;
+        if (!group.timeIn || (fallbackTs && new Date(fallbackTs) < new Date(group.timeIn.timestamp || group.timeIn.created_at))) {
+          group.timeIn = { ...log, timestamp: fallbackTs };
         }
       }
     }
@@ -336,18 +372,22 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
 
   // Summary Metrics
   const totalStrength = reconciledList.length;
-  const presentCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'PRESENT' || (r.hasTimeIn && !r.finalDailyStatus?.includes('ABSENT'))).length;
-  const lateCompleteCount = reconciledList.filter(r => r.finalDailyStatus === 'LATE' || r.finalDailyStatus?.includes('LATE') || r.isLate).length;
+  // Present Complete: Only cadets who have completed both Time-In AND Time-Out on time
+  const presentCompleteCount = reconciledList.filter(r => (r.finalDailyStatus === 'PRESENT' || r.finalDailyStatus === 'PRESENT (Complete)') && r.hasTimeIn && r.hasTimeOut && !r.isLate).length;
+  // Late Complete: Only cadets who have completed both scans, but arrived late
+  const lateCompleteCount = reconciledList.filter(r => (r.finalDailyStatus === 'LATE' || r.finalDailyStatus === 'LATE (Complete)') && r.hasTimeIn && r.hasTimeOut && r.isLate).length;
+  // Incomplete: Cadets missing Time-Out (hasTimeIn && !hasTimeOut) or missing Time-In (!hasTimeIn && hasTimeOut)
   const incompleteCount = reconciledList.filter(r =>
+    (r.hasTimeIn && !r.hasTimeOut) ||
+    (!r.hasTimeIn && r.hasTimeOut) ||
     r.finalDailyStatus === 'NO TIME-OUT' ||
     r.finalDailyStatus === 'NO TIME-IN' ||
     r.finalDailyStatus?.includes('NO TIME-OUT') ||
     r.finalDailyStatus?.includes('NO TIME-IN') ||
-    r.finalDailyStatus?.includes('INCOMPLETE') ||
-    (r.hasTimeIn && !r.hasTimeOut) ||
-    (!r.hasTimeIn && r.hasTimeOut)
+    r.finalDailyStatus?.includes('INCOMPLETE')
   ).length;
-  const absentCount = reconciledList.filter(r => r.finalDailyStatus === 'ABSENT' || r.finalDailyStatus?.includes('ABSENT')).length;
+  // Absent: Cadets with neither Time-In nor Time-Out
+  const absentCount = reconciledList.filter(r => !r.hasTimeIn && !r.hasTimeOut).length;
   const totalScanned = reconciledList.filter(r => r.hasTimeIn || r.hasTimeOut).length;
 
   return {
@@ -445,11 +485,15 @@ export function getScannedUnitEchelon(log) {
  */
 export function getActiveFormationCutoff() {
   try {
-    const local = localStorage.getItem('csu_rotc_admin_settings');
-    if (local) {
-      const parsed = JSON.parse(local);
+    const raw = localStorage.getItem('csu_rotc_admin_settings') || localStorage.getItem('csu_rotc_system_settings');
+    if (raw) {
+      const parsed = JSON.parse(raw);
       if (parsed.morningCutoffTime) return parsed.morningCutoffTime;
       if (parsed.formationCutoffTime) return parsed.formationCutoffTime;
+      if (parsed.formation_cutoff_time) return parsed.formation_cutoff_time;
+      if (parsed.cutoffTime) return parsed.cutoffTime;
+      if (parsed.cutoff_time) return parsed.cutoff_time;
+      if (parsed.musterAndUnit?.timeInCutoff) return parsed.musterAndUnit.timeInCutoff;
     }
     const legacy = localStorage.getItem('csu_rotc_formation_cutoff');
     if (legacy) return legacy;

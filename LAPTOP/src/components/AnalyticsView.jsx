@@ -52,6 +52,7 @@ import {
   ACTIVE_FORMATION_DATES,
   toDateKey as normalizeDateKey
 } from '../utils/attendanceRules';
+import { reconcileRosterAttendance } from '../utils/attendanceStatus';
 
 // Register Chart.js components + DataLabels plugin
 ChartJS.register(
@@ -345,7 +346,6 @@ export default function AnalyticsView({
 }) {
   const [selectedSemester, setSelectedSemester] = useState('1ST_SEM_2025_2026');
   const [isCollegeChartStacked, setIsCollegeChartStacked] = useState(false);
-  const [currentCalendarDate, setCurrentCalendarDate] = useState(() => new Date());
   const [flaggedCadets, setFlaggedCadets] = useState([]);
   const [evidenceCadet, setEvidenceCadet] = useState(null);
 
@@ -1013,32 +1013,109 @@ export default function AnalyticsView({
     };
   }, [activeCadets]);
 
-  const year = currentCalendarDate.getFullYear();
-  const month = currentCalendarDate.getMonth();
-  const monthName = currentCalendarDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const firstDayIndex = new Date(year, month, 1).getDay();
-  const totalDaysInMonth = new Date(year, month + 1, 0).getDate();
-  const totalDaysInPrevMonth = new Date(year, month, 0).getDate();
+  const todayKey = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
 
-  const prevMonthPadding = [];
-  for (let i = firstDayIndex - 1; i >= 0; i--) {
-    prevMonthPadding.push(totalDaysInPrevMonth - i);
-  }
+  const todayAttendanceStats = useMemo(() => {
+    const cadetList = activeCadets || [];
+    const total = cadetList.length || 21;
 
-  const daysArray = Array.from({ length: totalDaysInMonth }, (_, i) => i + 1);
+    // Filter today's attendance logs
+    const todayLogs = (propsLogs || []).filter(l => {
+      const raw = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in;
+      if (!raw) return false;
+      const str = String(raw).slice(0, 10);
+      return str === todayKey;
+    });
 
-  const isCurrentDayToday = (day) => {
-    const now = new Date();
-    return now.getFullYear() === year && now.getMonth() === month && now.getDate() === day;
-  };
+    let present = 0;
+    let late = 0;
+    let noTimeInOut = 0;
+    let absent = 0;
 
-  const handlePrevMonth = () => {
-    setCurrentCalendarDate(new Date(year, month - 1, 1));
-  };
+    if (todayLogs.length > 0) {
+      const { summary } = reconcileRosterAttendance(cadetList, todayLogs, todayKey);
+      present = summary?.presentCompleteCount || 0;
+      late = summary?.lateCompleteCount || 0;
+      noTimeInOut = summary?.incompleteCount || 0;
+      absent = Math.max(0, total - (present + late + noTimeInOut));
+    } else {
+      absent = total;
+    }
 
-  const handleNextMonth = () => {
-    setCurrentCalendarDate(new Date(year, month + 1, 1));
-  };
+    return {
+      present,
+      late,
+      noTimeInOut,
+      absent,
+      total
+    };
+  }, [activeCadets, propsLogs, todayKey]);
+
+  const donutChartData = useMemo(() => {
+    const { present, late, noTimeInOut, absent, total } = todayAttendanceStats;
+    const hasAnyScans = present > 0 || late > 0 || noTimeInOut > 0;
+
+    const dataValues = hasAnyScans
+      ? [present, late, noTimeInOut, absent]
+      : [0, 0, 0, total];
+
+    return {
+      labels: ['Present', 'Late', 'No Time In/Out', 'Absent'],
+      datasets: [
+        {
+          data: dataValues,
+          backgroundColor: [
+            '#10b981', // Present (Emerald)
+            '#f59e0b', // Late (Amber)
+            '#f97316', // No Time In/Out (Orange)
+            '#ef4444'  // Absent (Red)
+          ],
+          hoverBackgroundColor: [
+            '#059669',
+            '#d97706',
+            '#ea580c',
+            '#dc2626'
+          ],
+          borderWidth: 2,
+          borderColor: '#ffffff',
+          hoverOffset: 4
+        }
+      ]
+    };
+  }, [todayAttendanceStats]);
+
+  const donutChartOptions = useMemo(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '72%',
+    plugins: {
+      legend: {
+        display: false
+      },
+      datalabels: {
+        display: false
+      },
+      tooltip: {
+        backgroundColor: '#0f172a',
+        titleFont: { size: 12, weight: 'bold' },
+        bodyFont: { size: 11 },
+        padding: 8,
+        cornerRadius: 6,
+        callbacks: {
+          label: (context) => {
+            const label = context.label || '';
+            const val = context.parsed || 0;
+            const total = todayAttendanceStats.total || 1;
+            const pct = Math.round((val / total) * 100);
+            return ` ${label}: ${val} (${pct}%)`;
+          }
+        }
+      }
+    }
+  }), [todayAttendanceStats]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -1058,13 +1135,21 @@ export default function AnalyticsView({
       </div>
 
       {/* ========================================================================= */}
-      {/* SECTION 1: TOP MUSTER & ENROLLMENT TRENDS ROW                             */}
-      {/* 1. Cadet Growth (5 cols) | 2. Attendance Trend (4 cols) | 3. Calendar     */}
+      {/* SECTION 1: TOP MUSTER & ENROLLMENT TRENDS ROW (3 EQUAL COLUMNS)           */}
+      {/* 1. Cadet Growth (1 col) | 2. Attendance Trend (1 col) | 3. Today's Donut (1 col) */}
       {/* ========================================================================= */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gap: '1.5rem' }}>
+      <div 
+        className="grid grid-cols-1 lg:grid-cols-3" 
+        style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', 
+          gap: '1.5rem',
+          alignItems: 'stretch'
+        }}
+      >
 
         {/* 1. Cadet Growth Timeline Curve */}
-        <div style={{ gridColumn: 'span 5', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <Users size={16} color="var(--rotc-green-dark)" />
@@ -1074,13 +1159,13 @@ export default function AnalyticsView({
               Active Enrollment Timeline
             </span>
           </div>
-          <div style={{ height: '175px', width: '100%' }}>
+          <div style={{ height: '175px', width: '100%', flex: 1 }}>
             <Line data={growthData} options={growthChartOptions} />
           </div>
         </div>
 
         {/* 2. Formation Attendance Turnout Trend */}
-        <div style={{ gridColumn: 'span 4', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <div style={{ backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <TrendingUp size={16} color="#0284c7" />
@@ -1090,58 +1175,77 @@ export default function AnalyticsView({
               Formation %
             </span>
           </div>
-          <div style={{ height: '175px', width: '100%' }}>
+          <div style={{ height: '175px', width: '100%', flex: 1 }}>
             <Line data={trendData} options={attendanceChartOptions} />
           </div>
         </div>
 
-        {/* 3. Interactive Formation Calendar */}
-        <div style={{ gridColumn: 'span 3', backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem' }}>
-            <button
-              type="button"
-              onClick={handlePrevMonth}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px 4px' }}
-              title="Previous Month"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <h3 style={{ fontSize: '0.85rem', fontWeight: '800', color: '#1e293b', margin: 0 }}>{monthName}</h3>
-            <button
-              type="button"
-              onClick={handleNextMonth}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: '2px 4px' }}
-              title="Next Month"
-            >
-              <ChevronRight size={16} />
-            </button>
+        {/* 3. Today's Attendance Breakdown Donut Chart */}
+        <div style={{ backgroundColor: '#ffffff', padding: '1.25rem', borderRadius: '0.85rem', border: '1px solid #e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <PieChart size={16} color="#059669" />
+              <h3 style={{ fontSize: '0.875rem', fontWeight: '800', color: '#1e293b', margin: 0 }}>Today's Attendance</h3>
+            </div>
+            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#065f46', background: '#ecfdf5', padding: '2px 8px', borderRadius: '9999px', border: '1px solid #a7f3d0' }}>
+              Live Formation
+            </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textTransform: 'uppercase', textAlign: 'center', fontSize: '10px', fontWeight: '700', color: '#94a3b8', gap: '3px', marginBottom: '3px' }}>
-            <span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span>
+          <div style={{ position: 'relative', height: '135px', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Doughnut data={donutChartData} options={donutChartOptions} />
+            <div
+              style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                textAlign: 'center',
+                pointerEvents: 'none',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <span style={{ fontSize: '1.45rem', fontWeight: 900, color: '#0f172a', lineHeight: 1, fontFamily: 'Inter, sans-serif' }}>
+                {todayAttendanceStats.total}
+              </span>
+              <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: '2px' }}>
+                Cadets
+              </span>
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', textAlign: 'center', fontSize: '10.5px', gap: '3px' }}>
-            {prevMonthPadding.map(d => <span key={`prev-${d}`} style={{ color: '#cbd5e1', padding: '3px 0' }}>{d}</span>)}
-            {daysArray.map(day => {
-              const isToday = isCurrentDayToday(day);
-              return (
-                <span
-                  key={`day-${day}`}
-                  style={{
-                    padding: '3px 0',
-                    borderRadius: '50%',
-                    fontWeight: isToday ? '800' : '500',
-                    backgroundColor: isToday ? '#0284c7' : 'transparent',
-                    color: isToday ? '#ffffff' : '#334155',
-                    display: 'inline-block',
-                    boxShadow: isToday ? '0 2px 5px rgba(2, 132, 199, 0.35)' : 'none'
-                  }}
-                >
-                  {day}
-                </span>
-              );
-            })}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.35rem 0.75rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #f1f5f9' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontWeight: 600 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981' }} />
+                Present
+              </span>
+              <span style={{ fontWeight: 800, color: '#10b981' }}>{todayAttendanceStats.present}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontWeight: 600 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f59e0b' }} />
+                Late
+              </span>
+              <span style={{ fontWeight: 800, color: '#f59e0b' }}>{todayAttendanceStats.late}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontWeight: 600 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#f97316' }} />
+                No Time In/Out
+              </span>
+              <span style={{ fontWeight: 800, color: '#f97316' }}>{todayAttendanceStats.noTimeInOut}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontWeight: 600 }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#ef4444' }} />
+                Absent
+              </span>
+              <span style={{ fontWeight: 800, color: '#ef4444' }}>{todayAttendanceStats.absent}</span>
+            </div>
           </div>
         </div>
 

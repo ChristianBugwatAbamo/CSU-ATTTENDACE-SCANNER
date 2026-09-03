@@ -22,6 +22,7 @@ import { fetchSettingsFromSupabase, fetchCadetCountFromSupabase } from '../utils
 export default function PublicLandingPage({
   onNavigateToLogin,
   onNavigateToDashboard,
+  onNavigateToCadetLogin,
   isAuthenticated,
   currentUser
 }) {
@@ -171,7 +172,49 @@ export default function PublicLandingPage({
           </div>
         </div>
 
-
+        {/* Header Action Buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={onNavigateToCadetLogin}
+            style={{
+              background: 'rgba(229, 169, 0, 0.15)',
+              border: '1.5px solid #e5a900',
+              color: '#facc15',
+              padding: '0.45rem 1rem',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <Users size={15} /> Cadet Portal
+          </button>
+          <button
+            type="button"
+            onClick={isAuthenticated ? onNavigateToDashboard : onNavigateToLogin}
+            style={{
+              background: 'linear-gradient(135deg, #e5a900 0%, #d97706 100%)',
+              color: '#064e2e',
+              border: 'none',
+              padding: '0.45rem 1.1rem',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 2px 8px rgba(229, 169, 0, 0.3)'
+            }}
+          >
+            <Shield size={15} /> {isAuthenticated ? 'Admin HQ' : 'Admin Login'}
+          </button>
+        </div>
       </header>
 
       {/* Hero Section */}
@@ -324,6 +367,30 @@ export default function PublicLandingPage({
                 <LogIn size={18} /> Access Command Center <ChevronRight size={18} />
               </button>
             )}
+
+            {/* Cadet Portal Button */}
+            <button
+              type="button"
+              onClick={onNavigateToCadetLogin}
+              style={{
+                background: 'rgba(255, 255, 255, 0.12)',
+                border: '2px solid #e5a900',
+                color: '#facc15',
+                padding: '0.85rem 1.85rem',
+                borderRadius: '10px',
+                fontWeight: 800,
+                fontSize: '1rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                backdropFilter: 'blur(8px)',
+                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Users size={18} /> Basic Cadet Portal <ChevronRight size={18} />
+            </button>
           </div>
         </div>
       </section>

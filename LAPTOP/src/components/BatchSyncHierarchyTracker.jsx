@@ -1,9 +1,6 @@
 import React from 'react';
 import { CheckCircle2, Clock } from 'lucide-react';
-
-const COMPANIES = ['Alpha', 'Bravo', 'Charlie', 'Delta'];
-const PLATOONS = ['1st Platoon', '2nd Platoon'];
-const BATTALIONS = ['1st Battalion', '2nd Battalion'];
+import { useUnitStructure } from '../context/UnitContext';
 
 // Helper function to check if a timestamp/date string matches today (YYYY-MM-DD)
 const isToday = (dateInput) => {
@@ -32,6 +29,8 @@ const isToday = (dateInput) => {
 };
 
 export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
+  const { unitStructure } = useUnitStructure();
+
   // Check if a specific platoon has been scanned TODAY
   const isPlatoonScanned = (bat, coy, pl) => {
     return ingestedBatches.some((b) => {
@@ -43,15 +42,15 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
       const bCo = String(b.company || '').toLowerCase();
       const bPl = String(b.platoon || '').toLowerCase();
 
-      const targetBn = bat.toLowerCase();
-      const targetCoy = coy.toLowerCase();
-      const targetPl = pl.toLowerCase();
+      const targetBn = String(bat || '').toLowerCase();
+      const targetCoy = String(coy || '').toLowerCase();
+      const targetPl = String(pl || '').toLowerCase();
 
       // Check matching Battalion (e.g., '1st battalion' or contains '1')
       const targetBnNum = (targetBn.match(/(\d+)/) || [])[1];
       const matchBn = bBn.includes(targetBn) || (targetBnNum && bBn.includes(targetBnNum));
       // Check matching Company (e.g., 'alpha' or 'alpha company')
-      const matchCo = bCo.includes(targetCoy);
+      const matchCo = bCo.includes(targetCoy) || targetCoy.includes(bCo);
       // Check matching Platoon (e.g., '1st platoon' or contains '1')
       const targetPlNum = (targetPl.match(/(\d+)/) || [])[1];
       const matchPl = bPl.includes(targetPl) || (targetPlNum && (bPl.includes(targetPlNum) || bPl.includes(`${targetPlNum}pltn`)));
@@ -60,14 +59,18 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
     });
   };
 
-  // Check if entire company is complete (both platoons scanned)
-  const isCompanyComplete = (bat, coy) => {
-    return PLATOONS.every((pl) => isPlatoonScanned(bat, coy, pl));
+  // Check if entire company is complete
+  const isCompanyComplete = (batName, companyObj) => {
+    const platoons = companyObj.platoons || [];
+    if (platoons.length === 0) return false;
+    return platoons.every((pl) => isPlatoonScanned(batName, companyObj.name, pl.name || pl));
   };
 
-  // Check if entire battalion is complete (all 4 companies complete)
-  const isBattalionComplete = (bat) => {
-    return COMPANIES.every((coy) => isCompanyComplete(bat, coy));
+  // Check if entire battalion is complete
+  const isBattalionComplete = (battalionObj) => {
+    const companies = battalionObj.companies || [];
+    if (companies.length === 0) return false;
+    return companies.every((coy) => isCompanyComplete(battalionObj.name, coy));
   };
 
   return (
@@ -134,23 +137,13 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
           gap: '1.25rem'
         }}
       >
-        {(() => {
-          let bList = BATTALIONS;
-          try {
-            const saved = localStorage.getItem('csu_rotc_admin_settings');
-            if (saved) {
-              const parsed = JSON.parse(saved);
-              const struct = parsed.unitStructure || parsed.unit_structure;
-              if (Array.isArray(struct) && struct.length > 0) {
-                bList = struct.map(b => b.name);
-              }
-            }
-          } catch (_) {}
-          return bList.map((bat) => {
-            const batDone = isBattalionComplete(bat);
-            return (
-              <div 
-                key={bat}
+        {(unitStructure || []).map((bat) => {
+          const batDone = isBattalionComplete(bat);
+          const companies = bat.companies || [];
+
+          return (
+            <div 
+              key={bat.id || bat.name}
               style={{
                 backgroundColor: '#f8fafc',
                 border: '1px solid #e2e8f0',
@@ -182,23 +175,25 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                   }}
                 >
                   {batDone ? <CheckCircle2 size={16} color="#a7f3d0" /> : <Clock size={16} color="#64748b" />}
-                  <span>{bat}</span>
+                  <span>{bat.name}</span>
                 </div>
               </div>
 
-              {/* COMPANIES GRID (4 COYS) */}
+              {/* COMPANIES GRID */}
               <div 
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(4, 1fr)',
+                  gridTemplateColumns: `repeat(${Math.max(companies.length, 1)}, 1fr)`,
                   gap: '0.5rem'
                 }}
               >
-                {COMPANIES.map((coy) => {
-                  const coyDone = isCompanyComplete(bat, coy);
+                {companies.map((coy) => {
+                  const coyDone = isCompanyComplete(bat.name, coy);
+                  const platoons = coy.platoons || [];
+
                   return (
                     <div 
-                      key={coy}
+                      key={coy.id || coy.name}
                       style={{
                         display: 'flex',
                         flexDirection: 'column',
@@ -219,13 +214,17 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                           backgroundColor: coyDone ? '#059669' : '#ffffff',
                           color: coyDone ? '#ffffff' : '#334155',
                           border: coyDone ? '1px solid #047857' : '1.5px solid #cbd5e1',
-                          boxShadow: coyDone ? '0 2px 6px rgba(5, 150, 105, 0.2)' : 'none'
+                          boxShadow: coyDone ? '0 2px 6px rgba(5, 150, 105, 0.2)' : 'none',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis'
                         }}
+                        title={coy.name}
                       >
-                        {coy} COY
+                        {coy.shortCode || coy.name.replace(/ company$/i, '')}
                       </div>
 
-                      {/* PLATOONS NODES (2 PLATOONS PER COY) */}
+                      {/* PLATOONS NODES */}
                       <div 
                         style={{
                           display: 'flex',
@@ -233,11 +232,14 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                           gap: '0.35rem'
                         }}
                       >
-                        {PLATOONS.map((pl) => {
-                          const plDone = isPlatoonScanned(bat, coy, pl);
+                        {platoons.map((pl) => {
+                          const plName = pl.name || pl;
+                          const plDone = isPlatoonScanned(bat.name, coy.name, plName);
+                          const plShort = pl.shortCode || plName.replace(/ platoon$/i, ' PL').toUpperCase();
+
                           return (
                             <div
-                              key={pl}
+                              key={pl.id || plName}
                               style={{
                                 padding: '0.45rem 0.25rem',
                                 borderRadius: '6px',
@@ -249,10 +251,14 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                                 backgroundColor: plDone ? '#10b981' : '#ffffff',
                                 color: plDone ? '#ffffff' : '#94a3b8',
                                 border: plDone ? '1px solid #059669' : '1.5px dashed #cbd5e1',
-                                boxShadow: plDone ? '0 2px 4px rgba(16, 185, 129, 0.2)' : 'none'
+                                boxShadow: plDone ? '0 2px 4px rgba(16, 185, 129, 0.2)' : 'none',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
                               }}
+                              title={plName}
                             >
-                              {pl === '1st Platoon' ? '1ST PL' : '2ND PL'}
+                              {plShort}
                             </div>
                           );
                         })}
@@ -263,10 +269,9 @@ export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
                 })}
               </div>
 
-              </div>
-            );
-          });
-        })()}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

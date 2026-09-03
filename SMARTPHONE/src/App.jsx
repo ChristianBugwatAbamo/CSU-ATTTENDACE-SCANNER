@@ -10,6 +10,7 @@ import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
 import ScannerLandingView from './components/ScannerLandingView';
 import { getOfflineQueue, saveOfflineScan, removeOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp, getLocalPhilippineDate } from './services/storage';
+import { syncUnitStructureFromAdmin } from './utils/unitStructure';
 
 const SESSION_SETUP_KEY = 'csu_rotc_mobile_session_setup';
 
@@ -105,15 +106,26 @@ export default function App() {
     setAdminIpState(saved);
   };
 
-  // Health check to check connection with laptop
+  // Health check to check connection with laptop & auto-sync unit structure
   useEffect(() => {
+    let syncedOnce = false;
     const checkConn = async () => {
       try {
         const endpoint = `${adminIpState.replace(/\/$/, '')}/api/health`;
         const res = await fetch(endpoint, { method: 'GET', signal: AbortSignal.timeout(3000) });
-        setServerConnected(res.ok);
+        const isOk = res.ok;
+        setServerConnected(isOk);
+
+        // Automatically sync unit structure from Laptop Admin HQ when connected
+        if (isOk && !syncedOnce) {
+          try {
+            await syncUnitStructureFromAdmin(adminIpState);
+            syncedOnce = true;
+          } catch (_) {}
+        }
       } catch (err) {
         setServerConnected(false);
+        syncedOnce = false;
       }
     };
     checkConn();

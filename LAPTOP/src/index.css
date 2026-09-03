@@ -1676,4 +1676,19 @@ body {
   }
 }
 
+/* Tab 4: Data Management & Exports Stretched 2-Column Grid */
+.storage-grid-container {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.75rem;
+  width: 100%;
+}
+
+@media (min-width: 1024px) {
+  .storage-grid-container {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+
 
