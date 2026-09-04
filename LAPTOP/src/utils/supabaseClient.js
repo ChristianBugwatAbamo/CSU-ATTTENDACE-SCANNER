@@ -1493,36 +1493,66 @@ export async function reassignCadetsCompany(battalionName, oldCompanyName, targe
 export async function fetchCadetByCadetId(rawCadetId) {
   if (!rawCadetId) return null;
   const cleanId = String(rawCadetId).trim().toUpperCase();
+  const digitsOnly = cleanId.replace(/[^0-9]/g, '');
+  const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
-  // 1. Try Supabase
+  // 1. Query Supabase directly
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data, error } = await supabase
+      // Direct exact match on primary key `id` (e.g. "221-00003")
+      let { data, error } = await supabase
         .from('cadets')
         .select('*')
-        .or(`cadet_id.ilike.%${cleanId}%,id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%`)
-        .limit(1)
+        .eq('id', cleanId)
         .maybeSingle();
+
+      // If not found with raw input, try with dashed format (e.g. "22100003" -> "221-00003")
+      if (!data && dashedId !== cleanId) {
+        const dashedRes = await supabase
+          .from('cadets')
+          .select('*')
+          .eq('id', dashedId)
+          .maybeSingle();
+        data = dashedRes.data;
+        error = dashedRes.error;
+      }
+
+      // If still not found, try ilike match on id
+      if (!data) {
+        const ilikeRes = await supabase
+          .from('cadets')
+          .select('*')
+          .ilike('id', `%${cleanId}%`)
+          .limit(1)
+          .maybeSingle();
+        data = ilikeRes.data;
+        error = ilikeRes.error;
+      }
 
       if (!error && data) {
         return {
-          id: data.id || data.cadet_id,
-          cadetId: data.cadet_id || data.id,
-          studentId: data.student_id || data.studentId || '',
+          id: data.id,
+          cadetId: data.id,
           name: data.name,
           rank: data.rank || 'Cadet',
-          battalion: data.battalion,
-          company: data.company,
-          platoon: data.platoon,
-          course: data.course || data.program || '',
-          college: data.college || '',
-          yearLevel: data.year_level || data.yearLevel || '',
-          gender: data.gender || data.sex || '',
-          phone: data.phone || data.contact_number || '',
-          emergencyContact: data.emergency_contact || '',
-          photoUrl: data.photo_url || data.photoUrl || '',
-          status: data.status || 'ACTIVE',
+          battalion: data.battalion || '1st Battalion',
+          company: data.company || 'Alpha Company',
+          platoon: data.platoon || '1st Platoon',
+          type: data.type || 'Basic Cadet',
+          designation: data.designation || 'None',
+          course: data.course || '',
+          gender: data.gender || '',
+          department: data.department || '',
+          program: data.program || '',
+          contact_number: data.contact_number || '',
+          emergency_contact: data.emergency_contact || '',
+          province: data.province || '',
+          city: data.city || '',
+          barangay: data.barangay || '',
+          religion: data.religion || '',
+          is_active: data.is_active !== false,
+          status: data.is_active !== false ? 'ACTIVE' : 'INACTIVE',
           ...data
         };
       }
@@ -1538,11 +1568,10 @@ export async function fetchCadetByCadetId(rawCadetId) {
       const roster = JSON.parse(cached);
       if (Array.isArray(roster)) {
         const found = roster.find(c => {
-          const cId = String(c.cadetId || c.cadet_id || c.id || '').trim().toUpperCase();
-          const sId = String(c.studentId || c.student_id || '').trim().toUpperCase();
+          const cId = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
           const cleanInput = cleanId.replace(/[^A-Z0-9]/gi, '');
           const cleanCId = cId.replace(/[^A-Z0-9]/gi, '');
-          return cId === cleanId || cleanCId === cleanInput || sId === cleanId;
+          return cId === cleanId || cleanCId === cleanInput || cId === dashedId;
         });
         if (found) return found;
       }
@@ -1559,7 +1588,8 @@ export async function fetchCadetByCadetId(rawCadetId) {
 export async function fetchCadetAttendanceHistory(rawCadetId) {
   if (!rawCadetId) return [];
   const cleanId = String(rawCadetId).trim().toUpperCase();
-  const cleanNumOnly = cleanId.replace(/[^A-Z0-9]/gi, '');
+  const digitsOnly = cleanId.replace(/[^0-9]/g, '');
+  const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
   let logs = [];
 
@@ -1567,14 +1597,53 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data, error } = await supabase
+      // Direct exact match on cadet_id
+      let { data, error } = await supabase
         .from('attendance_logs')
         .select('*')
-        .or(`cadet_id.ilike.%${cleanId}%,cadet_id.ilike.%${cleanNumOnly}%`)
-        .order('session_date', { ascending: false });
+        .eq('cadet_id', cleanId)
+        .order('date', { ascending: false });
+
+      // Fallback with dashedId if different
+      if ((!data || data.length === 0) && dashedId !== cleanId) {
+        const dashedRes = await supabase
+          .from('attendance_logs')
+          .select('*')
+          .eq('cadet_id', dashedId)
+          .order('date', { ascending: false });
+        if (dashedRes.data && dashedRes.data.length > 0) {
+          data = dashedRes.data;
+          error = dashedRes.error;
+        }
+      }
+
+      // Fallback with ilike match on cadet_id
+      if (!data || data.length === 0) {
+        const ilikeRes = await supabase
+          .from('attendance_logs')
+          .select('*')
+          .ilike('cadet_id', `%${cleanId}%`)
+          .order('date', { ascending: false });
+        if (ilikeRes.data && ilikeRes.data.length > 0) {
+          data = ilikeRes.data;
+          error = ilikeRes.error;
+        }
+      }
 
       if (!error && Array.isArray(data) && data.length > 0) {
-        logs = data;
+        logs = data.map(l => ({
+          ...l,
+          cadetId: l.cadet_id,
+          timeIn: l.time_in,
+          timeOut: l.time_out,
+          timeInStatus: l.time_in_status,
+          timeOutStatus: l.time_out_status,
+          status: l.final_daily_status || l.status,
+          finalDailyStatus: l.final_daily_status || l.status,
+          dutyOfficer: l.duty_officer,
+          sessionName: l.session_name,
+          scanMode: l.scan_mode
+        }));
       }
     }
   } catch (err) {
@@ -1590,7 +1659,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
         const localMatches = masterLogs.filter(l => {
           const cId = String(l.cadetId || l.cadet_id || l.id || l.i || '').trim().toUpperCase();
           const cNum = cId.replace(/[^A-Z0-9]/gi, '');
-          return cId === cleanId || (cNum && cNum === cleanNumOnly);
+          return cId === cleanId || cId === dashedId || (cNum && cNum === digitsOnly);
         });
 
         if (logs.length === 0) {
@@ -1612,8 +1681,8 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
 
   // Sort descending by date
   return logs.sort((a, b) => {
-    const dateA = a.session_date || a.date || a.created_at || '';
-    const dateB = b.session_date || b.date || b.created_at || '';
+    const dateA = a.date || a.session_date || a.created_at || '';
+    const dateB = b.date || b.session_date || b.created_at || '';
     return dateB.localeCompare(dateA);
   });
 }
@@ -1629,20 +1698,20 @@ export async function fetchMandatoryFormationDates() {
     const supabase = getSupabaseClient();
     if (supabase) {
       const [sessionsRes, logsRes] = await Promise.allSettled([
-        supabase.from('attendance_sessions').select('session_date, date').limit(200),
-        supabase.from('attendance_logs').select('session_date, date').order('session_date', { ascending: false }).limit(500)
+        supabase.from('attendance_sessions').select('session_date').limit(500),
+        supabase.from('attendance_logs').select('date').order('date', { ascending: false }).limit(1000)
       ]);
 
       if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value.data)) {
         sessionsRes.value.data.forEach(s => {
-          const dk = toDateKey(s.session_date || s.date);
+          const dk = toDateKey(s.session_date);
           if (dk) datesSet.add(dk);
         });
       }
 
       if (logsRes.status === 'fulfilled' && Array.isArray(logsRes.value.data)) {
         logsRes.value.data.forEach(l => {
-          const dk = toDateKey(l.session_date || l.date);
+          const dk = toDateKey(l.date);
           if (dk) datesSet.add(dk);
         });
       }

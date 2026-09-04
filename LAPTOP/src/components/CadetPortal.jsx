@@ -16,6 +16,8 @@ import {
   RefreshCw,
   Search,
   ChevronRight,
+  ChevronLeft,
+  Menu,
   Activity,
   HelpCircle,
   MapPin,
@@ -23,7 +25,8 @@ import {
   Sun,
   Moon,
   Phone,
-  GraduationCap
+  GraduationCap,
+  Users
 } from 'lucide-react';
 import {
   fetchCadetAttendanceHistory,
@@ -91,6 +94,29 @@ export default function CadetPortal({ cadet, onLogout }) {
   const [refreshing, setRefreshing] = useState(false);
   const [showAlertDetails, setShowAlertDetails] = useState(true);
 
+  // Navigation tab state ('profile' | 'status' | 'attendance')
+  const [activeTab, setActiveTab] = useState('profile');
+
+  // Persistent Collapsible Sidebar state
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('csu_rotc_cadet_sidebar_collapsed') === 'true';
+    } catch (_) {
+      return false;
+    }
+  });
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('csu_rotc_cadet_sidebar_collapsed', String(next));
+      } catch (_) {}
+      return next;
+    });
+  };
+
   // Dark / Light Mode state persisted in localStorage
   const [theme, setTheme] = useState(() => {
     try {
@@ -140,8 +166,8 @@ export default function CadetPortal({ cadet, onLogout }) {
   });
 
   const loadData = async () => {
-    if (!cadet?.cadetId && !cadet?.id) return;
-    const cid = cadet.cadetId || cadet.id;
+    const cid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
+    if (!cid) return;
     setLoadingLogs(true);
     try {
       const [historyLogs, sbSettings, mDates, sessionsRes, liveCadetRes] = await Promise.allSettled([
@@ -177,11 +203,15 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   useEffect(() => {
     loadData();
-  }, [cadet?.cadetId, cadet?.id]);
+  }, [cadet?.id, cadet?.cadetId, cadet?.cadet_id, cadet?.student_id]);
 
   const handleRefresh = () => {
     setRefreshing(true);
     loadData();
+  };
+
+  const handleStatusCardClick = (status) => {
+    setStatusFilter(prev => prev === status ? 'ALL' : status);
   };
 
   // Map each formation date to its actual dynamic session cut-off time configured in the database
@@ -234,27 +264,41 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   // 2. Synchronized Attendance Metrics
   const metrics = useMemo(() => {
+    // Total Drill Sessions: Total drill events published in Supabase
     const totalFormations = evaluated.dailyBreakdown.length || formationDates.length || logs.length || 0;
-    const absences = evaluated.totalAbsences;
+
+    // Sessions Attended: Count of logs matching STATUS == 'PRESENT', 'LATE', or 'NO TIME-OUT'
+    const attendedSessions = evaluated.dailyBreakdown.filter(d => {
+      if (!d.isRecorded) return false;
+      const s = String(d.status || d.dayType || '').toUpperCase();
+      return s.includes('PRESENT') || s.includes('LATE') || s.includes('NO TIME-OUT') || s.includes('NO TIME-IN');
+    }).length;
+
+    const onTimeCount = evaluated.dailyBreakdown.filter(d =>
+      d.isRecorded && String(d.status || '').toUpperCase() === 'PRESENT'
+    ).length;
+
+    const lateCount = evaluated.dailyBreakdown.filter(d =>
+      d.isRecorded && String(d.status || '').toUpperCase().includes('LATE')
+    ).length;
+
+    // Total Absences: Total Drill Sessions - Sessions Attended
+    const absences = Math.max(0, totalFormations - attendedSessions);
     const unexcused = evaluated.unexcusedAbsences;
-    const lates = evaluated.totalIntervalLates;
+    const lates = lateCount || evaluated.totalIntervalLates;
     const missingScans = evaluated.totalIntervalMissingScans;
     const maxConsecutive = evaluated.maxConsecutiveAbsences;
 
-    const presentDays = evaluated.dailyBreakdown.filter(d =>
-      d.isRecorded && d.dayType === 'PRESENT'
-    ).length;
-
     let complianceRate = 0;
     if (totalFormations > 0) {
-      const netCompliant = Math.max(0, totalFormations - absences);
-      complianceRate = Math.round((netCompliant / totalFormations) * 100);
+      complianceRate = Math.round((attendedSessions / totalFormations) * 100);
     }
 
     return {
       totalFormations,
-      presentDays,
-      lates,
+      attendedSessions,
+      presentDays: onTimeCount,
+      lates: lateCount,
       missingScans,
       absences,
       unexcused,
@@ -268,9 +312,9 @@ export default function CadetPortal({ cadet, onLogout }) {
   // Counts for filter pills
   const counts = useMemo(() => {
     const all = evaluated.dailyBreakdown;
-    const present = all.filter(s => s.isRecorded && s.hasTimeIn && s.hasTimeOut && !s.status.includes('LATE')).length;
+    const present = all.filter(s => s.isRecorded && (s.dayType === 'PRESENT' || s.status === 'PRESENT') && !s.status.includes('LATE')).length;
     const late = all.filter(s => s.isRecorded && s.status.includes('LATE')).length;
-    const noTimeOut = all.filter(s => s.isRecorded && s.hasTimeIn && !s.hasTimeOut).length;
+    const noTimeOut = all.filter(s => s.isRecorded && (s.hasTimeIn && !s.hasTimeOut || s.status.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT')).length;
     const absent = all.filter(s => !s.isRecorded || s.status.includes('ABSENT') || s.dayType === 'UNRECORDED').length;
     return { all: all.length, present, late, noTimeOut, absent };
   }, [evaluated.dailyBreakdown]);
@@ -280,11 +324,11 @@ export default function CadetPortal({ cadet, onLogout }) {
     let sessions = [...evaluated.dailyBreakdown].sort((a, b) => b.date.localeCompare(a.date));
 
     if (statusFilter === 'PRESENT') {
-      sessions = sessions.filter(s => s.isRecorded && s.hasTimeIn && s.hasTimeOut && !s.status.includes('LATE'));
+      sessions = sessions.filter(s => s.isRecorded && (s.dayType === 'PRESENT' || s.status === 'PRESENT') && !s.status.includes('LATE'));
     } else if (statusFilter === 'LATE') {
       sessions = sessions.filter(s => s.isRecorded && s.status.includes('LATE'));
-    } else if (statusFilter === 'NO TIME-OUT') {
-      sessions = sessions.filter(s => s.isRecorded && s.hasTimeIn && !s.hasTimeOut);
+    } else if (statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME IN/OUT') {
+      sessions = sessions.filter(s => s.isRecorded && (s.hasTimeIn && !s.hasTimeOut || s.status.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT'));
     } else if (statusFilter === 'ABSENT') {
       sessions = sessions.filter(s => !s.isRecorded || s.status.includes('ABSENT') || s.dayType === 'UNRECORDED');
     }
@@ -345,6 +389,35 @@ export default function CadetPortal({ cadet, onLogout }) {
     signatureUrl: settings?.id_signature_url
   };
 
+  // 3 Primary Navigation Tabs for Persistent Sidebar
+  const navTabs = [
+    {
+      id: 'profile',
+      label: 'Cadet Profile',
+      icon: User,
+      badge: null,
+      description: 'Personal & Unit Info'
+    },
+    {
+      id: 'status',
+      label: 'Status & Appeals',
+      icon: Shield,
+      badge: isDropped
+        ? { text: 'DROPPED', color: '#ef4444' }
+        : isWarning
+        ? { text: 'WARNING', color: '#f59e0b' }
+        : null,
+      description: isDropped ? 'Action Required' : isWarning ? 'At Risk' : 'Good Standing'
+    },
+    {
+      id: 'attendance',
+      label: 'Attendance Log',
+      icon: Calendar,
+      badge: { text: String(counts.all || metrics.totalFormations || 0), color: '#10b981' },
+      description: 'Formation Drill Records'
+    }
+  ];
+
   return (
     <div
       style={{
@@ -352,324 +425,540 @@ export default function CadetPortal({ cadet, onLogout }) {
         backgroundColor: t.bg,
         color: t.textMain,
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'row',
         fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-        transition: 'background-color 0.2s ease, color 0.2s ease'
+        transition: 'background-color 0.2s ease, color 0.2s ease',
+        position: 'relative',
+        width: '100vw',
+        overflowX: 'hidden'
       }}
     >
-      {/* 1. Header Navigation Bar */}
-      <header
+      <style>{`
+        @media (max-width: 768px) {
+          .cadet-mobile-btn {
+            display: flex !important;
+          }
+          .cadet-persistent-sidebar {
+            position: fixed !important;
+            top: 0 !important;
+            bottom: 0 !important;
+            left: 0 !important;
+            transform: translateX(-100%);
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            z-index: 99 !important;
+          }
+          .cadet-persistent-sidebar.mobile-open {
+            transform: translateX(0) !important;
+          }
+        }
+      `}</style>
+
+      {/* Mobile Drawer Backdrop */}
+      {isMobileMenuOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 90
+          }}
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* ============================================================ */}
+      {/* PERSISTENT VERTICAL COLLAPSIBLE SIDEBAR ON THE LEFT         */}
+      {/* ============================================================ */}
+      <aside
         style={{
-          backgroundColor: t.headerBg,
-          borderBottom: '2px solid #e5a900',
-          padding: '0.85rem 1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          position: 'sticky',
-          top: 0,
-          zIndex: 40,
-          boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
-            style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '50%',
-              backgroundColor: '#043820',
-              border: '2px solid #e5a900',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '3px',
-              flexShrink: 0
-            }}
-          >
-            <img
-              src="/rotc-seal-transparent.png"
-              alt="CSU ROTC"
-              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              onError={(e) => { e.target.style.display = 'none'; }}
-            />
-          </div>
-          <div>
-            <div
-              style={{
-                fontFamily: 'Oswald, sans-serif',
-                fontSize: '1.15rem',
-                fontWeight: 800,
-                letterSpacing: '0.5px',
-                color: '#ffffff',
-                lineHeight: 1.2
-              }}
-            >
-              CSU ROTC CADET ATTENDANCE INFORMATION
-            </div>
-            <div style={{ fontSize: '0.72rem', color: '#facc15', fontWeight: 600 }}>
-              Caraga State University Main Campus
-            </div>
-          </div>
-        </div>
-
-        {/* Header Right: Theme Toggle, User Info & Sign Out */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Theme Toggle Button */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: isLight ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-              border: '1px solid rgba(255, 255, 255, 0.25)',
-              color: '#ffffff',
-              padding: '0.45rem 0.85rem',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease'
-            }}
-            title={isLight ? 'Switch to Tactical Dark Mode' : 'Switch to Clean Light Mode'}
-          >
-            {isLight ? <Moon size={15} color="#facc15" /> : <Sun size={15} color="#facc15" />}
-            <span>{isLight ? 'Dark Mode' : 'Light Mode'}</span>
-          </button>
-
-          <div
-            style={{
-              display: 'none',
-              textAlign: 'right',
-              fontSize: '0.82rem'
-            }}
-            className="md:block"
-          >
-            <div style={{ fontWeight: 800, color: '#ffffff' }}>{fullName}</div>
-            <div style={{ fontSize: '0.72rem', color: '#f1f5f9', fontFamily: 'monospace' }}>{cadetId}</div>
-          </div>
-
-          <button
-            type="button"
-            onClick={onLogout}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              background: 'rgba(239, 68, 68, 0.18)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
-              color: '#fecdd3',
-              padding: '0.45rem 0.85rem',
-              borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.18)'; }}
-          >
-            <LogOut size={14} /> Sign Out
-          </button>
-        </div>
-      </header>
-
-      {/* 2. Main Content Area */}
-      <main
-        style={{
-          flex: 1,
-          padding: '1.75rem 1rem',
-          maxWidth: '1152px',
-          margin: '0 auto',
-          width: '100%',
-          boxSizing: 'border-box',
+          width: isSidebarCollapsed ? '76px' : '260px',
+          backgroundColor: '#05331e',
+          backgroundImage: 'linear-gradient(180deg, #05331f 0%, #032014 100%)',
+          borderRight: '2px solid rgba(229, 169, 0, 0.4)',
           display: 'flex',
           flexDirection: 'column',
-          gap: '1.5rem',
-          position: 'relative',
-          zIndex: 10
+          position: 'sticky',
+          top: 0,
+          height: '100vh',
+          zIndex: 50,
+          flexShrink: 0,
+          transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          boxShadow: '4px 0 20px rgba(0, 0, 0, 0.35)',
+          overflow: 'hidden'
         }}
-        className="w-full max-w-6xl mx-auto px-4"
+        className={`cadet-persistent-sidebar ${isMobileMenuOpen ? 'mobile-open' : ''}`}
       >
-
-        {/* ============================================================ */}
-        {/* EMPATHETIC, CLEAR ATTENDANCE STATUS ALERT BANNER              */}
-        {/* ============================================================ */}
-        {isDropped && (
-          <div
-            style={{
-              background: isLight
-                ? 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)'
-                : 'linear-gradient(135deg, rgba(225, 29, 72, 0.12) 0%, rgba(159, 18, 57, 0.18) 100%)',
-              border: '1.5px solid #f43f5e',
-              borderRadius: '16px',
-              padding: '1.25rem 1.5rem',
-              boxShadow: isLight ? '0 4px 15px rgba(244, 63, 94, 0.15)' : '0 6px 20px rgba(225, 29, 72, 0.18)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
-              width: '100%',
-              boxSizing: 'border-box'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    background: '#e11d48',
-                    color: '#ffffff',
-                    borderRadius: '12px',
-                    padding: '0.6rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}
-                >
-                  <AlertOctagon size={26} />
-                </div>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
-                    <span
-                      style={{
-                        background: '#e11d48',
-                        color: '#ffffff',
-                        fontWeight: 900,
-                        fontSize: '0.7rem',
-                        letterSpacing: '0.5px',
-                        padding: '2px 8px',
-                        borderRadius: '9999px',
-                        textTransform: 'uppercase'
-                      }}
-                    >
-                      DROPPED STATUS
-                    </span>
-                    <span style={{ fontSize: '0.8rem', color: isLight ? '#be123c' : '#fca5a5', fontWeight: 700 }}>
-                      Absence Threshold Reached (ROTC Regulation)
-                    </span>
-                  </div>
-
-                  <h2 style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.3rem', fontWeight: 800, color: isLight ? '#881337' : '#ffffff', margin: '4px 0 6px 0' }}>
-                    Cadet Status: Dropped from CSU ROTCU
-                  </h2>
-
-                  <p style={{ margin: 0, fontSize: '0.86rem', color: isLight ? '#9f1239' : '#fecdd3', lineHeight: 1.5, wordBreak: 'break-word' }}>
-                    You have accumulated <strong>{metrics.absences} unrecorded absences</strong> ({metrics.maxConsecutive} consecutive unrecorded formation days).
-                  </p>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setShowAlertDetails(!showAlertDetails)}
-                style={{
-                  background: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.08)',
-                  border: isLight ? '1px solid #fecdd3' : '1px solid rgba(255, 255, 255, 0.15)',
-                  color: isLight ? '#9f1239' : '#f8fafc',
-                  padding: '5px 12px',
-                  borderRadius: '8px',
-                  fontSize: '0.76rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  flexShrink: 0
-                }}
-              >
-                {showAlertDetails ? 'Hide Next Steps' : 'View Next Steps'}
-              </button>
+        {/* Sidebar Header: ROTC Seal, Title & Collapse Toggle */}
+        <div
+          style={{
+            padding: isSidebarCollapsed ? '1rem 0.5rem' : '1.15rem 1rem',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
+            gap: '10px',
+            background: 'rgba(0, 0, 0, 0.2)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '50%',
+                backgroundColor: '#043820',
+                border: '2px solid #e5a900',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '2px',
+                flexShrink: 0
+              }}
+            >
+              <img
+                src="/rotc-seal-transparent.png"
+                alt="CSU ROTC"
+                style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
             </div>
 
-            {/* Clear, Helpful Steps to Appeal or Reinstate */}
-            {showAlertDetails && (
-              <div
-                style={{
-                  background: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.6)',
-                  border: isLight ? '1px solid #fecdd3' : '1px solid rgba(244, 63, 94, 0.3)',
-                  borderRadius: '10px',
-                  padding: '0.85rem 1rem',
-                  fontSize: '0.82rem',
-                  color: isLight ? '#1e293b' : '#e2e8f0',
-                  lineHeight: 1.5,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '6px'
-                }}
-              >
-                <div style={{ fontWeight: 800, color: isLight ? '#be123c' : '#fecdd3', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <HelpCircle size={15} color="#e11d48" />
-                  <span>How to Resolve This & Appeal:</span>
+            {!isSidebarCollapsed && (
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontFamily: 'Oswald, sans-serif',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.5px',
+                    color: '#facc15',
+                    lineHeight: 1.1,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  CADET PORTAL
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', marginTop: '4px' }}>
-                  <div style={{ background: isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)', padding: '8px 12px', borderRadius: '8px', border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.06)' }}>
-                    <strong>1. Report to Admin Office:</strong> Visit the <strong>ROTC OFFICE</strong> on Caraga State University, Ampayon Campus to verify your records.
-                  </div>
-                  <div style={{ background: isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)', padding: '8px 12px', borderRadius: '8px', border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.06)' }}>
-                    <strong>2. Submit Excuse Letters:</strong> Coordinate with your <strong>Platoon Leader</strong> and submit valid medical/academic excuses.
-                  </div>
+                <div
+                  style={{
+                    fontSize: '0.68rem',
+                    color: '#94a3b8',
+                    fontWeight: 600,
+                    letterSpacing: '0.5px',
+                    textTransform: 'uppercase',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  CSU ROTC UNIT
                 </div>
               </div>
             )}
           </div>
-        )}
 
-        {isWarning && (
-          <div
+          {/* Collapse / Expand Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             style={{
-              background: isLight
-                ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
-                : 'linear-gradient(135deg, rgba(217, 119, 6, 0.12) 0%, rgba(180, 83, 9, 0.18) 100%)',
-              border: '1.5px solid #f59e0b',
-              borderRadius: '16px',
-              padding: '1.15rem 1.35rem',
+              width: '28px',
+              height: '28px',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: '#facc15',
               display: 'flex',
               alignItems: 'center',
-              gap: '1rem',
-              boxShadow: isLight ? '0 4px 15px rgba(245, 158, 11, 0.12)' : 'none'
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+              flexShrink: 0,
+              transition: 'all 0.15s ease'
             }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(250, 204, 21, 0.2)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; }}
           >
-            <div style={{ background: '#f59e0b', color: '#0b0f19', borderRadius: '10px', padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <AlertTriangle size={24} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.9rem', color: isLight ? '#92400e' : '#fbbf24' }}>
-                Attendance Warning: {metrics.absences} Absences Recorded
-              </div>
-              <div style={{ fontSize: '0.8rem', color: isLight ? '#b45309' : '#fef3c7', marginTop: '2px' }}>
-                You are approaching the drop limit. Accumulating 3 consecutive unrecorded formations or more than 3 total absences triggers an administrative drop.
-              </div>
-            </div>
-          </div>
-        )}
+            {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+        </div>
 
-        {!isDropped && !isWarning && (
-          <div
+        {/* Sidebar Navigation Tabs (Cadet Profile, Status & Appeals, Attendance Log) */}
+        <div
+          style={{
+            flex: 1,
+            padding: isSidebarCollapsed ? '1rem 0.4rem' : '1rem 0.65rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.45rem',
+            overflowY: 'auto'
+          }}
+        >
+          {navTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setIsMobileMenuOpen(false);
+                }}
+                title={isSidebarCollapsed ? tab.label : ''}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: isSidebarCollapsed ? '0' : '12px',
+                  justifyContent: isSidebarCollapsed ? 'center' : 'flex-start',
+                  width: '100%',
+                  padding: isSidebarCollapsed ? '0.75rem 0' : '0.75rem 0.85rem',
+                  borderRadius: '10px',
+                  border: isActive ? '1px solid rgba(250, 204, 21, 0.4)' : '1px solid transparent',
+                  borderLeft: isActive ? '4px solid #facc15' : '4px solid transparent',
+                  background: isActive ? 'rgba(250, 204, 21, 0.14)' : 'transparent',
+                  color: isActive ? '#facc15' : '#e2e8f0',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  position: 'relative',
+                  transition: 'all 0.18s ease'
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
+                    e.currentTarget.style.color = '#ffffff';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.color = '#e2e8f0';
+                  }
+                }}
+              >
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon size={20} color={isActive ? '#facc15' : '#cbd5e1'} />
+                  {isSidebarCollapsed && tab.badge && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-4px',
+                        right: '-6px',
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        background: tab.badge.color || '#ef4444',
+                        boxShadow: '0 0 6px rgba(0,0,0,0.5)'
+                      }}
+                    />
+                  )}
+                </div>
+
+                {!isSidebarCollapsed && (
+                  <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: isActive ? 800 : 600, fontSize: '0.88rem', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {tab.label}
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: isActive ? '#fef08a' : '#94a3b8', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {tab.description}
+                      </div>
+                    </div>
+
+                    {tab.badge && (
+                      <span
+                        style={{
+                          fontSize: '0.66rem',
+                          fontWeight: 800,
+                          padding: '2px 6px',
+                          borderRadius: '999px',
+                          background: `${tab.badge.color}22`,
+                          color: tab.badge.color,
+                          border: `1px solid ${tab.badge.color}66`,
+                          flexShrink: 0
+                        }}
+                      >
+                        {tab.badge.text}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Sidebar Footer: Cadet Summary & Relocated Sign Out Button */}
+        <div
+          style={{
+            padding: isSidebarCollapsed ? '0.75rem 0.4rem' : '0.85rem 0.85rem',
+            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+            background: 'rgba(0, 0, 0, 0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px'
+          }}
+        >
+          {!isSidebarCollapsed && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '9px',
+                padding: '4px 6px',
+                borderRadius: '8px',
+                background: 'rgba(255, 255, 255, 0.04)'
+              }}
+            >
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: '#e5a900',
+                  color: '#064e2e',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  flexShrink: 0
+                }}
+              >
+                {fullName ? fullName.charAt(0).toUpperCase() : 'C'}
+              </div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {fullName}
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#94a3b8', fontFamily: 'monospace' }}>
+                  {cadetId}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Relocated Sign Out Button at Bottom of Sidebar */}
+          <button
+            type="button"
+            onClick={onLogout}
+            title="Sign Out"
             style={{
-              background: isLight
-                ? 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)'
-                : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.15) 100%)',
-              border: '1.5px solid #10b981',
-              borderRadius: '16px',
-              padding: '1rem 1.25rem',
               display: 'flex',
               alignItems: 'center',
-              gap: '1rem',
-              boxShadow: isLight ? '0 4px 15px rgba(16, 185, 129, 0.1)' : 'none'
+              justifyContent: 'center',
+              gap: '8px',
+              width: '100%',
+              padding: isSidebarCollapsed ? '0.65rem 0' : '0.6rem 0.85rem',
+              borderRadius: '8px',
+              background: 'rgba(239, 68, 68, 0.16)',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              color: '#fca5a5',
+              fontSize: '0.82rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.28)';
+              e.currentTarget.style.color = '#ffffff';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.16)';
+              e.currentTarget.style.color = '#fca5a5';
             }}
           >
-            <div style={{ background: '#10b981', color: '#ffffff', borderRadius: '10px', padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <CheckCircle2 size={22} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.9rem', color: isLight ? '#065f46' : '#34d399' }}>
-                Attendance Status: Good Standing
+            <LogOut size={16} />
+            {!isSidebarCollapsed && <span>Sign Out</span>}
+          </button>
+        </div>
+      </aside>
+
+      {/* ============================================================ */}
+      {/* MAIN VIEW COLUMN (HEADER + ACTIVE TAB CONTENT)               */}
+      {/* ============================================================ */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          minHeight: '100vh',
+          backgroundColor: t.bg
+        }}
+      >
+        {/* Sticky Top Header Navigation Bar */}
+        <header
+          style={{
+            backgroundColor: t.headerBg,
+            borderBottom: '2px solid #e5a900',
+            padding: '0.85rem 1.5rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            position: 'sticky',
+            top: 0,
+            zIndex: 40,
+            boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Mobile Hamburger Toggle Button */}
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.12)',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
+                color: '#facc15',
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                display: 'none',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              className="cadet-mobile-btn"
+              title="Toggle Navigation Menu"
+            >
+              <Menu size={20} />
+            </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div
+                style={{
+                  fontFamily: 'Oswald, sans-serif',
+                  fontSize: '1.15rem',
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  color: '#facc15',
+                  lineHeight: 1.2
+                }}
+              >
+                CADET PORTAL
               </div>
-              <div style={{ fontSize: '0.8rem', color: isLight ? '#047857' : '#a7f3d0', marginTop: '2px' }}>
-                Your formation drill attendance is within compliant parameters. Keep up the active participation!
-              </div>
+              <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '0.9rem' }}>/</span>
+              <span style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.88rem' }}>
+                {activeTab === 'profile' ? 'Cadet Profile' : activeTab === 'status' ? 'Status & Appeals' : 'Attendance Log'}
+              </span>
             </div>
           </div>
-        )}
+
+          {/* Header Right: Theme Toggle & Cadet Info (Sign Out Relocated to Sidebar) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Theme Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleTheme}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: isLight ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
+                color: '#ffffff',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '8px',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              title={isLight ? 'Switch to Tactical Dark Mode' : 'Switch to Clean Light Mode'}
+            >
+              {isLight ? <Moon size={15} color="#facc15" /> : <Sun size={15} color="#facc15" />}
+              <span>{isLight ? 'Dark Mode' : 'Light Mode'}</span>
+            </button>
+
+            <div
+              style={{
+                display: 'none',
+                textAlign: 'right',
+                fontSize: '0.82rem'
+              }}
+              className="md:block"
+            >
+              <div style={{ fontWeight: 800, color: '#ffffff' }}>{fullName}</div>
+              <div style={{ fontSize: '0.72rem', color: '#f1f5f9', fontFamily: 'monospace' }}>{cadetId}</div>
+            </div>
+          </div>
+        </header>
+
+        {/* 2. Main Content Area */}
+        <main
+          style={{
+            flex: 1,
+            padding: '1.75rem 1rem',
+            maxWidth: '1152px',
+            margin: '0 auto',
+            width: '100%',
+            boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.5rem',
+            position: 'relative',
+            zIndex: 10
+          }}
+          className="w-full max-w-6xl mx-auto px-4"
+        >
+
+        {/* ============================================================ */}
+        {/* TAB 1: CADET PROFILE                                         */}
+        {/* ============================================================ */}
+        {activeTab === 'profile' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+            {/* Quick alert banner if dropped */}
+            {isDropped && (
+              <div
+                style={{
+                  background: isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)',
+                  border: '1.5px solid #f43f5e',
+                  borderRadius: '12px',
+                  padding: '0.85rem 1.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <AlertOctagon size={22} color="#f43f5e" />
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: '0.88rem', color: '#e11d48' }}>
+                      Attendance Alert: Dropped from Rolls
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: t.textMuted }}>
+                      Threshold of allowable unexcused absences has been exceeded. Official appeal process is available.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('status')}
+                  style={{
+                    background: '#e11d48',
+                    border: 'none',
+                    color: '#ffffff',
+                    padding: '0.45rem 0.9rem',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  View Appeal Steps <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
 
         {/* ============================================================ */}
         {/* 3. HERO CADET PROFILE & FORMATION BREADCRUMB CARD            */}
@@ -891,131 +1180,739 @@ export default function CadetPortal({ cadet, onLogout }) {
           </div>
         </div>
 
-        {/* ============================================================ */}
-        {/* 4. BALANCED 4-COLUMN ATTENDANCE METRICS GRID                  */}
-        {/* ============================================================ */}
+        {/* Quick Drill & Standing Overview Strip */}
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))',
-            gap: '1rem'
+            background: t.cardBg,
+            border: `1px solid ${t.cardBorder}`,
+            borderRadius: '14px',
+            padding: '1.15rem 1.4rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            boxShadow: t.cardShadow
           }}
         >
-          {/* Card 1: Attendance Standing */}
-          <div
-            style={{
-              background: t.cardBg,
-              border: `1.5px solid ${isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'}`,
-              borderRadius: '14px',
-              padding: '1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '0.5rem',
-              boxShadow: t.cardShadow
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>Attendance Rate</span>
-              <Activity size={18} color={isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                background: isDropped ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: isDropped ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981'
+              }}
+            >
+              <Activity size={22} />
             </div>
             <div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
+              <div style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>
+                Current Military Standing
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    background: isDropped ? 'rgba(244, 63, 94, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                    color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
+                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 800
+                  }}
+                >
+                  {isDropped ? 'DROPPED FROM ROLLS' : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: t.textMuted }}>
+                  • {metrics.complianceRate}% Attendance ({metrics.attendedSessions} / {metrics.totalFormations} Drills)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('status')}
+              style={{
+                background: isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.08)',
+                border: `1px solid ${t.cardBorder}`,
+                color: t.textMain,
+                padding: '0.5rem 0.9rem',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+            >
+              <Shield size={14} color="#e5a900" /> Status & Appeals
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('attendance')}
+              style={{
+                background: '#064e2e',
+                border: '1px solid #e5a900',
+                color: '#facc15',
+                padding: '0.5rem 1rem',
+                borderRadius: '8px',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px'
+              }}
+            >
+              <Calendar size={14} /> View Attendance Log →
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ============================================================ */}
+    {/* TAB 2: STATUS & APPEALS                                      */}
+    {/* ============================================================ */}
+    {activeTab === 'status' && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* 4. ATTENDANCE STANDING & PERFORMANCE STATUS BANNER */}
+        <div
+          style={{
+            background: t.cardBg,
+            border: `1.5px solid ${isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'}`,
+            borderRadius: '14px',
+            padding: '1rem 1.4rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            boxShadow: t.cardShadow
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <div
+              style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '12px',
+                background: isDropped
+                  ? 'rgba(244, 63, 94, 0.12)'
+                  : isWarning
+                  ? 'rgba(245, 158, 11, 0.12)'
+                  : 'rgba(16, 185, 129, 0.12)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'
+              }}
+            >
+              <Activity size={22} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Official ROTC Standing & Performance
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    background: isDropped
+                      ? 'rgba(244, 63, 94, 0.15)'
+                      : isWarning
+                      ? 'rgba(245, 158, 11, 0.15)'
+                      : 'rgba(16, 185, 129, 0.15)',
+                    color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
+                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                    padding: '2px 10px',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 800
+                  }}
+                >
+                  {isDropped ? 'DROPPED FROM ROLLS' : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
+                </span>
+                <span style={{ fontSize: '0.8rem', color: t.textMuted }}>
+                  {isDropped
+                    ? 'Threshold of allowable absences exceeded.'
+                    : isWarning
+                    ? 'Approaching allowable unexcused absence limit.'
+                    : 'Compliant with military drill attendance regulations.'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>
+                Attendance Rate
+              </div>
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
                 {metrics.complianceRate}%
               </div>
-              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: isDropped ? '#be123c' : isWarning ? '#b45309' : '#047857', marginTop: '4px' }}>
-                {isDropped ? 'Dropped (Threshold Exceeded)' : isWarning ? 'Warning (Approaching Limit)' : 'Good Standing'}
+            </div>
+            <div style={{ width: '80px', height: '8px', background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)', borderRadius: '999px', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${metrics.complianceRate}%`,
+                  height: '100%',
+                  background: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
+                  borderRadius: '999px',
+                  transition: 'width 0.5s ease'
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Status Banners & Actions */}
+        {isDropped && (
+          <div
+            style={{
+              background: isLight
+                ? 'linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%)'
+                : 'linear-gradient(135deg, rgba(225, 29, 72, 0.12) 0%, rgba(159, 18, 57, 0.18) 100%)',
+              border: '1.5px solid #f43f5e',
+              borderRadius: '16px',
+              padding: '1.25rem 1.5rem',
+              boxShadow: isLight ? '0 4px 15px rgba(244, 63, 94, 0.15)' : '0 6px 20px rgba(225, 29, 72, 0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              width: '100%',
+              boxSizing: 'border-box'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    background: '#e11d48',
+                    color: '#ffffff',
+                    borderRadius: '12px',
+                    padding: '0.6rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}
+                >
+                  <AlertOctagon size={26} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                    <span
+                      style={{
+                        background: '#e11d48',
+                        color: '#ffffff',
+                        fontWeight: 900,
+                        fontSize: '0.7rem',
+                        letterSpacing: '0.5px',
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      DROPPED STATUS
+                    </span>
+                    <span style={{ fontSize: '0.8rem', color: isLight ? '#be123c' : '#fca5a5', fontWeight: 700 }}>
+                      Absence Threshold Reached (ROTC Regulation)
+                    </span>
+                  </div>
+
+                  <h2 style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.3rem', fontWeight: 800, color: isLight ? '#881337' : '#ffffff', margin: '4px 0 6px 0' }}>
+                    Cadet Status: Dropped from CSU ROTCU
+                  </h2>
+
+                  <p style={{ margin: 0, fontSize: '0.86rem', color: isLight ? '#9f1239' : '#fecdd3', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                    You have accumulated <strong>{metrics.absences} unrecorded absences</strong> ({metrics.maxConsecutive} consecutive unrecorded formation days).
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAlertDetails(!showAlertDetails)}
+                style={{
+                  background: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.08)',
+                  border: isLight ? '1px solid #fecdd3' : '1px solid rgba(255, 255, 255, 0.15)',
+                  color: isLight ? '#9f1239' : '#f8fafc',
+                  padding: '5px 12px',
+                  borderRadius: '8px',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                {showAlertDetails ? 'Hide Next Steps' : 'View Next Steps'}
+              </button>
+            </div>
+
+            {/* Clear, Helpful Steps to Appeal or Reinstate */}
+            {showAlertDetails && (
+              <div
+                style={{
+                  background: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.6)',
+                  border: isLight ? '1px solid #fecdd3' : '1px solid rgba(244, 63, 94, 0.3)',
+                  borderRadius: '10px',
+                  padding: '0.85rem 1rem',
+                  fontSize: '0.82rem',
+                  color: isLight ? '#1e293b' : '#e2e8f0',
+                  lineHeight: 1.5,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '6px'
+                }}
+              >
+                <div style={{ fontWeight: 800, color: isLight ? '#be123c' : '#fecdd3', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <HelpCircle size={15} color="#e11d48" />
+                  <span>How to Resolve This & Appeal:</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '8px', marginTop: '4px' }}>
+                  <div style={{ background: isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)', padding: '8px 12px', borderRadius: '8px', border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.06)' }}>
+                    <strong>1. Report to Admin Office:</strong> Visit the <strong>ROTC OFFICE</strong> on Caraga State University, Ampayon Campus to verify your records.
+                  </div>
+                  <div style={{ background: isLight ? '#f8fafc' : 'rgba(255,255,255,0.04)', padding: '8px 12px', borderRadius: '8px', border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.06)' }}>
+                    <strong>2. Submit Excuse Letters:</strong> Coordinate with your <strong>Platoon Leader</strong> and submit valid medical/academic excuses.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {isWarning && (
+          <div
+            style={{
+              background: isLight
+                ? 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%)'
+                : 'linear-gradient(135deg, rgba(217, 119, 6, 0.12) 0%, rgba(180, 83, 9, 0.18) 100%)',
+              border: '1.5px solid #f59e0b',
+              borderRadius: '16px',
+              padding: '1.15rem 1.35rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              boxShadow: isLight ? '0 4px 15px rgba(245, 158, 11, 0.12)' : 'none'
+            }}
+          >
+            <div style={{ background: '#f59e0b', color: '#0b0f19', borderRadius: '10px', padding: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <AlertTriangle size={24} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.9rem', color: isLight ? '#92400e' : '#fbbf24' }}>
+                Attendance Warning: {metrics.absences} Absences Recorded
+              </div>
+              <div style={{ fontSize: '0.8rem', color: isLight ? '#b45309' : '#fef3c7', marginTop: '2px' }}>
+                You are approaching the drop limit. Accumulating 3 consecutive unrecorded formations or more than 3 total absences triggers an administrative drop.
               </div>
             </div>
           </div>
+        )}
 
-          {/* Card 2: Total Formations */}
+        {!isDropped && !isWarning && (
           <div
             style={{
-              background: t.cardBg,
-              border: `1px solid ${t.cardBorder}`,
-              borderRadius: '14px',
-              padding: '1.25rem',
+              background: isLight
+                ? 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%)'
+                : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(5, 150, 105, 0.15) 100%)',
+              border: '1.5px solid #10b981',
+              borderRadius: '16px',
+              padding: '1rem 1.25rem',
               display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '0.5rem',
-              boxShadow: t.cardShadow
+              alignItems: 'center',
+              gap: '1rem',
+              boxShadow: isLight ? '0 4px 15px rgba(16, 185, 129, 0.1)' : 'none'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>Total Drill Sessions</span>
-              <Calendar size={18} color="#0284c7" />
+            <div style={{ background: '#10b981', color: '#ffffff', borderRadius: '10px', padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <CheckCircle2 size={22} />
             </div>
             <div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: t.textMain, lineHeight: 1.1 }}>
-                {metrics.totalFormations}
+              <div style={{ fontWeight: 800, fontSize: '0.9rem', color: isLight ? '#065f46' : '#34d399' }}>
+                Attendance Status: Good Standing
               </div>
-              <div style={{ fontSize: '0.74rem', color: t.textMuted, marginTop: '4px' }}>
-                Mandatory semester formation dates
+              <div style={{ fontSize: '0.8rem', color: isLight ? '#047857' : '#a7f3d0', marginTop: '2px' }}>
+                Your formation drill attendance is within compliant parameters. Keep up the active participation!
               </div>
             </div>
           </div>
+        )}
 
-          {/* Card 3: Formations Attended */}
-          <div
-            style={{
-              background: t.cardBg,
-              border: `1px solid ${t.cardBorder}`,
-              borderRadius: '14px',
-              padding: '1.25rem',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              gap: '0.5rem',
-              boxShadow: t.cardShadow
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>Sessions Attended</span>
-              <CheckCircle2 size={18} color="#059669" />
-            </div>
+        {/* Official CSU ROTC Attendance & Appeals Regulations Card */}
+        <div
+          style={{
+            background: t.cardBg,
+            border: `1px solid ${t.cardBorder}`,
+            borderRadius: '16px',
+            padding: '1.5rem',
+            boxShadow: t.cardShadow,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem',
+            transition: 'background-color 0.2s ease, border-color 0.2s ease'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <BookOpen size={22} color="#e5a900" />
             <div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: isLight ? '#047857' : '#34d399', lineHeight: 1.1 }}>
-                {metrics.presentDays + metrics.lates}
-              </div>
-              <div style={{ fontSize: '0.74rem', color: t.textMuted, marginTop: '4px' }}>
-                {metrics.presentDays} On-Time • {metrics.lates} Tardy/Late
-              </div>
+              <h3 style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.15rem', fontWeight: 800, margin: 0, color: t.textMain }}>
+                ROTC Attendance Policies & Reinstatement Appeals
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.78rem', color: t.textMuted }}>
+                Official Caraga State University ROTC Unit Regulations & Department of Military Science Policies
+              </p>
             </div>
           </div>
 
-          {/* Card 4: Total Absences */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginTop: '0.25rem' }}>
+            <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '12px', padding: '1rem' }}>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#e5a900', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <AlertOctagon size={16} /> 20% Unexcused Absence Rule (RA 7077)
+              </div>
+              <p style={{ fontSize: '0.78rem', color: t.textMuted, margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                Under AFP & ROTC regulations, cadets who accumulate unexcused absences exceeding 20% of total formation drill hours or miss 3 consecutive drills are administratively dropped from the roster.
+              </p>
+            </div>
+
+            <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '12px', padding: '1rem' }}>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <CheckCircle2 size={16} /> Valid Grounds for Excused Absence
+              </div>
+              <p style={{ fontSize: '0.78rem', color: t.textMuted, margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                Medical illness with physician certificate, official university academic delegation or varsity competition, or immediate family emergency substantiated with written notice.
+              </p>
+            </div>
+
+            <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '12px', padding: '1rem' }}>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: isLight ? '#0369a1' : '#38bdf8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <FileText size={16} /> Official Appeal Workflow
+              </div>
+              <p style={{ fontSize: '0.78rem', color: t.textMuted, margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                1. Secure and complete the Cadet Appeal & Reinstatement Form.
+                <br />
+                2. Attach required supporting documentation.
+                <br />
+                3. Secure endorsement from your Platoon Leader and Company Commander.
+                <br />
+                4. Submit to the ROTC S1 Office within 5 academic days.
+              </p>
+            </div>
+
+            <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '12px', padding: '1rem' }}>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: t.textMain, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <MapPin size={16} color="#e5a900" /> ROTC Headquarters & Contact
+              </div>
+              <p style={{ fontSize: '0.78rem', color: t.textMuted, margin: '6px 0 0 0', lineHeight: 1.5 }}>
+                CSU 1501st CDC ROTC Unit Headquarters, Main Campus, Ampayon, Butuan City.
+                <br />
+                Email: <strong>rotc@carsu.edu.ph</strong> • Office Hours: Mon-Fri 08:00 AM - 05:00 PM
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ============================================================ */}
+    {/* TAB 3: ATTENDANCE LOG                                        */}
+    {/* ============================================================ */}
+    {activeTab === 'attendance' && (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* Quick alert notice if dropped or warning */}
+        {(isDropped || isWarning) && (
           <div
             style={{
-              background: t.cardBg,
-              border: `1.5px solid ${metrics.absences > 0 ? '#ef4444' : t.cardBorder}`,
-              borderRadius: '14px',
-              padding: '1.25rem',
+              background: isDropped
+                ? (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)')
+                : (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.15)'),
+              border: `1.5px solid ${isDropped ? '#f43f5e' : '#f59e0b'}`,
+              borderRadius: '12px',
+              padding: '0.75rem 1.25rem',
               display: 'flex',
-              flexDirection: 'column',
+              alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '0.5rem',
-              boxShadow: t.cardShadow
+              flexWrap: 'wrap',
+              gap: '8px'
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>Total Absences</span>
-              <AlertTriangle size={18} color={metrics.absences > 0 ? '#ef4444' : t.textSubtle} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isDropped ? <AlertOctagon size={18} color="#e11d48" /> : <AlertTriangle size={18} color="#d97706" />}
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isDropped ? '#e11d48' : '#d97706' }}>
+                {isDropped ? 'Attendance Warning: Cadet is marked as Dropped from Rolls.' : 'Attendance Alert: Approaching absence threshold.'}
+              </span>
             </div>
-            <div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '2.2rem', fontWeight: 900, color: metrics.absences > 0 ? '#dc2626' : t.textMain, lineHeight: 1.1 }}>
-                {metrics.absences}
+            <button
+              type="button"
+              onClick={() => setActiveTab('status')}
+              style={{
+                background: isDropped ? '#e11d48' : '#d97706',
+                border: 'none',
+                color: '#ffffff',
+                padding: '3px 10px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                cursor: 'pointer'
+              }}
+            >
+              View Status & Appeals →
+            </button>
+          </div>
+        )}
+
+        {/* ============================================================ */}
+        {/* 5. INTERACTIVE SUMMARY CARDS (MATCHING ADMIN UI)             */}
+        {/* ============================================================ */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+          {/* Card 1: Total Formations */}
+          <div
+            style={{
+              background: statusFilter === 'ALL'
+                ? (isLight ? '#f0fdf4' : 'rgba(6, 78, 46, 0.25)')
+                : t.cardBg,
+              border: `1px solid ${statusFilter === 'ALL' ? '#064e2e' : t.cardBorder}`,
+              borderLeft: `5px solid ${statusFilter === 'ALL' ? '#064e2e' : (isLight ? '#cbd5e1' : '#334155')}`,
+              borderRadius: '12px',
+              padding: '1.1rem 1.25rem',
+              cursor: 'pointer',
+              outline: statusFilter === 'ALL' ? '2px solid #064e2e' : 'none',
+              boxShadow: t.cardShadow,
+              transition: 'all 0.15s ease'
+            }}
+            onClick={() => handleStatusCardClick('ALL')}
+            title="Click to show all formation drill sessions"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(6, 78, 46, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isLight ? '#064e2e' : '#34d399'
+                }}
+              >
+                <Users size={20} />
               </div>
-              <div style={{ fontSize: '0.74rem', color: metrics.absences > 0 ? '#b91c1c' : t.textMuted, marginTop: '4px' }}>
-                {metrics.maxConsecutive > 0 ? `${metrics.maxConsecutive} consecutive absence streak` : 'Zero absence streak'}
+              <div>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                  Total Formations
+                </div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: t.textMain }}>
+                  {counts.all} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                </div>
               </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+              {statusFilter === 'ALL' ? '✓ Showing all drill dates' : 'Click to filter → All Formations'}
+            </div>
+          </div>
+
+          {/* Card 2: PRESENT */}
+          <div
+            style={{
+              background: statusFilter === 'PRESENT'
+                ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.2)')
+                : t.cardBg,
+              border: `1px solid ${statusFilter === 'PRESENT' ? '#059669' : t.cardBorder}`,
+              borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : (isLight ? '#d1fae5' : '#065f46')}`,
+              borderRadius: '12px',
+              padding: '1.1rem 1.25rem',
+              cursor: 'pointer',
+              outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
+              boxShadow: t.cardShadow,
+              transition: 'all 0.15s ease'
+            }}
+            onClick={() => handleStatusCardClick('PRESENT')}
+            title="Click to filter table: Present (On-Time) sessions only"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(5, 150, 105, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#059669'
+                }}
+              >
+                <CheckCircle2 size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                  Present
+                </div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#065f46' : '#34d399' }}>
+                  {counts.present} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+              {statusFilter === 'PRESENT' ? '✓ Filtering table by Present' : 'Click to filter → Present'}
+            </div>
+          </div>
+
+          {/* Card 3: LATE */}
+          <div
+            style={{
+              background: statusFilter === 'LATE'
+                ? (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.2)')
+                : t.cardBg,
+              border: `1px solid ${statusFilter === 'LATE' ? '#d97706' : t.cardBorder}`,
+              borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : (isLight ? '#fde68a' : '#78350f')}`,
+              borderRadius: '12px',
+              padding: '1.1rem 1.25rem',
+              cursor: 'pointer',
+              outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
+              boxShadow: t.cardShadow,
+              transition: 'all 0.15s ease'
+            }}
+            onClick={() => handleStatusCardClick('LATE')}
+            title="Click to filter table: Late / Tardy sessions only"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(217, 119, 6, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#d97706'
+                }}
+              >
+                <Clock size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                  Late
+                </div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24' }}>
+                  {counts.late} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+              {statusFilter === 'LATE' ? '✓ Filtering table by Late' : 'Click to filter → Late'}
+            </div>
+          </div>
+
+          {/* Card 4: NO TIME IN/OUT */}
+          <div
+            style={{
+              background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT')
+                ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
+                : t.cardBg,
+              border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : t.cardBorder}`,
+              borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
+              borderRadius: '12px',
+              padding: '1.1rem 1.25rem',
+              cursor: 'pointer',
+              outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
+              boxShadow: t.cardShadow,
+              transition: 'all 0.15s ease'
+            }}
+            onClick={() => handleStatusCardClick('NO TIME-OUT')}
+            title="Click to filter table: Incomplete time-in/out records"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(234, 88, 12, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ea580c'
+                }}
+              >
+                <Activity size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                  No Time In/Out
+                </div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#9a3412' : '#fb923c' }}>
+                  {counts.noTimeOut} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+              {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
+            </div>
+          </div>
+
+          {/* Card 5: ABSENT CADETS */}
+          <div
+            style={{
+              background: statusFilter === 'ABSENT'
+                ? (isLight ? '#fef2f2' : 'rgba(220, 38, 38, 0.2)')
+                : t.cardBg,
+              border: `1px solid ${statusFilter === 'ABSENT' ? '#dc2626' : t.cardBorder}`,
+              borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#dc2626' : (isLight ? '#fecaca' : '#7f1d1d')}`,
+              borderRadius: '12px',
+              padding: '1.1rem 1.25rem',
+              cursor: 'pointer',
+              outline: statusFilter === 'ABSENT' ? '2px solid #dc2626' : 'none',
+              boxShadow: t.cardShadow,
+              transition: 'all 0.15s ease'
+            }}
+            onClick={() => handleStatusCardClick('ABSENT')}
+            title="Click to filter table: Absent / Missed sessions only"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  background: 'rgba(220, 38, 38, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#dc2626'
+                }}
+              >
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                  Absent Cadets
+                </div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#b91c1c' : '#f87171' }}>
+                  {counts.absent} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Absences</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+              {statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent'}
             </div>
           </div>
         </div>
 
         {/* ============================================================ */}
-        {/* 5. FORMATION SCHEDULE & LOGS (STUDENT-FRIENDLY TABLE)         */}
+        {/* 6. FORMATION DRILL SCHEDULE (STUDENT-FRIENDLY TABLE)          */}
         {/* ============================================================ */}
         <div
           style={{
@@ -1049,7 +1946,87 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Active Filter Pill with Clear button */}
+              {statusFilter !== 'ALL' && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.3)',
+                    border: '1px solid #059669',
+                    borderRadius: '8px',
+                    padding: '4px 10px',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    color: isLight ? '#065f46' : '#34d399'
+                  }}
+                >
+                  <span>Active Filter: <strong>{statusFilter}</strong> ({displaySchedule.length})</span>
+                  <button
+                    type="button"
+                    onClick={() => setStatusFilter('ALL')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'inherit',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '0 2px'
+                    }}
+                    title="Clear filter and show all"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
 
+              {/* Date Filter Input */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.05)',
+                  border: `1px solid ${t.cardBorder}`,
+                  borderRadius: '8px',
+                  padding: '0.35rem 0.65rem',
+                  gap: '6px'
+                }}
+              >
+                <Search size={13} color={t.textMuted} />
+                <input
+                  type="text"
+                  placeholder="Filter by date..."
+                  value={searchDate}
+                  onChange={(e) => setSearchDate(e.target.value)}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    outline: 'none',
+                    fontSize: '0.76rem',
+                    color: t.textMain,
+                    width: '120px'
+                  }}
+                />
+                {searchDate && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchDate('')}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: t.textMuted,
+                      padding: 0,
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
 
               {/* Refresh Button */}
               <button
@@ -1076,116 +2053,32 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
           </div>
 
-          {/* Filter Pills Strip */}
+          {/* Friendly Data Table (Scrollable Container with Sticky Header) */}
           <div
+            className="max-h-[420px] overflow-y-auto"
             style={{
-              padding: '1rem 1.5rem',
-              background: t.filterStripBg,
-              borderBottom: `1px solid ${t.cardBorder}`,
-              display: 'flex',
-              justifyContent: 'center',
-              alignItems: 'center',
-              gap: '8px',
-              flexWrap: 'wrap'
+              maxHeight: '420px',
+              overflowY: 'auto',
+              overflowX: 'auto',
+              position: 'relative'
             }}
           >
-            <button
-              type="button"
-              onClick={() => setStatusFilter('ALL')}
-              style={{
-                background: statusFilter === 'ALL' ? '#059669' : t.filterPillInactiveBg,
-                color: statusFilter === 'ALL' ? '#ffffff' : t.textMuted,
-                border: '1px solid',
-                borderColor: statusFilter === 'ALL' ? '#10b981' : t.filterPillInactiveBorder,
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              All Formations ({counts.all})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('PRESENT')}
-              style={{
-                background: statusFilter === 'PRESENT' ? '#059669' : t.filterPillInactiveBg,
-                color: statusFilter === 'PRESENT' ? '#ffffff' : isLight ? '#047857' : '#34d399',
-                border: '1px solid',
-                borderColor: statusFilter === 'PRESENT' ? '#10b981' : t.filterPillInactiveBorder,
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              On-Time ({counts.present})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('LATE')}
-              style={{
-                background: statusFilter === 'LATE' ? '#d97706' : t.filterPillInactiveBg,
-                color: statusFilter === 'LATE' ? '#ffffff' : isLight ? '#b45309' : '#fbbf24',
-                border: '1px solid',
-                borderColor: statusFilter === 'LATE' ? '#f59e0b' : t.filterPillInactiveBorder,
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              Late / Tardy ({counts.late})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('NO TIME-OUT')}
-              style={{
-                background: statusFilter === 'NO TIME-OUT' ? '#ea580c' : t.filterPillInactiveBg,
-                color: statusFilter === 'NO TIME-OUT' ? '#ffffff' : isLight ? '#c2410c' : '#fb923c',
-                border: '1px solid',
-                borderColor: statusFilter === 'NO TIME-OUT' ? '#f97316' : t.filterPillInactiveBorder,
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              No Time-Out ({counts.noTimeOut})
-            </button>
-            <button
-              type="button"
-              onClick={() => setStatusFilter('ABSENT')}
-              style={{
-                background: statusFilter === 'ABSENT' ? '#dc2626' : t.filterPillInactiveBg,
-                color: statusFilter === 'ABSENT' ? '#ffffff' : isLight ? '#b91c1c' : '#f87171',
-                border: '1px solid',
-                borderColor: statusFilter === 'ABSENT' ? '#ef4444' : t.filterPillInactiveBorder,
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer'
-              }}
-            >
-              Absences ({counts.absent})
-            </button>
-          </div>
-
-          {/* Friendly Data Table */}
-          <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.84rem' }}>
-              <thead>
+              <thead
+                style={{
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 20,
+                  background: t.tableHeadBg,
+                  boxShadow: isLight ? '0 1px 3px rgba(0, 0, 0, 0.08)' : '0 2px 6px rgba(0, 0, 0, 0.35)'
+                }}
+              >
                 <tr style={{ background: t.tableHeadBg, borderBottom: `1px solid ${t.tableRowBorder}` }}>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Drill Date</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Time-In</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Time-Out</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Attendance Status</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Remarks / Rule Impact</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Drill Date</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Time-In</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Time-Out</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Attendance Status</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Remarks / Rule Impact</th>
                 </tr>
               </thead>
               <tbody>
@@ -1326,8 +2219,8 @@ export default function CadetPortal({ cadet, onLogout }) {
                                   ? (isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.15)')
                                   : (isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.1)'),
                                 border: `1px solid ${isLate
-                                    ? (isLight ? '#fde68a' : 'rgba(217, 119, 6, 0.35)')
-                                    : (isLight ? '#bbf7d0' : 'rgba(16, 185, 129, 0.25)')
+                                  ? (isLight ? '#fde68a' : 'rgba(217, 119, 6, 0.35)')
+                                  : (isLight ? '#bbf7d0' : 'rgba(16, 185, 129, 0.25)')
                                   }`,
                                 padding: '2px 8px',
                                 borderRadius: '6px'
@@ -1445,8 +2338,11 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
           </div>
         </div>
+      </div>
+    )}
 
       </main>
+      </div>
 
       {/* Digital ID Card Modal */}
       {showIdModal && (

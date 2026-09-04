@@ -35,7 +35,7 @@ export default function PublicLandingPage({
         const parsed = JSON.parse(saved);
         if (parsed.commandingOfficer) return parsed.commandingOfficer;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'LTC CHRISTIAN B ABAMO INF (GSC) PA';
   });
 
@@ -46,7 +46,7 @@ export default function PublicLandingPage({
         const parsed = JSON.parse(saved);
         if (parsed.hostInstitution) return parsed.hostInstitution;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'Caraga State University';
   });
 
@@ -57,7 +57,7 @@ export default function PublicLandingPage({
         const parsed = JSON.parse(saved);
         if (parsed.unitName) return parsed.unitName;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 'CSU MAIN ROTC UNIT';
   });
 
@@ -68,7 +68,7 @@ export default function PublicLandingPage({
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed.length;
       }
-    } catch (_) {}
+    } catch (_) { }
     return 1194;
   });
 
@@ -149,7 +149,7 @@ export default function PublicLandingPage({
         style={{
           background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
           color: '#ffffff',
-          padding: '1rem 2rem',
+          padding: '1rem clamp(1rem, 3vw, 2rem)',
           borderBottom: '2px solid #e5a900',
           boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
           position: 'sticky',
@@ -158,17 +158,58 @@ export default function PublicLandingPage({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem'
+          boxSizing: 'border-box'
         }}
       >
-        {/* Unit Title */}
-        <div>
-          <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.25rem', fontWeight: 800, letterSpacing: '0.5px', color: '#ffffff' }}>
-            {unitName}
+        {/* Unit Branding Container */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', maxWidth: '100%', minWidth: 0 }}>
+          <div
+            style={{
+              width: 'clamp(36px, 8vw, 42px)',
+              height: 'clamp(36px, 8vw, 42px)',
+              borderRadius: '50%',
+              background: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            <img
+              src="/rotc-seal-transparent.png"
+              alt="CSU ROTC Unit Seal"
+              style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
           </div>
-          <div style={{ fontSize: '0.74rem', color: '#cbd5e1', fontWeight: 500 }}>
-            Attendance & Corps Roster Management System
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  fontFamily: "'Oswald', sans-serif",
+                  fontSize: 'clamp(1.05rem, 3.5vw, 1.25rem)',
+                  fontWeight: 800,
+                  letterSpacing: '0.5px',
+                  color: '#ffffff',
+                  lineHeight: 1.2
+                }}
+              >
+                CARAGA STATE UNIVERSITY ROTCU
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: 'clamp(0.66rem, 2.2vw, 0.74rem)',
+                color: '#cbd5e1',
+                fontWeight: 500,
+                lineHeight: 1.3,
+                marginTop: '1px'
+              }}
+            >
+              1501st CDC • 15th RCDG • ARESCOM • PHILIPPINE ARMY
+            </div>
           </div>
         </div>
 
@@ -194,38 +235,49 @@ export default function PublicLandingPage({
           >
             <Users size={15} /> Cadet Portal
           </button>
-          <button
-            type="button"
-            onClick={isAuthenticated ? onNavigateToDashboard : onNavigateToLogin}
-            style={{
-              background: 'linear-gradient(135deg, #e5a900 0%, #d97706 100%)',
-              color: '#064e2e',
-              border: 'none',
-              padding: '0.45rem 1.1rem',
-              borderRadius: '8px',
-              fontSize: '0.82rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              boxShadow: '0 2px 8px rgba(229, 169, 0, 0.3)'
-            }}
-          >
-            <Shield size={15} /> {isAuthenticated ? 'Admin HQ' : 'Admin Login'}
-          </button>
         </div>
       </header>
 
+      {/* Embedded Responsive Media Query Styles */}
+      <style>{`
+        .min-h-screen {
+          min-height: 100vh;
+          min-height: 100dvh;
+        }
+        .admin-hero-section {
+          min-height: calc(100vh - 72px) !important;
+          min-height: calc(100dvh - 72px) !important;
+          display: flex !important;
+          flex-direction: column !important;
+          justify-content: space-between !important;
+          align-items: center !important;
+        }
+        @media (max-width: 640px) {
+          .admin-hero-section {
+            min-height: calc(100vh - 64px) !important;
+            min-height: calc(100dvh - 64px) !important;
+            padding: 2rem 1rem !important;
+          }
+        }
+      `}</style>
+
       {/* Hero Section */}
       <section
+        className="min-h-screen flex flex-col justify-between admin-hero-section"
         style={{
           background: 'radial-gradient(circle at 50% 20%, #064e2e 0%, #043820 60%, #021a0f 100%)',
           color: '#ffffff',
-          padding: '4.5rem 1.5rem 5rem 1.5rem',
+          minHeight: 'calc(100vh - 72px)',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '2.5rem 1.5rem 2.25rem 1.5rem',
           textAlign: 'center',
           position: 'relative',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          boxSizing: 'border-box',
+          width: '100%'
         }}
       >
         {/* Subtle Background Camo Grid Overlay */}
@@ -239,37 +291,181 @@ export default function PublicLandingPage({
           }}
         />
 
-        <div style={{ maxWidth: '840px', margin: '0 auto', position: 'relative', zIndex: 1 }}>
-          {/* CSU ROTC Official Logo / Seal (Significantly Enlarged) */}
+        {/* Top Spacer for flex justify-between */}
+        <div style={{ flexShrink: 0, height: '1px' }} />
+
+        <div style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%' }}>
+          {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
           <div
             style={{
-              width: 'clamp(140px, 18vw, 180px)',
-              height: 'clamp(140px, 18vw, 180px)',
-              margin: '0 auto 1.5rem auto',
-              borderRadius: '50%',
-              background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
-              border: '4px solid #e5a900',
-              boxShadow: '0 12px 35px rgba(0, 0, 0, 0.55), 0 0 30px rgba(229, 169, 0, 0.35)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '10px',
-              transition: 'transform 0.3s ease'
+              gap: 'clamp(0.4rem, 2vw, 1.4rem)',
+              margin: '0 auto 1.5rem auto',
+              flexWrap: 'wrap',
+              maxWidth: '920px'
             }}
           >
-            <img
-              src="/rotc-seal-transparent.png"
-              alt="CSU ROTC Official Seal"
+            {/* 1. Far Left: RCDG Logo */}
+            <div
+              title="15th Regional Community Defense Group (15RCDG)"
               style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'contain',
-                filter: 'drop-shadow(0 4px 10px rgba(0,0,0,0.3))'
+                width: 'clamp(64px, 8.5vw, 100px)',
+                height: 'clamp(64px, 8.5vw, 100px)',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
+                border: '2.5px solid rgba(229, 169, 0, 0.6)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                flexShrink: 0,
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
-              onError={(e) => {
-                e.target.style.display = 'none';
+            >
+              <img
+                src="/rcdg-logo.png"
+                alt="15th RCDG Logo"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '50%',
+                  filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
+
+            {/* 2. Left Center: CDC Logo */}
+            <div
+              title="1501st Community Defense Center (1501st CDC)"
+              style={{
+                width: 'clamp(74px, 10vw, 116px)',
+                height: 'clamp(74px, 10vw, 116px)',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
+                border: '2.5px solid rgba(229, 169, 0, 0.7)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '7px',
+                flexShrink: 0,
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
-            />
+            >
+              <img
+                src="/cdc-logo.png"
+                alt="1501st CDC Logo"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '50%',
+                  filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
+
+            {/* 3. Center: Featured Main ROTC Emblem (Significantly Enlarged) */}
+            <div
+              title="Caraga State University ROTC Unit"
+              style={{
+                width: 'clamp(170px, 23vw, 235px)',
+                height: 'clamp(170px, 23vw, 235px)',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
+                border: '4.5px solid #e5a900',
+                boxShadow: '0 18px 52px rgba(0, 0, 0, 0.7), 0 0 48px rgba(229, 169, 0, 0.6), 0 0 90px rgba(250, 204, 21, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '12px',
+                flexShrink: 0,
+                zIndex: 2,
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease'
+              }}
+            >
+              <img
+                src="/rotc-seal-transparent.png"
+                alt="CSU ROTC Official Seal"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  filter: 'drop-shadow(0 0 24px rgba(229, 169, 0, 0.65)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5))'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
+
+            {/* 4. Right Center: NSTP Logo */}
+            <div
+              title="National Service Training Program (NSTP CSU)"
+              style={{
+                width: 'clamp(74px, 10vw, 116px)',
+                height: 'clamp(74px, 10vw, 116px)',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
+                border: '2.5px solid rgba(229, 169, 0, 0.7)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '7px',
+                flexShrink: 0,
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease'
+              }}
+            >
+              <img
+                src="/nstp-logo.png"
+                alt="CSU NSTP Logo"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '50%',
+                  filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
+
+            {/* 5. Far Right: CSU Logo */}
+            <div
+              title="Caraga State University (CSU Main)"
+              style={{
+                width: 'clamp(64px, 8.5vw, 100px)',
+                height: 'clamp(64px, 8.5vw, 100px)',
+                borderRadius: '50%',
+                background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
+                border: '2.5px solid rgba(229, 169, 0, 0.6)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '6px',
+                flexShrink: 0,
+                transition: 'transform 0.3s ease, box-shadow 0.3s ease'
+              }}
+            >
+              <img
+                src="/csu-logo.png"
+                alt="Caraga State University Logo"
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'contain',
+                  borderRadius: '50%',
+                  filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
+                }}
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            </div>
           </div>
 
           {/* Official Badge Pill */}
@@ -290,7 +486,7 @@ export default function PublicLandingPage({
             }}
           >
             <Shield size={14} />
-            <span>1501st CDC • 15th RCDG • ARESCOM • PHILIPPINE ARMY</span>
+            <span>HONOR • PATRIOTISM • DUTY</span>
           </div>
 
           <h1
@@ -367,32 +563,11 @@ export default function PublicLandingPage({
                 <LogIn size={18} /> Access Command Center <ChevronRight size={18} />
               </button>
             )}
-
-            {/* Cadet Portal Button */}
-            <button
-              type="button"
-              onClick={onNavigateToCadetLogin}
-              style={{
-                background: 'rgba(255, 255, 255, 0.12)',
-                border: '2px solid #e5a900',
-                color: '#facc15',
-                padding: '0.85rem 1.85rem',
-                borderRadius: '10px',
-                fontWeight: 800,
-                fontSize: '1rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '8px',
-                backdropFilter: 'blur(8px)',
-                boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Users size={18} /> Basic Cadet Portal <ChevronRight size={18} />
-            </button>
           </div>
         </div>
+
+        {/* Bottom Spacer for flex justify-between */}
+        <div style={{ flexShrink: 0, height: '1px' }} />
       </section>
 
       {/* Quick Unit Command Overview Bar */}
