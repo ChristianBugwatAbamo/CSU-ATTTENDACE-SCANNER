@@ -71,6 +71,8 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
   let consecutiveAbsences = 0;
   let maxConsecutiveAbsences = 0;
   let consecutiveLates = 0;
+  let maxConsecutiveLates = 0;
+  let consecutiveLateConversions = 0;
   let totalIntervalLates = 0;
   let totalIntervalMissingScans = 0; // Tracks No Time-In or No Time-Out occurrences
   const dailyBreakdown = [];
@@ -84,21 +86,18 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
       const rawTimeIn = log.time_in || log.timeIn;
       const rawTimeOut = log.time_out || log.timeOut;
       
-      const isNullTimeOut = !rawTimeOut || String(rawTimeOut).trim() === '' || String(rawTimeOut).toUpperCase() === 'NO TIME-OUT';
-      const isNullTimeIn = !rawTimeIn || String(rawTimeIn).trim() === '' || String(rawTimeIn).toUpperCase() === 'NO TIME-IN';
+      const isNullTimeOut = !rawTimeOut || String(rawTimeOut).trim() === '' || String(rawTimeOut).toUpperCase() === 'NO TIME-OUT' || String(rawTimeOut).toUpperCase() === 'NULL';
+      const isNullTimeIn = !rawTimeIn || String(rawTimeIn).trim() === '' || String(rawTimeIn).toUpperCase() === 'NO TIME-IN' || String(rawTimeIn).toUpperCase() === 'NULL';
 
-      const cleanTimeIn = isNullTimeIn ? ((log.scanMode === 'Time-In' || log.scan_mode === 'Time-In') ? log.timestamp : null) : rawTimeIn;
-      const cleanTimeOut = isNullTimeOut ? ((log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out') ? log.timestamp : null) : rawTimeOut;
+      const cleanTimeIn = isNullTimeIn
+        ? ((!st.includes('NO TIME-IN') && !rawTimeOut && (log.scanMode === 'Time-In' || log.scan_mode === 'Time-In')) ? log.timestamp : null)
+        : rawTimeIn;
+      const cleanTimeOut = isNullTimeOut
+        ? ((!st.includes('NO TIME-OUT') && !rawTimeIn && (log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out')) ? log.timestamp : null)
+        : rawTimeOut;
 
       const hasTimeIn = Boolean(cleanTimeIn);
       const hasTimeOut = Boolean(cleanTimeOut);
-
-      const hasMissingScan =
-        st.includes('NO TIME-IN') ||
-        st.includes('NO TIME-OUT') ||
-        st.includes('INCOMPLETE') ||
-        (hasTimeIn && !hasTimeOut) ||
-        (!hasTimeIn && hasTimeOut);
 
       let penaltyLabel = 'Present & Verified';
       let dayType = 'PRESENT';
@@ -106,12 +105,16 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
 
       if (hasTimeIn && !hasTimeOut) {
         totalIntervalMissingScans += 1;
+        consecutiveAbsences = 0;
+        consecutiveLates = 0;
         dayType = 'NO TIME-OUT';
         const isLate = st.includes('LATE') || Boolean(log.isLate || log.is_late);
         entryStatus = isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
         penaltyLabel = `Missing Time-Out Scan (+1/4 Interval Penalty)`;
       } else if (!hasTimeIn && hasTimeOut) {
         totalIntervalMissingScans += 1;
+        consecutiveAbsences = 0;
+        consecutiveLates = 0;
         dayType = 'NO TIME-IN';
         entryStatus = 'NO TIME-IN';
         penaltyLabel = `Missing Time-In Scan (+1/4 Interval Penalty)`;
@@ -126,13 +129,14 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
       } else if (st.includes('LATE')) {
         consecutiveAbsences = 0;
         consecutiveLates += 1;
+        maxConsecutiveLates = Math.max(maxConsecutiveLates, consecutiveLates);
         totalIntervalLates += 1;
         dayType = 'LATE';
         entryStatus = 'LATE (Complete)';
 
-        // Rule: 3 consecutive lates = 1 absent
+        // Rule 5: 3 consecutive lates = 1 absent
         if (consecutiveLates === 3) {
-          unexcusedAbsences += 1;
+          consecutiveLateConversions += 1;
           consecutiveLates = 0;
           penaltyLabel = `3rd Consecutive Late (+1 Converted Absent)`;
         } else {
@@ -184,51 +188,84 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
     }
   });
 
-  // Rule: 4 interval lates = 1 absent
+  // Rule 6: 4 interval lates = 1 absent
   const lateConversions = Math.floor(totalIntervalLates / 4);
 
-  // Rule: 4 interval No Time-In / No Time-Out = 1 absent
+  // Rule 7: 4 interval No Time-In / No Time-Out = 1 absent
   const missingScanConversions = Math.floor(totalIntervalMissingScans / 4);
 
-  const totalAbsences = unexcusedAbsences + lateConversions + missingScanConversions;
+  // Total converted absences from rules 5, 6, and 7
+  const totalConvertedAbsences = consecutiveLateConversions + lateConversions + missingScanConversions;
 
-  // Status classification
+  // Calculated Absences column incorporates converted absences
+  const totalAbsences = unexcusedAbsences + totalConvertedAbsences;
+
+  // Status, Reason, and Badge classification
   let status = 'GOOD';
   let reason = 'Good Standing';
+  let badgeLabel = 'GOOD';
+  let ruleId = null;
 
   if (maxConsecutiveAbsences >= 3) {
     status = 'DROPPED';
     reason = 'Dropped (3 Consecutive Absences)';
+    badgeLabel = 'DROPPED';
+    ruleId = 1;
   } else if (totalAbsences > 3) {
     status = 'DROPPED';
     reason = 'Dropped (Exceeded 3 Interval Absences)';
-  } else if (totalAbsences === 3) {
+    badgeLabel = 'DROPPED';
+    ruleId = 2;
+  } else if (totalAbsences === 3 && (unexcusedAbsences === 3 || (!consecutiveLateConversions && !lateConversions && !missingScanConversions))) {
     status = 'WARNING';
     reason = 'Warning (3 Interval Absences)';
-  } else if (totalAbsences === 2) {
+    badgeLabel = 'WARNING';
+    ruleId = 3;
+  } else if (consecutiveLateConversions > 0 || maxConsecutiveLates >= 3) {
+    status = 'PENALTY / WARNING';
+    reason = 'Penalized (3 Consecutive Lates)';
+    badgeLabel = 'Penalized (3 Consecutive Lates)';
+    ruleId = 5;
+  } else if (lateConversions > 0 || totalIntervalLates >= 4) {
+    status = 'PENALTY / WARNING';
+    reason = 'Penalized (4 Interval Lates)';
+    badgeLabel = 'Penalized (4 Interval Lates)';
+    ruleId = 6;
+  } else if (missingScanConversions > 0 || totalIntervalMissingScans >= 4) {
+    status = 'PENALTY / WARNING';
+    reason = 'Penalized (4 Missing Scans)';
+    badgeLabel = 'Penalized (4 Missing Scans)';
+    ruleId = 7;
+  } else if (totalAbsences === 2 || totalAbsences === 3) {
     status = 'WARNING';
-    reason = 'Warning (2 Absences)';
+    reason = totalAbsences === 3 ? 'Warning (3 Interval Absences)' : 'Warning (2 Absences)';
+    badgeLabel = 'WARNING';
+    ruleId = totalAbsences === 3 ? 3 : 4;
   }
 
   return {
     ...cadet,
     unexcusedAbsences,
+    consecutiveLateConversions,
+    lateConversions,
+    missingScanConversions,
+    totalConvertedAbsences,
     totalAbsences,
     maxConsecutiveAbsences,
     totalIntervalLates,
     totalIntervalMissingScans,
-    lateConversions,
-    missingScanConversions,
     dailyBreakdown,
     status,
-    reason
+    reason,
+    badgeLabel,
+    ruleId
   };
 }
 
 /**
  * Sorts evaluated cadets in ascending order based on:
  * 1. Calculated Absences (0, 1, 2, 3...)
- * 2. Alert Status Tiers (Warning Threshold [1] -> Official Drop [2])
+ * 2. Alert Status Tiers (Ascending: Penalty / Warning [1] -> Warning Threshold [2] -> Official Drop [3])
  * 3. Tardiness (Total Interval Lates) (0, 1, 2...)
  * 4. Missing Scans count (0, 1, 2...)
  * 5. Stable Alphabetical Tie-breaker by Cadet Name / ID
@@ -238,8 +275,9 @@ export function sortCadetAlertsAscending(cadets = []) {
 
   const getStatusRank = (c) => {
     const s = String(c?.status || '').toUpperCase();
-    if (s === 'DROPPED') return 2; // Higher alert tier (Official Drop)
-    if (s === 'WARNING') return 1; // Lower alert tier (Warning Threshold)
+    if (s === 'DROPPED') return 3; // Highest alert tier (Official Drop)
+    if (s === 'WARNING') return 2; // Warning Threshold
+    if (s.includes('PENALTY') || s.includes('PENALIZED')) return 1; // Penalty / Warning tier
     return 0; // Good / lowest tier
   };
 
@@ -276,4 +314,55 @@ export function sortCadetAlertsAscending(cadets = []) {
     const nameB = String(b.name || b.id || '').toUpperCase();
     return nameA.localeCompare(nameB);
   });
+}
+
+/**
+ * Shared utility to calculate a cadet's converted absences and adjusted attendance rate.
+ * Enforces official ROTC training regulation formulas:
+ * - Converted Absences: Raw Absences + ⌊Missing Scans / 4⌋ + ⌊Interval Lates / 4⌋ + ⌊Consecutive Lates / 3⌋
+ * - Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
+ */
+export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_DATES) {
+  const evaluated = evaluateCadetAttendance(cadet, formationDates);
+  const rawAbsences = Number(evaluated.unexcusedAbsences || 0);
+  const missingScans = Number(evaluated.totalIntervalMissingScans || 0);
+  const intervalLates = Number(evaluated.totalIntervalLates || 0);
+  const maxConsecutiveLates = Number(evaluated.maxConsecutiveLates || 0);
+  const consecutiveLateConversions = Number(
+    evaluated.consecutiveLateConversions !== undefined
+      ? evaluated.consecutiveLateConversions
+      : Math.floor(maxConsecutiveLates / 3)
+  );
+
+  const missingScanConversions = Math.floor(missingScans / 4);
+  const intervalLateConversions = Math.floor(intervalLates / 4);
+
+  // Converted Absences: Raw Absences + ⌊Missing Scans / 4⌋ + ⌊Interval Lates / 4⌋ + ⌊Consecutive Lates / 3⌋
+  const convertedAbsences = rawAbsences + missingScanConversions + intervalLateConversions + consecutiveLateConversions;
+
+  const totalFormations = (evaluated.dailyBreakdown && evaluated.dailyBreakdown.length > 0)
+    ? evaluated.dailyBreakdown.length
+    : (formationDates && formationDates.length > 0 ? formationDates.length : 1);
+
+  // Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
+  let adjustedAttendanceRate = 100;
+  if (totalFormations > 0) {
+    const rate = ((totalFormations - convertedAbsences) / totalFormations) * 100;
+    adjustedAttendanceRate = Math.max(0, Math.min(100, Math.round(rate)));
+  }
+
+  return {
+    ...evaluated,
+    rawAbsences,
+    missingScans,
+    intervalLates,
+    consecutiveLateConversions,
+    missingScanConversions,
+    intervalLateConversions,
+    convertedAbsences,
+    totalAbsences: convertedAbsences,
+    totalFormations,
+    adjustedAttendanceRate,
+    complianceRate: adjustedAttendanceRate
+  };
 }

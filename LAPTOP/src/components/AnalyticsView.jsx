@@ -48,6 +48,7 @@ import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import { getSupabaseClient } from '../utils/supabaseClient';
 import {
   evaluateCadetAttendance,
+  calculateCadetAbsences,
   sortCadetAlertsAscending,
   ACTIVE_FORMATION_DATES,
   toDateKey as normalizeDateKey
@@ -394,7 +395,7 @@ export default function AnalyticsView({
       if (client) {
         const { data: cData, error: cErr } = await client
           .from('cadets')
-          .select('id, name, battalion, company, platoon, contact_number, phone, emergency_contact, attendance_logs(date, status, session_date, timestamp, timeIn, timeOut, hasTimeIn, hasTimeOut)');
+          .select('id, name, battalion, company, platoon, contact_number, emergency_contact, attendance_logs(date, status, timestamp, time_in, time_out, scan_mode, final_daily_status, time_in_status, time_out_status)');
         if (!cErr && Array.isArray(cData) && cData.length > 0) {
           cadetsData = cData;
         }
@@ -447,7 +448,7 @@ export default function AnalyticsView({
 
       // 2. Evaluate each cadet against ROTC attendance rules across every active formation date
       const evaluatedList = (cadetsData || []).map((cadet) => {
-        return evaluateCadetAttendance(cadet, sortedFormationDates);
+        return calculateCadetAbsences(cadet, sortedFormationDates);
       });
 
       // Filter only cadets needing admin action and apply ascending multi-level sort
@@ -583,65 +584,82 @@ export default function AnalyticsView({
           });
         }
 
-        const dailyDateMap = new Map();
+        // Track distinct formation dates and unique cadets with actual PRESENT turnout per date
+        const formationDatesSet = new Set();
+        const dailyPresentMap = new Map(); // dateKey -> Set of unique cadet_ids
 
         if (client) {
           const { data: logs, error: logsError } = await client
             .from('attendance_logs')
-            .select('created_at, date, timestamp, status')
-            .in('status', ['PRESENT', 'LATE', 'Present', 'Late']);
+            .select('cadet_id, date, timestamp, status, final_daily_status');
 
           if (!logsError && Array.isArray(logs) && logs.length > 0) {
             logs.forEach(curr => {
-              const rawDate = curr.created_at || curr.date || curr.timestamp;
-              const dateKey = toDateKey(rawDate) || toDateKey(new Date());
-              if (dateKey) {
-                dailyDateMap.set(dateKey, (dailyDateMap.get(dateKey) || 0) + 1);
+              // Always prioritize actual drill date over row creation metadata
+              const rawDate = curr.date || curr.timestamp;
+              const dateKey = toDateKey(rawDate);
+              if (!dateKey) return;
+              formationDatesSet.add(dateKey);
+
+              const cid = String(curr.cadet_id || '').trim().toUpperCase();
+              const st = String(curr.status || curr.final_daily_status || '').toUpperCase();
+              // Actual present turnout: verified PRESENT on-time complete (excluding ABSENT, LATE, or incomplete scans)
+              const isPresent = st === 'PRESENT' || st === 'PRESENT (COMPLETE)' || (st.includes('PRESENT') && !st.includes('ABSENT') && !st.includes('NO TIME-IN'));
+
+              if (cid && isPresent) {
+                if (!dailyPresentMap.has(dateKey)) {
+                  dailyPresentMap.set(dateKey, new Set());
+                }
+                dailyPresentMap.get(dateKey).add(cid);
               }
             });
           } else {
             const { data: sessions, error: sessErr } = await client
               .from('attendance_sessions')
-              .select('session_date, present_count, late_count, total_scanned')
+              .select('session_date, present_count, total_scanned')
               .order('session_date', { ascending: true });
 
             if (!sessErr && Array.isArray(sessions) && sessions.length > 0) {
               sessions.forEach(curr => {
                 const dateKey = toDateKey(curr.session_date);
                 if (dateKey) {
-                  const scanned = (curr.present_count !== undefined || curr.late_count !== undefined)
-                    ? ((curr.present_count || 0) + (curr.late_count || 0))
-                    : ((curr.total_scanned !== undefined && curr.total_scanned !== null) ? curr.total_scanned : 0);
+                  formationDatesSet.add(dateKey);
+                  const presentCount = (curr.present_count !== undefined && curr.present_count !== null)
+                    ? curr.present_count
+                    : (curr.total_scanned || 0);
 
-                  dailyDateMap.set(dateKey, (dailyDateMap.get(dateKey) || 0) + (scanned || 0));
+                  if (!dailyPresentMap.has(dateKey)) {
+                    dailyPresentMap.set(dateKey, new Set());
+                  }
+                  for (let i = 0; i < presentCount; i++) {
+                    dailyPresentMap.get(dateKey).add(`session_present_${i}`);
+                  }
                 }
               });
             }
           }
         }
 
-        if (dailyDateMap.size === 0 && Array.isArray(propsLogs) && propsLogs.length > 0) {
-          const logsByDate = new Map();
+        if (formationDatesSet.size === 0 && Array.isArray(propsLogs) && propsLogs.length > 0) {
           propsLogs.forEach(l => {
-            const rawStatus = String(l.status || l.timeInStatus || l.finalDailyStatus || '').toUpperCase();
-            if (rawStatus === 'PRESENT' || rawStatus === 'LATE' || (rawStatus && rawStatus !== 'ABSENT' && rawStatus !== 'EXCUSED')) {
-              const rawDate = l.date || l.timestamp || l.receivedAt;
-              if (!rawDate) return;
-              const dateKey = toDateKey(rawDate);
-              if (!dateKey) return;
-              if (!logsByDate.has(dateKey)) logsByDate.set(dateKey, new Set());
-              const cid = String(l.cadetId || l.id || '').trim();
-              if (cid) logsByDate.get(dateKey).add(cid);
-            }
-          });
+            const rawDate = l.date || l.session_date || l.timestamp || l.receivedAt;
+            const dateKey = toDateKey(rawDate);
+            if (!dateKey) return;
+            formationDatesSet.add(dateKey);
 
-          logsByDate.forEach((cadetSet, dateKey) => {
-            dailyDateMap.set(dateKey, cadetSet.size);
+            const rawStatus = String(l.status || l.finalDailyStatus || l.timeInStatus || '').toUpperCase();
+            const isPresent = rawStatus === 'PRESENT' || rawStatus === 'PRESENT (COMPLETE)' || (rawStatus.includes('PRESENT') && !rawStatus.includes('ABSENT') && !rawStatus.includes('NO TIME-IN'));
+            const cid = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
+
+            if (cid && isPresent) {
+              if (!dailyPresentMap.has(dateKey)) dailyPresentMap.set(dateKey, new Set());
+              dailyPresentMap.get(dateKey).add(cid);
+            }
           });
         }
 
-        const unitCapacity = totalCount > 0 ? totalCount : 11;
-        const sortedDateKeys = Array.from(dailyDateMap.keys()).sort();
+        const unitCapacity = totalCount > 0 ? totalCount : 33;
+        const sortedDateKeys = Array.from(formationDatesSet).sort();
 
         const labels = sortedDateKeys.map(key => {
           const [y, m, d] = key.split('-').map(Number);
@@ -651,9 +669,10 @@ export default function AnalyticsView({
             : key;
         });
 
+        // Actual Turnout Rate formula: (Actual Present Cadets on Date / Total Cadets Roster) * 100
         const percentageRates = sortedDateKeys.map(key => {
-          const attendedCount = dailyDateMap.get(key) || 0;
-          const rate = Math.round(((attendedCount || 0) / unitCapacity) * 100);
+          const presentCadetsCount = dailyPresentMap.has(key) ? dailyPresentMap.get(key).size : 0;
+          const rate = Math.round((presentCadetsCount / unitCapacity) * 100);
           return rate > 100 ? 100 : (rate < 0 ? 0 : rate);
         });
 
@@ -1138,11 +1157,11 @@ export default function AnalyticsView({
       {/* SECTION 1: TOP MUSTER & ENROLLMENT TRENDS ROW (3 EQUAL COLUMNS)           */}
       {/* 1. Cadet Growth (1 col) | 2. Attendance Trend (1 col) | 3. Today's Donut (1 col) */}
       {/* ========================================================================= */}
-      <div 
-        className="grid grid-cols-1 lg:grid-cols-3" 
-        style={{ 
-          display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', 
+      <div
+        className="grid grid-cols-1 lg:grid-cols-3"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
           gap: '1.5rem',
           alignItems: 'stretch'
         }}
@@ -1575,7 +1594,7 @@ export default function AnalyticsView({
             </div>
             <div>
               <h3 style={{ fontSize: '0.92rem', fontWeight: 800, color: '#0f172a', textTransform: 'uppercase', letterSpacing: '0.04em', margin: 0 }}>
-                Cadet Attendance Performance & Drop Alerts
+                Cadet Attendance Performance
               </h3>
               <p style={{ fontSize: '0.74rem', color: '#64748b', margin: '2px 0 0 0' }}>
                 Automated monitoring for dropped cadets and threshold warnings.
@@ -1717,6 +1736,22 @@ export default function AnalyticsView({
                           boxShadow: '0 1px 3px rgba(225, 29, 72, 0.3)'
                         }}>
                           <AlertOctagon size={12} /> DROPPED
+                        </span>
+                      ) : (cadet.badgeLabel && cadet.badgeLabel !== 'WARNING' && cadet.badgeLabel !== 'DROPPED' && cadet.badgeLabel !== 'GOOD') || cadet.status === 'PENALTY / WARNING' || cadet.status?.includes('PENALTY') ? (
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '4px',
+                          padding: '4px 10px',
+                          borderRadius: '8px',
+                          backgroundColor: '#ea580c',
+                          color: '#ffffff',
+                          fontWeight: 800,
+                          fontSize: '0.68rem',
+                          boxShadow: '0 1px 3px rgba(234, 88, 12, 0.3)'
+                        }}>
+                          <AlertTriangle size={12} /> {cadet.badgeLabel || 'PENALTY / WARNING'}
                         </span>
                       ) : (
                         <span style={{
@@ -1928,12 +1963,12 @@ export default function AnalyticsView({
                   width: '44px',
                   height: '44px',
                   borderRadius: '12px',
-                  backgroundColor: evidenceCadet.status === 'DROPPED' ? '#fff1f2' : '#fef3c7',
-                  border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : '#fde68a'}`,
+                  backgroundColor: evidenceCadet.status === 'DROPPED' ? '#fff1f2' : (evidenceCadet.status?.includes('PENALTY') ? '#fff7ed' : '#fef3c7'),
+                  border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : (evidenceCadet.status?.includes('PENALTY') ? '#fed7aa' : '#fde68a')}`,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : '#d97706'
+                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : (evidenceCadet.status?.includes('PENALTY') ? '#ea580c' : '#d97706')
                 }}>
                   {evidenceCadet.status === 'DROPPED' ? <AlertOctagon size={24} /> : <AlertTriangle size={24} />}
                 </div>
@@ -2108,7 +2143,7 @@ export default function AnalyticsView({
                     {evidenceCadet.totalIntervalLates || 0}
                   </span>
                   <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748b' }}>
-                    (+{evidenceCadet.lateConversions || 0} Abs)
+                    (+{(evidenceCadet.lateConversions || 0) + (evidenceCadet.consecutiveLateConversions || 0)} Abs)
                   </span>
                 </div>
               </div>
@@ -2158,8 +2193,8 @@ export default function AnalyticsView({
 
               {/* Card 5: Rule Status */}
               <div style={{
-                backgroundColor: evidenceCadet.status === 'DROPPED' ? '#ffe4e6' : '#fef3c7',
-                border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : '#fde68a'}`,
+                backgroundColor: evidenceCadet.status === 'DROPPED' ? '#ffe4e6' : (evidenceCadet.status?.includes('PENALTY') ? '#fff7ed' : '#fef3c7'),
+                border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : (evidenceCadet.status?.includes('PENALTY') ? '#fed7aa' : '#fde68a')}`,
                 borderRadius: '12px',
                 padding: '0.75rem 0.5rem',
                 display: 'flex',
@@ -2175,7 +2210,7 @@ export default function AnalyticsView({
                   justifyContent: 'center',
                   fontSize: '0.68rem',
                   fontWeight: 800,
-                  color: evidenceCadet.status === 'DROPPED' ? '#9f1239' : '#92400e',
+                  color: evidenceCadet.status === 'DROPPED' ? '#9f1239' : (evidenceCadet.status?.includes('PENALTY') ? '#9a3412' : '#92400e'),
                   textTransform: 'uppercase',
                   letterSpacing: '0.02em',
                   lineHeight: 1.15
@@ -2189,7 +2224,7 @@ export default function AnalyticsView({
                   justifyContent: 'center',
                   fontSize: '0.85rem',
                   fontWeight: 900,
-                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : '#d97706',
+                  color: evidenceCadet.status === 'DROPPED' ? '#e11d48' : (evidenceCadet.status?.includes('PENALTY') ? '#ea580c' : '#d97706'),
                   textTransform: 'uppercase',
                   lineHeight: 1
                 }}>

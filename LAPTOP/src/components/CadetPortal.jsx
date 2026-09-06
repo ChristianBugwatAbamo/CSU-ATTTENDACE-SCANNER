@@ -35,8 +35,8 @@ import {
   fetchAttendanceSessionsFromSupabase,
   fetchCadetByCadetId
 } from '../utils/supabaseClient';
-import { evaluateCadetAttendance, toDateKey } from '../utils/attendanceRules';
-import { formatDisplayTime } from '../utils/attendanceStatus';
+import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey } from '../utils/attendanceRules';
+import { formatDisplayTime, parseTimeToMinutes, parseCutoffMinutes } from '../utils/attendanceStatus';
 import IDCardPreview from './IDCardPreview';
 
 // Format YYYY-MM-DD into a friendly, student-readable date (e.g., "Thu, Sep 3, 2026")
@@ -239,7 +239,7 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   // 1. Official ROTC Rule Engine Evaluation
   const evaluated = useMemo(() => {
-    return evaluateCadetAttendance(
+    return calculateCadetAbsences(
       {
         ...cadet,
         attendance_logs: logs
@@ -248,7 +248,7 @@ export default function CadetPortal({ cadet, onLogout }) {
     );
   }, [cadet, logs, formationDates]);
 
-  // Determine official drop and warning states
+  // Determine official drop, warning, and penalty states
   const isDropped = Boolean(
     evaluated.status === 'DROPPED' ||
     cadet.status === 'DROPPED' ||
@@ -256,7 +256,13 @@ export default function CadetPortal({ cadet, onLogout }) {
     cadet.is_dropped
   );
 
-  const isWarning = !isDropped && Boolean(
+  const isPenalty = !isDropped && Boolean(
+    evaluated.status === 'PENALTY / WARNING' ||
+    evaluated.status?.includes('PENALTY') ||
+    evaluated.badgeLabel?.startsWith('Penalized')
+  );
+
+  const isWarning = !isDropped && !isPenalty && Boolean(
     evaluated.status === 'WARNING' ||
     evaluated.totalAbsences >= 2 ||
     cadet.status === 'WARNING'
@@ -265,14 +271,7 @@ export default function CadetPortal({ cadet, onLogout }) {
   // 2. Synchronized Attendance Metrics
   const metrics = useMemo(() => {
     // Total Drill Sessions: Total drill events published in Supabase
-    const totalFormations = evaluated.dailyBreakdown.length || formationDates.length || logs.length || 0;
-
-    // Sessions Attended: Count of logs matching STATUS == 'PRESENT', 'LATE', or 'NO TIME-OUT'
-    const attendedSessions = evaluated.dailyBreakdown.filter(d => {
-      if (!d.isRecorded) return false;
-      const s = String(d.status || d.dayType || '').toUpperCase();
-      return s.includes('PRESENT') || s.includes('LATE') || s.includes('NO TIME-OUT') || s.includes('NO TIME-IN');
-    }).length;
+    const totalFormations = evaluated.totalFormations || evaluated.dailyBreakdown.length || formationDates.length || logs.length || 0;
 
     const onTimeCount = evaluated.dailyBreakdown.filter(d =>
       d.isRecorded && String(d.status || '').toUpperCase() === 'PRESENT'
@@ -282,55 +281,129 @@ export default function CadetPortal({ cadet, onLogout }) {
       d.isRecorded && String(d.status || '').toUpperCase().includes('LATE')
     ).length;
 
-    // Total Absences: Total Drill Sessions - Sessions Attended
-    const absences = Math.max(0, totalFormations - attendedSessions);
-    const unexcused = evaluated.unexcusedAbsences;
+    // Converted Absences: Raw Absences + ⌊Missing Scans/4⌋ + ⌊Interval Lates/4⌋ + ⌊Consecutive Lates/3⌋
+    const convertedAbsences = evaluated.convertedAbsences ?? evaluated.totalAbsences ?? 0;
+    const unexcused = evaluated.rawAbsences ?? evaluated.unexcusedAbsences ?? 0;
     const lates = lateCount || evaluated.totalIntervalLates;
     const missingScans = evaluated.totalIntervalMissingScans;
     const maxConsecutive = evaluated.maxConsecutiveAbsences;
 
-    let complianceRate = 0;
-    if (totalFormations > 0) {
-      complianceRate = Math.round((attendedSessions / totalFormations) * 100);
-    }
+    // Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
+    const complianceRate = evaluated.adjustedAttendanceRate ?? (
+      totalFormations > 0
+        ? Math.max(0, Math.min(100, Math.round(((totalFormations - convertedAbsences) / totalFormations) * 100)))
+        : 100
+    );
 
     return {
       totalFormations,
-      attendedSessions,
+      attendedSessions: Math.max(0, totalFormations - convertedAbsences),
       presentDays: onTimeCount,
       lates: lateCount,
       missingScans,
-      absences,
+      absences: convertedAbsences,
       unexcused,
       maxConsecutive,
       complianceRate,
-      status: isDropped ? 'DROPPED' : isWarning ? 'WARNING' : 'GOOD',
+      status: isDropped ? 'DROPPED' : isPenalty ? (evaluated.badgeLabel || 'PENALTY / WARNING') : isWarning ? 'WARNING' : 'GOOD',
       reason: evaluated.reason
     };
-  }, [evaluated, formationDates, logs, isDropped, isWarning]);
+  }, [evaluated, formationDates, logs, isDropped, isPenalty, isWarning]);
 
   // Counts for filter pills
   const counts = useMemo(() => {
     const all = evaluated.dailyBreakdown;
-    const present = all.filter(s => s.isRecorded && (s.dayType === 'PRESENT' || s.status === 'PRESENT') && !s.status.includes('LATE')).length;
-    const late = all.filter(s => s.isRecorded && s.status.includes('LATE')).length;
-    const noTimeOut = all.filter(s => s.isRecorded && (s.hasTimeIn && !s.hasTimeOut || s.status.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT')).length;
-    const absent = all.filter(s => !s.isRecorded || s.status.includes('ABSENT') || s.dayType === 'UNRECORDED').length;
+    const isValidTime = (val) => {
+      if (!val) return false;
+      const s = String(val).trim().toUpperCase();
+      return s !== '' && s !== '—' && s !== '-' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+    };
+
+    const present = all.filter(s => {
+      if (!s.isRecorded) return false;
+      const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+      const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+      const st = String(s.status || s.dayType || '').toUpperCase();
+      return hasIn && hasOut && (s.dayType === 'PRESENT' || st.includes('PRESENT')) && !st.includes('LATE') && !st.includes('ABSENT');
+    }).length;
+
+    const late = all.filter(s => {
+      if (!s.isRecorded) return false;
+      const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+      const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+      const st = String(s.status || s.dayType || '').toUpperCase();
+      return hasIn && hasOut && (st.includes('LATE') || s.dayType === 'LATE');
+    }).length;
+
+    // Incomplete Scans: Captures BOTH missing Time-In (!hasTimeIn && hasTimeOut) and missing Time-Out (hasTimeIn && !hasTimeOut)
+    const noTimeOut = all.filter(s => {
+      if (!s.isRecorded) return false;
+      const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+      const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+      const st = String(s.status || s.dayType || '').toUpperCase();
+      const isMissingTimeOut = (hasIn && !hasOut) || st.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT';
+      const isMissingTimeIn = (!hasIn && hasOut) || st.includes('NO TIME-IN') || s.dayType === 'NO TIME-IN';
+      return isMissingTimeOut || isMissingTimeIn;
+    }).length;
+
+    // Converted Absences reflected in absent count
+    const absent = evaluated.convertedAbsences !== undefined
+      ? evaluated.convertedAbsences
+      : (evaluated.totalAbsences ?? all.filter(s => {
+        if (!s.isRecorded) return true;
+        const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+        const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+        const st = String(s.status || s.dayType || '').toUpperCase();
+        return (!hasIn && !hasOut) || st.includes('ABSENT') || s.dayType === 'UNRECORDED' || s.dayType === 'ABSENT';
+      }).length);
+
     return { all: all.length, present, late, noTimeOut, absent };
-  }, [evaluated.dailyBreakdown]);
+  }, [evaluated]);
 
   // 3. Filtered Formation Schedule
   const displaySchedule = useMemo(() => {
     let sessions = [...evaluated.dailyBreakdown].sort((a, b) => b.date.localeCompare(a.date));
 
+    const isValidTime = (val) => {
+      if (!val) return false;
+      const s = String(val).trim().toUpperCase();
+      return s !== '' && s !== '—' && s !== '-' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+    };
+
     if (statusFilter === 'PRESENT') {
-      sessions = sessions.filter(s => s.isRecorded && (s.dayType === 'PRESENT' || s.status === 'PRESENT') && !s.status.includes('LATE'));
+      sessions = sessions.filter(s => {
+        if (!s.isRecorded) return false;
+        const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+        const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+        const st = String(s.status || s.dayType || '').toUpperCase();
+        return hasIn && hasOut && (s.dayType === 'PRESENT' || st.includes('PRESENT')) && !st.includes('LATE') && !st.includes('ABSENT');
+      });
     } else if (statusFilter === 'LATE') {
-      sessions = sessions.filter(s => s.isRecorded && s.status.includes('LATE'));
-    } else if (statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME IN/OUT') {
-      sessions = sessions.filter(s => s.isRecorded && (s.hasTimeIn && !s.hasTimeOut || s.status.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT'));
+      sessions = sessions.filter(s => {
+        if (!s.isRecorded) return false;
+        const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+        const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+        const st = String(s.status || s.dayType || '').toUpperCase();
+        return hasIn && hasOut && (st.includes('LATE') || s.dayType === 'LATE');
+      });
+    } else if (statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-IN') {
+      sessions = sessions.filter(s => {
+        if (!s.isRecorded) return false;
+        const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+        const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+        const st = String(s.status || s.dayType || '').toUpperCase();
+        const isMissingTimeOut = (hasIn && !hasOut) || st.includes('NO TIME-OUT') || s.dayType === 'NO TIME-OUT';
+        const isMissingTimeIn = (!hasIn && hasOut) || st.includes('NO TIME-IN') || s.dayType === 'NO TIME-IN';
+        return isMissingTimeOut || isMissingTimeIn;
+      });
     } else if (statusFilter === 'ABSENT') {
-      sessions = sessions.filter(s => !s.isRecorded || s.status.includes('ABSENT') || s.dayType === 'UNRECORDED');
+      sessions = sessions.filter(s => {
+        if (!s.isRecorded) return true;
+        const hasIn = s.hasTimeIn !== undefined ? (s.hasTimeIn && isValidTime(s.timeIn)) : isValidTime(s.timeIn);
+        const hasOut = s.hasTimeOut !== undefined ? (s.hasTimeOut && isValidTime(s.timeOut)) : isValidTime(s.timeOut);
+        const st = String(s.status || s.dayType || '').toUpperCase();
+        return (!hasIn && !hasOut) || st.includes('ABSENT') || s.dayType === 'UNRECORDED' || s.dayType === 'ABSENT';
+      });
     }
 
     if (searchDate.trim()) {
@@ -343,6 +416,73 @@ export default function CadetPortal({ cadet, onLogout }) {
 
     return sessions;
   }, [evaluated.dailyBreakdown, statusFilter, searchDate]);
+
+  // 4. Synthetic Breakdown Rows for Converted Absences (Rules 5, 6, 7)
+  const conversionRows = useMemo(() => {
+    if (statusFilter !== 'ABSENT' || searchDate) return [];
+    const rows = [];
+
+    const missingScans = Number(evaluated.missingScans ?? evaluated.totalIntervalMissingScans ?? 0);
+    const intervalLates = Number(evaluated.intervalLates ?? evaluated.totalIntervalLates ?? 0);
+    const consecutiveLateConversions = Number(evaluated.consecutiveLateConversions ?? 0);
+
+    const missingScanConversions = Math.floor(missingScans / 4);
+    const intervalLateConversions = Math.floor(intervalLates / 4);
+
+    // Rule 7: 4 Missing Scans (No Time-In / Time-Out) -> 1 Converted Absent
+    if (missingScanConversions > 0) {
+      const rem = missingScans % 4;
+      const progressText = rem > 0
+        ? `${missingScans} Missing Scans Total = ${missingScanConversions} Converted Absent + ${rem}/4 toward next penalty`
+        : `${missingScans} Missing Scans Total = ${missingScanConversions} Converted Absent (4/4 penalty threshold met)`;
+
+      rows.push({
+        id: 'rule-7-conversion',
+        ruleCode: 'Rule 7 Conversion',
+        title: 'Rule 7: 4 Cumulative Missing Scans',
+        conversions: missingScanConversions,
+        totalEvents: missingScans,
+        progress: progressText,
+        detail: `Rule 7 Conversion: 4 Cumulative Missing Scans → +${missingScanConversions} Converted Absent`,
+        explanation: 'Automated conversion: Every 4 incomplete scans (missing Time-In or Time-Out) add 1 official absence.'
+      });
+    }
+
+    // Rule 6: 4 Interval Lates -> 1 Converted Absent
+    if (intervalLateConversions > 0) {
+      const rem = intervalLates % 4;
+      const progressText = rem > 0
+        ? `${intervalLates} Interval Lates Total = ${intervalLateConversions} Converted Absent + ${rem}/4 toward next penalty`
+        : `${intervalLates} Interval Lates Total = ${intervalLateConversions} Converted Absent (4/4 penalty threshold met)`;
+
+      rows.push({
+        id: 'rule-6-conversion',
+        ruleCode: 'Rule 6 Conversion',
+        title: 'Rule 6: 4 Interval Lates',
+        conversions: intervalLateConversions,
+        totalEvents: intervalLates,
+        progress: progressText,
+        detail: `Rule 6 Conversion: 4 Cumulative Lates → +${intervalLateConversions} Converted Absent`,
+        explanation: 'Automated conversion: Every 4 cumulative late formations add 1 official absence.'
+      });
+    }
+
+    // Rule 5: 3 Consecutive Lates -> 1 Converted Absent
+    if (consecutiveLateConversions > 0) {
+      rows.push({
+        id: 'rule-5-conversion',
+        ruleCode: 'Rule 5 Conversion',
+        title: 'Rule 5: 3 Consecutive Lates',
+        conversions: consecutiveLateConversions,
+        totalEvents: consecutiveLateConversions * 3,
+        progress: `3 Consecutive Late Formations Streak = +${consecutiveLateConversions} Converted Absent`,
+        detail: `Rule 5 Conversion: 3 Consecutive Lates → +${consecutiveLateConversions} Converted Absent`,
+        explanation: 'Automated conversion: 3 consecutive late formations add 1 official absence.'
+      });
+    }
+
+    return rows;
+  }, [statusFilter, searchDate, evaluated]);
 
   const activeCadet = { ...cadet, ...cadetProfile };
   const cadetId = activeCadet.cadetId || activeCadet.cadet_id || activeCadet.id || 'N/A';
@@ -1201,11 +1341,17 @@ export default function CadetPortal({ cadet, onLogout }) {
                 width: '42px',
                 height: '42px',
                 borderRadius: '10px',
-                background: isDropped ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                background: isDropped
+                  ? 'rgba(239, 68, 68, 0.15)'
+                  : isPenalty
+                    ? 'rgba(234, 88, 12, 0.15)'
+                    : isWarning
+                      ? 'rgba(245, 158, 11, 0.15)'
+                      : 'rgba(16, 185, 129, 0.15)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: isDropped ? '#ef4444' : isWarning ? '#f59e0b' : '#10b981'
+                color: isDropped ? '#ef4444' : isPenalty ? '#ea580c' : isWarning ? '#f59e0b' : '#10b981'
               }}
             >
               <Activity size={22} />
@@ -1217,16 +1363,22 @@ export default function CadetPortal({ cadet, onLogout }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', flexWrap: 'wrap' }}>
                 <span
                   style={{
-                    background: isDropped ? 'rgba(244, 63, 94, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                    color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
-                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                    background: isDropped
+                      ? 'rgba(244, 63, 94, 0.15)'
+                      : isPenalty
+                        ? 'rgba(234, 88, 12, 0.15)'
+                        : isWarning
+                          ? 'rgba(245, 158, 11, 0.15)'
+                          : 'rgba(16, 185, 129, 0.15)',
+                    color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669',
+                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isPenalty ? 'rgba(234, 88, 12, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
                     padding: '2px 8px',
                     borderRadius: '6px',
                     fontSize: '0.78rem',
                     fontWeight: 800
                   }}
                 >
-                  {isDropped ? 'DROPPED FROM ROLLS' : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
+                  {isDropped ? 'DROPPED FROM ROLLS' : isPenalty ? (evaluated.badgeLabel || 'PENALTY / WARNING') : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
                 </span>
                 <span style={{ fontSize: '0.8rem', color: t.textMuted }}>
                   • {metrics.complianceRate}% Attendance ({metrics.attendedSessions} / {metrics.totalFormations} Drills)
@@ -1288,7 +1440,7 @@ export default function CadetPortal({ cadet, onLogout }) {
         <div
           style={{
             background: t.cardBg,
-            border: `1.5px solid ${isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'}`,
+            border: `1.5px solid ${isDropped ? '#f43f5e' : isPenalty ? '#ea580c' : isWarning ? '#f59e0b' : '#10b981'}`,
             borderRadius: '14px',
             padding: '1rem 1.4rem',
             display: 'flex',
@@ -1307,13 +1459,15 @@ export default function CadetPortal({ cadet, onLogout }) {
                 borderRadius: '12px',
                 background: isDropped
                   ? 'rgba(244, 63, 94, 0.12)'
+                  : isPenalty
+                  ? 'rgba(234, 88, 12, 0.12)'
                   : isWarning
                   ? 'rgba(245, 158, 11, 0.12)'
                   : 'rgba(16, 185, 129, 0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'
+                color: isDropped ? '#f43f5e' : isPenalty ? '#ea580c' : isWarning ? '#f59e0b' : '#10b981'
               }}
             >
               <Activity size={22} />
@@ -1327,22 +1481,26 @@ export default function CadetPortal({ cadet, onLogout }) {
                   style={{
                     background: isDropped
                       ? 'rgba(244, 63, 94, 0.15)'
+                      : isPenalty
+                      ? 'rgba(234, 88, 12, 0.15)'
                       : isWarning
                       ? 'rgba(245, 158, 11, 0.15)'
                       : 'rgba(16, 185, 129, 0.15)',
-                    color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
-                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
+                    color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669',
+                    border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isPenalty ? 'rgba(234, 88, 12, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
                     padding: '2px 10px',
                     borderRadius: '6px',
                     fontSize: '0.78rem',
                     fontWeight: 800
                   }}
                 >
-                  {isDropped ? 'DROPPED FROM ROLLS' : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
+                  {isDropped ? 'DROPPED FROM ROLLS' : isPenalty ? (evaluated.badgeLabel || 'PENALTY / WARNING') : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
                 </span>
                 <span style={{ fontSize: '0.8rem', color: t.textMuted }}>
                   {isDropped
                     ? 'Threshold of allowable absences exceeded.'
+                    : isPenalty
+                    ? (evaluated.reason || 'Converted penalty absences applied to record.')
                     : isWarning
                     ? 'Approaching allowable unexcused absence limit.'
                     : 'Compliant with military drill attendance regulations.'}
@@ -1356,7 +1514,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               <div style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>
                 Attendance Rate
               </div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
                 {metrics.complianceRate}%
               </div>
             </div>
@@ -1365,7 +1523,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                 style={{
                   width: `${metrics.complianceRate}%`,
                   height: '100%',
-                  background: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
+                  background: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669',
                   borderRadius: '999px',
                   transition: 'width 0.5s ease'
                 }}
@@ -1629,14 +1787,16 @@ export default function CadetPortal({ cadet, onLogout }) {
     {/* ============================================================ */}
     {activeTab === 'attendance' && (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        {/* Quick alert notice if dropped or warning */}
-        {(isDropped || isWarning) && (
+        {/* Quick alert notice if dropped, penalty, or warning */}
+        {(isDropped || isPenalty || isWarning) && (
           <div
             style={{
               background: isDropped
                 ? (isLight ? '#fff1f2' : 'rgba(225, 29, 72, 0.15)')
+                : isPenalty
+                ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.15)')
                 : (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.15)'),
-              border: `1.5px solid ${isDropped ? '#f43f5e' : '#f59e0b'}`,
+              border: `1.5px solid ${isDropped ? '#f43f5e' : isPenalty ? '#ea580c' : '#f59e0b'}`,
               borderRadius: '12px',
               padding: '0.75rem 1.25rem',
               display: 'flex',
@@ -1647,9 +1807,13 @@ export default function CadetPortal({ cadet, onLogout }) {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              {isDropped ? <AlertOctagon size={18} color="#e11d48" /> : <AlertTriangle size={18} color="#d97706" />}
-              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isDropped ? '#e11d48' : '#d97706' }}>
-                {isDropped ? 'Attendance Warning: Cadet is marked as Dropped from Rolls.' : 'Attendance Alert: Approaching absence threshold.'}
+              {isDropped ? <AlertOctagon size={18} color="#e11d48" /> : <AlertTriangle size={18} color={isPenalty ? '#ea580c' : '#d97706'} />}
+              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: isDropped ? '#e11d48' : isPenalty ? '#c2410c' : '#d97706' }}>
+                {isDropped
+                  ? 'Attendance Warning: Cadet is marked as Dropped from Rolls.'
+                  : isPenalty
+                  ? `Attendance Penalty: ${evaluated.badgeLabel || evaluated.reason || 'Converted Absences Applied'} (${metrics.absences} Converted Absent).`
+                  : 'Attendance Alert: Approaching absence threshold.'}
               </span>
             </div>
             <button
@@ -1819,20 +1983,20 @@ export default function CadetPortal({ cadet, onLogout }) {
           {/* Card 4: NO TIME IN/OUT */}
           <div
             style={{
-              background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT')
+              background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN')
                 ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
                 : t.cardBg,
-              border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : t.cardBorder}`,
-              borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
+              border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : t.cardBorder}`,
+              borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
               borderRadius: '12px',
               padding: '1.1rem 1.25rem',
               cursor: 'pointer',
-              outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
+              outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '2px solid #ea580c' : 'none',
               boxShadow: t.cardShadow,
               transition: 'all 0.15s ease'
             }}
-            onClick={() => handleStatusCardClick('NO TIME-OUT')}
-            title="Click to filter table: Incomplete time-in/out records"
+            onClick={() => handleStatusCardClick('NO TIME IN/OUT')}
+            title="Click to filter table: Incomplete time-in or time-out records"
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
               <div
@@ -1859,7 +2023,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               </div>
             </div>
             <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
+              {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
             </div>
           </div>
 
@@ -1962,7 +2126,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                     color: isLight ? '#065f46' : '#34d399'
                   }}
                 >
-                  <span>Active Filter: <strong>{statusFilter}</strong> ({displaySchedule.length})</span>
+                  <span>Active Filter: <strong>{statusFilter}</strong> ({displaySchedule.length + (statusFilter === 'ABSENT' ? conversionRows.length : 0)})</span>
                   <button
                     type="button"
                     onClick={() => setStatusFilter('ALL')}
@@ -2089,7 +2253,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                       <div>Loading attendance evaluation records...</div>
                     </td>
                   </tr>
-                ) : displaySchedule.length === 0 ? (
+                ) : (displaySchedule.length === 0 && conversionRows.length === 0) ? (
                   <tr>
                     <td colSpan={5} style={{ padding: '3rem', textAlign: 'center', color: t.textMuted }}>
                       <Calendar size={32} style={{ margin: '0 auto 0.5rem auto', opacity: 0.4 }} />
@@ -2102,7 +2266,109 @@ export default function CadetPortal({ cadet, onLogout }) {
                     </td>
                   </tr>
                 ) : (
-                  displaySchedule.map((entry, idx) => {
+                  <>
+                    {/* Synthetic Breakdown Rows for Converted Absences (Rules 5, 6, 7) */}
+                    {conversionRows.map((row) => (
+                      <tr
+                        key={row.id}
+                        style={{
+                          borderBottom: `1px solid ${t.tableRowBorder}`,
+                          background: isLight ? 'rgba(254, 242, 242, 0.7)' : 'rgba(239, 68, 68, 0.08)',
+                          borderLeft: '4px solid #ef4444',
+                          transition: 'background-color 0.15s ease'
+                        }}
+                      >
+                        {/* Drill Date Column */}
+                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.74rem',
+                                fontWeight: 800,
+                                color: isLight ? '#b45309' : '#fbbf24',
+                                background: isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.18)',
+                                border: `1px solid ${isLight ? '#fde68a' : 'rgba(245, 158, 11, 0.4)'}`,
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.4px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}
+                            >
+                              <AlertTriangle size={12} />
+                              {row.ruleCode}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: t.textMuted, marginTop: '4px' }}>
+                            Automated Penalty Conversion
+                          </div>
+                        </td>
+
+                        {/* Time In Column */}
+                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                          <span
+                            style={{
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              color: t.textSubtle,
+                              fontStyle: 'italic'
+                            }}
+                          >
+                            — Penalty System —
+                          </span>
+                        </td>
+
+                        {/* Time Out Column */}
+                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                          <span
+                            style={{
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              color: t.textSubtle,
+                              fontStyle: 'italic'
+                            }}
+                          >
+                            — Rule Engine —
+                          </span>
+                        </td>
+
+                        {/* Attendance Status Column */}
+                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                          <span
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                              background: isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.18)',
+                              border: `1px solid ${isLight ? '#fca5a5' : 'rgba(239, 68, 68, 0.4)'}`,
+                              color: isLight ? '#b91c1c' : '#f87171',
+                              padding: '3px 9px',
+                              borderRadius: '6px',
+                              fontSize: '0.74rem',
+                              fontWeight: 800
+                            }}
+                          >
+                            <AlertOctagon size={13} />
+                            <span>CONVERTED ABSENT (+{row.conversions})</span>
+                          </span>
+                        </td>
+
+                        {/* Remarks / Rule Impact Column */}
+                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                          <div style={{ fontWeight: 800, color: isLight ? '#b91c1c' : '#f87171', fontSize: '0.82rem' }}>
+                            {row.detail}
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: isLight ? '#92400e' : '#fbbf24', marginTop: '3px', fontWeight: 600 }}>
+                            {row.progress}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* Formation Drill Schedule Rows */}
+                    {displaySchedule.map((entry, idx) => {
                     const rawDate = entry.date || 'N/A';
                     const friendlyDate = formatFriendlyDate(rawDate);
                     const activeCutoffTime = settings?.formation_cutoff_time || settings?.formationCutoffTime || settings?.morningCutoffTime || '07:30';
@@ -2112,18 +2378,40 @@ export default function CadetPortal({ cadet, onLogout }) {
                     const isValidTime = (val) => {
                       if (!val) return false;
                       const s = String(val).trim().toUpperCase();
-                      return s !== '' && s !== '—' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
+                      return s !== '' && s !== '—' && s !== '-' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
                     };
 
-                    const hasTimeIn = isValidTime(entry.timeIn);
-                    const hasTimeOut = isValidTime(entry.timeOut);
+                    const hasTimeIn = Boolean(
+                      entry.hasTimeIn !== undefined
+                        ? (entry.hasTimeIn && isValidTime(entry.timeIn))
+                        : isValidTime(entry.timeIn)
+                    );
+                    const hasTimeOut = Boolean(
+                      entry.hasTimeOut !== undefined
+                        ? (entry.hasTimeOut && isValidTime(entry.timeOut))
+                        : isValidTime(entry.timeOut)
+                    );
                     const timeInStr = hasTimeIn ? formatDisplayTime(entry.timeIn) : null;
                     const timeOutStr = hasTimeOut ? formatDisplayTime(entry.timeOut) : null;
                     const isRecorded = entry.isRecorded;
                     const rawStatus = String(entry.status || '').toUpperCase();
-                    const isLate = rawStatus.includes('LATE') || entry.dayType === 'LATE' || Boolean(entry.isLate);
+                    
+                    let isLate = rawStatus.includes('LATE') || entry.dayType === 'LATE' || Boolean(entry.isLate);
+                    if (!isLate && hasTimeIn && sessionCutoff) {
+                      try {
+                        const timeInMins = parseTimeToMinutes(entry.timeIn);
+                        const cutoffMins = parseCutoffMinutes(sessionCutoff);
+                        if (!isNaN(timeInMins) && !isNaN(cutoffMins) && timeInMins > cutoffMins) {
+                          isLate = true;
+                        }
+                      } catch (_) {}
+                    }
 
-                    // Reconcile status badges cleanly
+                    // Reconcile status badges cleanly per official rules:
+                    // 1. hasTimeIn && !hasTimeOut -> Status: NO TIME-OUT
+                    // 2. !hasTimeIn && hasTimeOut -> Status: NO TIME-IN
+                    // 3. !hasTimeIn && !hasTimeOut -> Status: ABSENT
+                    // 4. hasTimeIn && hasTimeOut  -> Status: PRESENT (or LATE based on cut-off)
                     let badgeLabel = 'Absent';
                     let badgeBg = isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.12)';
                     let badgeBorder = isLight ? '#fca5a5' : 'rgba(239, 68, 68, 0.35)';
@@ -2131,13 +2419,13 @@ export default function CadetPortal({ cadet, onLogout }) {
                     let badgeIcon = <XCircle size={13} />;
                     let remarkText = entry.penaltyLabel || 'Unrecorded Formation Day';
 
-                    if (!isRecorded || rawStatus.includes('UNRECORDED') || rawStatus === 'ABSENT') {
-                      badgeLabel = 'Absent';
-                      badgeBg = isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.12)';
-                      badgeBorder = isLight ? '#fca5a5' : 'rgba(239, 68, 68, 0.35)';
-                      badgeColor = isLight ? '#b91c1c' : '#f87171';
-                      badgeIcon = <XCircle size={13} />;
-                      remarkText = entry.penaltyLabel || 'Unrecorded Formation Day';
+                    if (rawStatus.includes('EXCUSED')) {
+                      badgeLabel = 'Excused';
+                      badgeBg = isLight ? '#f3e8ff' : 'rgba(167, 139, 250, 0.15)';
+                      badgeBorder = isLight ? '#e9d5ff' : 'rgba(167, 139, 250, 0.4)';
+                      badgeColor = isLight ? '#7e22ce' : '#a78bfa';
+                      badgeIcon = <Shield size={13} />;
+                      remarkText = 'Official Excused Absence (No penalty)';
                     } else if (hasTimeIn && !hasTimeOut) {
                       badgeLabel = isLate ? 'Late / No Time-Out' : 'No Time-Out';
                       badgeBg = isLate
@@ -2148,28 +2436,46 @@ export default function CadetPortal({ cadet, onLogout }) {
                         : (isLight ? '#fed7aa' : 'rgba(249, 115, 22, 0.4)');
                       badgeColor = isLate ? '#ea580c' : (isLight ? '#c2410c' : '#fb923c');
                       badgeIcon = <Clock size={13} color={badgeColor} />;
-                      remarkText = 'Missing Time-Out Scan (+1/4 session penalty)';
-                    } else if (isLate) {
-                      badgeLabel = 'Late (Tardy)';
-                      badgeBg = isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.15)';
-                      badgeBorder = isLight ? '#fde68a' : 'rgba(217, 119, 6, 0.4)';
-                      badgeColor = '#d97706';
-                      badgeIcon = <Clock size={13} color="#d97706" />;
-                      remarkText = 'Late scan (+0.25 interval penalty)';
-                    } else if (rawStatus.includes('EXCUSED')) {
-                      badgeLabel = 'Excused';
-                      badgeBg = isLight ? '#f3e8ff' : 'rgba(167, 139, 250, 0.15)';
-                      badgeBorder = isLight ? '#e9d5ff' : 'rgba(167, 139, 250, 0.4)';
-                      badgeColor = isLight ? '#7e22ce' : '#a78bfa';
-                      badgeIcon = <Shield size={13} />;
-                      remarkText = 'Official Excused Absence (No penalty)';
+                      remarkText = isLate
+                        ? 'Late scan & Missing Time-Out Scan (+0.50 penalty)'
+                        : 'Missing Time-Out Scan (+1/4 session penalty)';
+                    } else if (!hasTimeIn && hasTimeOut) {
+                      badgeLabel = 'No Time-In';
+                      badgeBg = isLight ? '#ffedd5' : 'rgba(249, 115, 22, 0.15)';
+                      badgeBorder = isLight ? '#fed7aa' : 'rgba(249, 115, 22, 0.4)';
+                      badgeColor = isLight ? '#c2410c' : '#fb923c';
+                      badgeIcon = <Clock size={13} color={badgeColor} />;
+                      remarkText = 'Missing Time-In Scan (+1/4 session penalty)';
+                    } else if (!hasTimeIn && !hasTimeOut || !isRecorded || rawStatus.includes('UNRECORDED') || rawStatus === 'ABSENT') {
+                      badgeLabel = 'Absent';
+                      badgeBg = isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.12)';
+                      badgeBorder = isLight ? '#fca5a5' : 'rgba(239, 68, 68, 0.35)';
+                      badgeColor = isLight ? '#b91c1c' : '#f87171';
+                      badgeIcon = <XCircle size={13} />;
+                      remarkText = entry.penaltyLabel || 'Official Absent / Unrecorded Formation Day';
+                    } else if (hasTimeIn && hasTimeOut) {
+                      if (isLate) {
+                        badgeLabel = 'Late (Tardy)';
+                        badgeBg = isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.15)';
+                        badgeBorder = isLight ? '#fde68a' : 'rgba(217, 119, 6, 0.4)';
+                        badgeColor = '#d97706';
+                        badgeIcon = <Clock size={13} color="#d97706" />;
+                        remarkText = entry.penaltyLabel || 'Late scan (+0.25 interval penalty)';
+                      } else {
+                        badgeLabel = 'Present';
+                        badgeBg = isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.15)';
+                        badgeBorder = isLight ? '#bbf7d0' : 'rgba(16, 185, 129, 0.4)';
+                        badgeColor = isLight ? '#15803d' : '#34d399';
+                        badgeIcon = <CheckCircle2 size={13} />;
+                        remarkText = 'Verified Formation Attendance (Compliant)';
+                      }
                     } else {
-                      badgeLabel = 'Present';
-                      badgeBg = isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.15)';
-                      badgeBorder = isLight ? '#bbf7d0' : 'rgba(16, 185, 129, 0.4)';
-                      badgeColor = isLight ? '#15803d' : '#34d399';
-                      badgeIcon = <CheckCircle2 size={13} />;
-                      remarkText = 'Verified Formation Attendance (Compliant)';
+                      badgeLabel = 'Absent';
+                      badgeBg = isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.12)';
+                      badgeBorder = isLight ? '#fca5a5' : 'rgba(239, 68, 68, 0.35)';
+                      badgeColor = isLight ? '#b91c1c' : '#f87171';
+                      badgeIcon = <XCircle size={13} />;
+                      remarkText = entry.penaltyLabel || 'Unrecorded Formation Day';
                     }
 
                     return (
@@ -2237,6 +2543,23 @@ export default function CadetPortal({ cadet, onLogout }) {
                                 {timeInStr}
                               </span>
                             </div>
+                          ) : hasTimeOut ? (
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                background: isLight ? '#ffedd5' : 'rgba(249, 115, 22, 0.12)',
+                                border: isLight ? '1px solid #fed7aa' : '1px solid rgba(249, 115, 22, 0.3)',
+                                color: isLight ? '#c2410c' : '#fb923c',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              No Time-In
+                            </span>
                           ) : (
                             <span style={{ color: t.textSubtle, fontSize: '0.8rem' }}>—</span>
                           )}
@@ -2285,8 +2608,9 @@ export default function CadetPortal({ cadet, onLogout }) {
                         </td>
                       </tr>
                     );
-                  })
-                )}
+                  })}
+                </>
+              )}
               </tbody>
             </table>
           </div>
