@@ -1507,23 +1507,36 @@ export async function fetchCadetByCadetId(rawCadetId) {
         .eq('id', cleanId)
         .maybeSingle();
 
+      // If not found by id, query by student_id or email
+      if (!data) {
+        const studentRes = await supabase
+          .from('cadets')
+          .select('*')
+          .or(`student_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
+          .maybeSingle();
+        if (studentRes.data) {
+          data = studentRes.data;
+          error = studentRes.error;
+        }
+      }
+
       // If not found with raw input, try with dashed format (e.g. "22100003" -> "221-00003")
       if (!data && dashedId !== cleanId) {
         const dashedRes = await supabase
           .from('cadets')
           .select('*')
-          .eq('id', dashedId)
+          .or(`id.eq.${dashedId},student_id.eq.${dashedId}`)
           .maybeSingle();
         data = dashedRes.data;
         error = dashedRes.error;
       }
 
-      // If still not found, try ilike match on id
+      // If still not found, try ilike match on id, student_id, or email
       if (!data) {
         const ilikeRes = await supabase
           .from('cadets')
           .select('*')
-          .ilike('id', `%${cleanId}%`)
+          .or(`id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%,email.ilike.%${cleanId}%`)
           .limit(1)
           .maybeSingle();
         data = ilikeRes.data;
@@ -1569,9 +1582,19 @@ export async function fetchCadetByCadetId(rawCadetId) {
       if (Array.isArray(roster)) {
         const found = roster.find(c => {
           const cId = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+          const sId = String(c.student_id || c.studentId || '').trim().toUpperCase();
+          const email = String(c.email || '').trim().toLowerCase();
           const cleanInput = cleanId.replace(/[^A-Z0-9]/gi, '');
           const cleanCId = cId.replace(/[^A-Z0-9]/gi, '');
-          return cId === cleanId || cleanCId === cleanInput || cId === dashedId;
+          const cleanSId = sId.replace(/[^A-Z0-9]/gi, '');
+          return (
+            cId === cleanId ||
+            cleanCId === cleanInput ||
+            cId === dashedId ||
+            sId === cleanId ||
+            (cleanSId && cleanSId === cleanInput) ||
+            (email && email === cleanId.toLowerCase())
+          );
         });
         if (found) return found;
       }

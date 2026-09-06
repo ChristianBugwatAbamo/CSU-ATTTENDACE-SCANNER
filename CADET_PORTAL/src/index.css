@@ -1690,5 +1690,388 @@ body {
   }
 }
 
+/* Cadet Portal Landing Page: 5-Logo Row Responsive Scrolling */
+.cadet-logos-banner-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  justify-content: safe center;
+  flex-wrap: nowrap !important;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(229, 169, 0, 0.35) transparent;
+}
+
+.cadet-logos-banner-container::-webkit-scrollbar {
+  height: 4px;
+}
+
+.cadet-logos-banner-container::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 9999px;
+}
+
+.cadet-logos-banner-container::-webkit-scrollbar-thumb {
+  background: rgba(229, 169, 0, 0.4);
+  border-radius: 9999px;
+}
+
+.cadet-logos-banner-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(229, 169, 0, 0.7);
+}
+
+/* Dropped Status Alert Banner: Responsive Layout */
+.dropped-alert-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .dropped-alert-container {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+}
+
+.dropped-alert-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .dropped-alert-btn {
+    width: auto;
+  }
+}
+
+/* Cadet Profile Card: Mobile & Responsive Enhancements */
+.cadet-profile-card {
+  padding: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+.cadet-profile-header-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .cadet-profile-header-container {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.25rem;
+  }
+}
+
+.cadet-profile-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.cadet-profile-name {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  line-height: 1.25;
+  font-size: 1.125rem; /* text-lg */
+  word-break: break-word;
+}
+
+@media (min-width: 640px) {
+  .cadet-profile-name {
+    font-size: 1.25rem; /* sm:text-xl */
+  }
+}
+
+.cadet-profile-id-btn {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .cadet-profile-id-btn {
+    width: auto;
+  }
+}
+
+/* Cadet Profile Details 2-Column Grid (grid-cols-2) */
+.cadet-profile-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 0.75rem;
+  border-radius: 12px;
+  padding: 0.95rem 1rem;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.grid-cols-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.text-lg {
+  font-size: 1.125rem;
+  line-height: 1.4;
+}
+
+@media (min-width: 640px) {
+  .sm\:text-xl {
+    font-size: 1.25rem;
+    line-height: 1.4;
+  }
+}
+
+@media (min-width: 768px) {
+  .cadet-profile-details-grid {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) !important;
+    gap: 1rem;
+    padding: 1.1rem 1.25rem;
+  }
+}
+
+/* Assigned Formation Section & Tag Wrapping */
+.cadet-formation-strip {
+  border-top: 1px solid var(--border-color, #e5e7eb);
+  padding-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .cadet-formation-strip {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.85rem;
+  }
+}
+
+.cadet-formation-label {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.cadet-formation-tags-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  white-space: nowrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  scrollbar-width: none;
+}
+
+.cadet-formation-tags-wrap::-webkit-scrollbar {
+  display: none;
+}
+
+.cadet-formation-pill {
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.25;
+}
+
+.cadet-formation-pill-battalion {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+}
+
+.cadet-formation-pill-company {
+  background-color: #d1fae5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.cadet-formation-pill-platoon {
+  background-color: #fef3c7;
+  color: #78350f;
+  border: 1px solid #fcd34d;
+  font-weight: 800;
+}
+
+/* Cadet Statistics Container: Mobile 2-Column Grid (grid-cols-2) & Sticky Header Protection */
+.cadet-stats-section {
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.overflow-hidden {
+  overflow: hidden !important;
+}
+
+.cadet-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.col-span-2 {
+  grid-column: span 2 / span 2 !important;
+}
+
+@media (min-width: 768px) {
+  .cadet-stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+    gap: 1rem;
+  }
+
+  .cadet-stat-card-total,
+  .cadet-stats-grid > .col-span-2 {
+    grid-column: auto !important;
+  }
+}
+
+/* Vertical Section Spacing utilities */
+.space-y-3 {
+  gap: 0.75rem !important;
+}
+
+@media (min-width: 640px) {
+  .sm\:space-y-4 {
+    gap: 1rem !important;
+  }
+}
+
+/* Cadet Portal Main Section Container */
+.cadet-main-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem; /* space-y-3 on mobile */
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .cadet-main-sections {
+    gap: 1rem; /* sm:space-y-4 */
+  }
+}
+
+/* Official ROTC Standing Card: Compact Inline Flex Row on Mobile */
+.cadet-standing-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .cadet-standing-card {
+    padding: 1rem 1.4rem;
+    border-radius: 14px;
+    gap: 1.25rem;
+  }
+}
+
+.cadet-standing-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.cadet-standing-subtitle {
+  display: none;
+}
+
+@media (min-width: 640px) {
+  .cadet-standing-subtitle {
+    display: inline;
+  }
+}
+
+.cadet-standing-progress-bar {
+  display: block !important;
+}
+
+/* Formation Drill Schedule: Horizontal Scroll & No-Wrap Cell Enforcement */
+.cadet-drill-table-container {
+  overflow-x: auto !important;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.cadet-drill-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+}
+
+.cadet-drill-table th,
+.cadet-drill-table td {
+  white-space: nowrap !important;
+}
+
+/* Formation Drill Schedule Controls Mobile Stacking & Stretching */
+.cadet-drill-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.cadet-drill-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+}
+
+@media (max-width: 640px) {
+  .cadet-drill-controls {
+    width: 100% !important;
+  }
+  .cadet-drill-action-row {
+    width: 100% !important;
+  }
+}
+
+
+
+
+
+
+
+
 
 

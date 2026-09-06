@@ -7,10 +7,10 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Auto-formatting mask: XXX-XXXXX (e.g., 221-01231)
+  // Auto-formatting mask: XXX-XXXXX (digits only, max 8 digits)
   const handleInputChange = (e) => {
-    const raw = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const trimmed = raw.slice(0, 8); // Max 8 characters: 3 prefix + 5 suffix
+    const digitsOnly = e.target.value.replace(/\D/g, '');
+    const trimmed = digitsOnly.slice(0, 8); // Max 8 digits: 3 prefix + 5 suffix
 
     let formatted = trimmed;
     if (trimmed.length > 3) {
@@ -251,13 +251,14 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
               <input
                 id="cadet-id-input"
                 type="text"
+                inputMode="numeric"
                 value={cadetIdInput}
                 onChange={handleInputChange}
                 placeholder="221-01231"
                 autoComplete="off"
                 autoFocus
                 disabled={loading}
-                maxLength={9} // 8 characters + 1 hyphen
+                maxLength={9} // 8 digits + 1 hyphen
                 style={{
                   width: '100%',
                   padding: '0.8rem 1rem 0.8rem 2.75rem',

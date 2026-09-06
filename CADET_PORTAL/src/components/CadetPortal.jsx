@@ -24,7 +24,8 @@ import {
   Moon,
   Phone,
   GraduationCap,
-  Users
+  Users,
+  Info
 } from 'lucide-react';
 import {
   fetchCadetAttendanceHistory,
@@ -90,7 +91,7 @@ export default function CadetPortal({ cadet, onLogout }) {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchDate, setSearchDate] = useState('');
   const [refreshing, setRefreshing] = useState(false);
-  const [showAlertDetails, setShowAlertDetails] = useState(true);
+  const [showAlertDetails, setShowAlertDetails] = useState(false);
 
   // Dark / Light Mode state persisted in localStorage
   const [theme, setTheme] = useState(() => {
@@ -308,12 +309,33 @@ export default function CadetPortal({ cadet, onLogout }) {
       sessions = sessions.filter(s => !s.isRecorded || s.status.includes('ABSENT') || s.dayType === 'UNRECORDED');
     }
 
-    if (searchDate.trim()) {
-      const query = searchDate.trim().toLowerCase();
-      sessions = sessions.filter(s =>
-        s.date.toLowerCase().includes(query) ||
-        formatFriendlyDate(s.date).toLowerCase().includes(query)
-      );
+    if (searchDate && searchDate.trim()) {
+      const rawQuery = searchDate.trim().toLowerCase();
+      const queryKey = toDateKey(searchDate.trim());
+      const queryFriendly = queryKey ? formatFriendlyDate(queryKey).toLowerCase() : '';
+
+      sessions = sessions.filter(s => {
+        const rawDate = String(s.date || '').toLowerCase();
+        const friendly = formatFriendlyDate(s.date).toLowerCase();
+        const sessionKey = toDateKey(s.date);
+
+        // 1. Direct substring match against raw date or friendly date
+        if (rawDate.includes(rawQuery) || friendly.includes(rawQuery)) {
+          return true;
+        }
+
+        // 2. Normalized key match (e.g., input type="date" value '2026-09-04' against sessionKey '2026-09-04')
+        if (queryKey && sessionKey && queryKey === sessionKey) {
+          return true;
+        }
+
+        // 3. Match against friendly formatted representation of the date
+        if (queryFriendly && (friendly.includes(queryFriendly) || rawDate.includes(queryFriendly))) {
+          return true;
+        }
+
+        return false;
+      });
     }
 
     return sessions;
@@ -391,7 +413,7 @@ export default function CadetPortal({ cadet, onLogout }) {
           boxShadow: '0 4px 15px rgba(0,0,0,0.3)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <div
             style={{
               width: '42px',
@@ -413,7 +435,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               onError={(e) => { e.target.style.display = 'none'; }}
             />
           </div>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <div
               style={{
                 fontFamily: 'Oswald, sans-serif',
@@ -421,39 +443,39 @@ export default function CadetPortal({ cadet, onLogout }) {
                 fontWeight: 800,
                 letterSpacing: '0.5px',
                 color: '#facc15',
-                lineHeight: 1.2
+                lineHeight: 1.2,
+                whiteSpace: 'nowrap'
               }}
             >
               CADET PORTAL
             </div>
-
           </div>
         </div>
 
         {/* Header Right: Theme Toggle, User Info & Sign Out */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {/* Theme Toggle Button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+          {/* Theme Toggle Button (Icon-Only Switch) */}
           <button
             type="button"
             onClick={toggleTheme}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
+              justifyContent: 'center',
+              width: '36px',
+              height: '36px',
               background: isLight ? 'rgba(255, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.1)',
               border: '1px solid rgba(255, 255, 255, 0.25)',
               color: '#ffffff',
-              padding: '0.45rem 0.85rem',
               borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
               cursor: 'pointer',
-              transition: 'all 0.15s ease'
+              transition: 'all 0.15s ease',
+              flexShrink: 0
             }}
-            title={isLight ? 'Switch to Tactical Dark Mode' : 'Switch to Clean Light Mode'}
+            title={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+            aria-label={isLight ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
           >
-            {isLight ? <Moon size={15} color="#facc15" /> : <Sun size={15} color="#facc15" />}
-            <span>{isLight ? 'Dark Mode' : 'Light Mode'}</span>
+            {isLight ? <Moon size={17} color="#facc15" /> : <Sun size={17} color="#facc15" />}
           </button>
 
           <div
@@ -464,51 +486,51 @@ export default function CadetPortal({ cadet, onLogout }) {
             }}
             className="md:block"
           >
-            <div style={{ fontWeight: 800, color: '#ffffff' }}>{fullName}</div>
-            <div style={{ fontSize: '0.72rem', color: '#f1f5f9', fontFamily: 'monospace' }}>{cadetId}</div>
+            <div style={{ fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap' }}>{fullName}</div>
+            <div style={{ fontSize: '0.72rem', color: '#f1f5f9', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{cadetId}</div>
           </div>
 
+          {/* Sign Out Button (Icon-Only Action) */}
           <button
             type="button"
             onClick={onLogout}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
+              justifyContent: 'center',
+              width: '36px',
+              height: '36px',
               background: 'rgba(239, 68, 68, 0.18)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               color: '#fecdd3',
-              padding: '0.45rem 0.85rem',
               borderRadius: '8px',
-              fontSize: '0.8rem',
-              fontWeight: 700,
               cursor: 'pointer',
-              transition: 'all 0.15s ease'
+              transition: 'all 0.15s ease',
+              flexShrink: 0
             }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.18)'; }}
+            title="Sign Out"
+            aria-label="Sign Out"
           >
-            <LogOut size={14} /> Sign Out
+            <LogOut size={16} />
           </button>
         </div>
       </header>
 
       {/* 2. Main Content Area */}
       <main
+        className="cadet-main-sections w-full max-w-6xl mx-auto px-4 space-y-3 sm:space-y-4"
         style={{
           flex: 1,
-          padding: '1.75rem 1rem',
+          padding: 'clamp(1rem, 2vw, 1.5rem) 1rem',
           maxWidth: '1152px',
           margin: '0 auto',
           width: '100%',
           boxSizing: 'border-box',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1.5rem',
           position: 'relative',
           zIndex: 10
         }}
-        className="w-full max-w-6xl mx-auto px-4"
       >
 
         {/* ============================================================ */}
@@ -531,8 +553,15 @@ export default function CadetPortal({ cadet, onLogout }) {
               boxSizing: 'border-box'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem', minWidth: 0, flex: 1 }}>
+            <div
+              className="dropped-alert-container"
+              style={{
+                display: 'flex',
+                gap: '0.85rem',
+                width: '100%'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', minWidth: 0 }}>
                 <div
                   style={{
                     background: '#e11d48',
@@ -548,52 +577,45 @@ export default function CadetPortal({ cadet, onLogout }) {
                   <AlertOctagon size={26} />
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span
                       style={{
                         background: '#e11d48',
                         color: '#ffffff',
                         fontWeight: 900,
-                        fontSize: '0.7rem',
+                        fontSize: 'clamp(1.15rem, 4.5vw, 1.45rem)',
                         letterSpacing: '0.5px',
-                        padding: '2px 8px',
+                        padding: '4px 12px',
                         borderRadius: '9999px',
-                        textTransform: 'uppercase'
+                        textTransform: 'uppercase',
+                        whiteSpace: 'nowrap',
+                        display: 'inline-block'
                       }}
                     >
                       DROPPED STATUS
                     </span>
-                    <span style={{ fontSize: '0.8rem', color: isLight ? '#be123c' : '#fca5a5', fontWeight: 700 }}>
-                      Absence Threshold Reached (ROTC Regulation)
-                    </span>
                   </div>
-
-                  <h2 style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.3rem', fontWeight: 800, color: isLight ? '#881337' : '#ffffff', margin: '4px 0 6px 0' }}>
-                    Cadet Status: Dropped from CSU ROTCU
-                  </h2>
-
-                  <p style={{ margin: 0, fontSize: '0.86rem', color: isLight ? '#9f1239' : '#fecdd3', lineHeight: 1.5, wordBreak: 'break-word' }}>
-                    You have accumulated <strong>{metrics.absences} unrecorded absences</strong> ({metrics.maxConsecutive} consecutive unrecorded formation days).
-                  </p>
                 </div>
               </div>
 
               <button
                 type="button"
+                className="dropped-alert-btn"
                 onClick={() => setShowAlertDetails(!showAlertDetails)}
                 style={{
                   background: isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.08)',
                   border: isLight ? '1px solid #fecdd3' : '1px solid rgba(255, 255, 255, 0.15)',
                   color: isLight ? '#9f1239' : '#f8fafc',
-                  padding: '5px 12px',
+                  padding: '8px 16px',
                   borderRadius: '8px',
-                  fontSize: '0.76rem',
+                  fontSize: '0.82rem',
                   fontWeight: 700,
                   cursor: 'pointer',
-                  flexShrink: 0
+                  flexShrink: 0,
+                  whiteSpace: 'nowrap'
                 }}
               >
-                {showAlertDetails ? 'Hide Next Steps' : 'View Next Steps'}
+                {showAlertDetails ? 'Hide Resolution Steps' : 'View Resolution Steps'}
               </button>
             </div>
 
@@ -692,11 +714,11 @@ export default function CadetPortal({ cadet, onLogout }) {
         {/* 3. HERO CADET PROFILE & FORMATION BREADCRUMB CARD            */}
         {/* ============================================================ */}
         <div
+          className="cadet-profile-card"
           style={{
             background: t.cardBg,
             border: `1px solid ${t.cardBorder}`,
             borderRadius: '16px',
-            padding: '1.5rem',
             boxShadow: t.cardShadow,
             display: 'flex',
             flexDirection: 'column',
@@ -704,13 +726,13 @@ export default function CadetPortal({ cadet, onLogout }) {
             transition: 'background-color 0.2s ease, border-color 0.2s ease'
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.25rem' }}>
-            {/* Cadet Avatar & Identity */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1.15rem' }}>
+          <div className="cadet-profile-header-container">
+            {/* Cadet Avatar & Identity - Clean Horizontal Layout */}
+            <div className="cadet-profile-identity">
               <div
                 style={{
-                  width: '68px',
-                  height: '68px',
+                  width: 'clamp(54px, 12vw, 68px)',
+                  height: 'clamp(54px, 12vw, 68px)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
                   border: '2.5px solid #e5a900',
@@ -730,11 +752,11 @@ export default function CadetPortal({ cadet, onLogout }) {
                     style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                   />
                 ) : (
-                  <User size={34} />
+                  <User size={30} />
                 )}
               </div>
 
-              <div>
+              <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginBottom: '4px' }}>
                   <span
                     style={{
@@ -744,7 +766,8 @@ export default function CadetPortal({ cadet, onLogout }) {
                       padding: '2px 8px',
                       borderRadius: '6px',
                       fontSize: '0.72rem',
-                      fontWeight: 800
+                      fontWeight: 800,
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     {rank}
@@ -752,21 +775,26 @@ export default function CadetPortal({ cadet, onLogout }) {
                   <span
                     style={{
                       fontFamily: 'monospace',
-                      fontSize: '0.8rem',
+                      fontSize: '0.78rem',
                       background: t.insetBg,
                       color: t.textMuted,
                       padding: '2px 8px',
                       borderRadius: '6px',
                       border: `1px solid ${t.insetBorder}`,
-                      fontWeight: 700
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap'
                     }}
                   >
                     ID: {cadetId}
                   </span>
-
                 </div>
 
-                <h1 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 800, color: t.textMain, letterSpacing: '0.2px' }}>
+                <h1
+                  className="cadet-profile-name text-lg sm:text-xl"
+                  style={{
+                    color: t.textMain
+                  }}
+                >
                   {fullName}
                 </h1>
               </div>
@@ -775,6 +803,7 @@ export default function CadetPortal({ cadet, onLogout }) {
             {/* Digital ID Button */}
             <button
               type="button"
+              className="cadet-profile-id-btn"
               onClick={() => setShowIdModal(true)}
               style={{
                 background: '#e5a900',
@@ -789,7 +818,9 @@ export default function CadetPortal({ cadet, onLogout }) {
                 alignItems: 'center',
                 gap: '8px',
                 boxShadow: '0 2px 8px rgba(229, 169, 0, 0.25)',
-                transition: 'background-color 0.15s ease'
+                transition: 'background-color 0.15s ease',
+                flexShrink: 0,
+                whiteSpace: 'nowrap'
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = '#d97706'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = '#e5a900'; }}
@@ -798,80 +829,76 @@ export default function CadetPortal({ cadet, onLogout }) {
             </button>
           </div>
 
-          {/* Cadet Detailed Profile Metadata Strip (Clean 2-Row Grid) */}
+          {/* Cadet Detailed Profile Metadata Strip (2-Column Grid: grid-cols-2) */}
           <div
+            className="cadet-profile-details-grid grid-cols-2"
             style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: '1rem',
               background: isLight ? '#f8fafc' : 'rgba(15, 23, 42, 0.4)',
-              border: `1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem'
+              border: `1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}`
             }}
           >
             {/* Department */}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <BookOpen size={12} color="#e5a900" />
-                <span>Department</span>
+                <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>Department</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', wordBreak: 'break-word' }}>
                 {department}
               </div>
             </div>
 
             {/* Academic Program */}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <GraduationCap size={13} color="#e5a900" />
-                <span>Academic Program</span>
+                <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>Program</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', wordBreak: 'break-word' }}>
                 {program}
               </div>
             </div>
 
             {/* Gender */}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <User size={12} color="#e5a900" />
                 <span>Gender</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', wordBreak: 'break-word' }}>
                 {gender}
               </div>
             </div>
 
             {/* Contact Number */}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Phone size={12} color="#e5a900" />
-                <span>Contact Number</span>
+                <span style={{ whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>Contact</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', fontFamily: 'monospace' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', fontFamily: 'monospace', wordBreak: 'break-word' }}>
                 {contactNumber}
               </div>
             </div>
 
             {/* Religion */}
-            <div>
+            <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <Shield size={12} color="#e5a900" />
                 <span>Religion</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', wordBreak: 'break-word' }}>
                 {religion}
               </div>
             </div>
 
-            {/* Row 2: Permanent Address (Full Width) */}
-            <div style={{ gridColumn: '1 / -1', borderTop: `1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}`, paddingTop: '0.85rem' }}>
+            {/* Row 2: Permanent Address (Full Width across 2 columns) */}
+            <div style={{ gridColumn: '1 / -1', borderTop: `1px solid ${isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.08)'}`, paddingTop: '0.85rem', minWidth: 0 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 600, color: t.textMuted, textTransform: 'uppercase', letterSpacing: '0.4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <MapPin size={12} color="#e5a900" />
                 <span>Permanent Address</span>
               </div>
-              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: t.textMain, marginTop: '4px', wordBreak: 'break-word' }}>
                 {permanentAddress}
               </div>
             </div>
@@ -879,29 +906,87 @@ export default function CadetPortal({ cadet, onLogout }) {
 
           {/* Unit Echelon Breadcrumb Strip */}
           <div
+            className="cadet-formation-strip"
             style={{
-              borderTop: `1px solid ${t.cardBorder}`,
-              paddingTop: '0.9rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '0.75rem'
+              borderTop: `1px solid ${t.cardBorder}`
             }}
           >
-            <div style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+            <div
+              className="cadet-formation-label"
+              style={{
+                fontSize: '0.74rem',
+                color: t.textMuted,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.4px',
+                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                flexShrink: 0
+              }}
+            >
               Assigned Formation:
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '8px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 700, color: t.textMain }}>
+            <div
+              className="cadet-formation-tags-wrap"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'nowrap',
+                overflowX: 'auto',
+                WebkitOverflowScrolling: 'touch',
+                whiteSpace: 'nowrap',
+                gap: '6px'
+              }}
+            >
+              <div
+                className="cadet-formation-pill cadet-formation-pill-battalion"
+                style={{
+                  background: isLight ? '#dbeafe' : 'rgba(30, 58, 138, 0.35)',
+                  border: isLight ? '1px solid #bfdbfe' : '1px solid rgba(96, 165, 250, 0.4)',
+                  color: isLight ? '#1d4ed8' : '#93c5fd',
+                  borderRadius: '8px',
+                  padding: '3px 8px',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
                 {battalion}
               </div>
-              <ChevronRight size={14} color={t.textSubtle} />
-              <div style={{ background: t.insetBg, border: `1px solid ${t.insetBorder}`, borderRadius: '8px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 700, color: t.textMain }}>
+              <ChevronRight size={13} color={t.textSubtle} style={{ flexShrink: 0 }} />
+              <div
+                className="cadet-formation-pill cadet-formation-pill-company"
+                style={{
+                  background: isLight ? '#d1fae5' : 'rgba(6, 78, 46, 0.35)',
+                  border: isLight ? '1px solid #a7f3d0' : '1px solid rgba(16, 185, 129, 0.4)',
+                  color: isLight ? '#065f46' : '#6ee7b7',
+                  borderRadius: '8px',
+                  padding: '3px 8px',
+                  fontSize: '0.76rem',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
                 {company}
               </div>
-              <ChevronRight size={14} color={t.textSubtle} />
-              <div style={{ background: isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.3)', border: '1px solid #059669', borderRadius: '8px', padding: '4px 10px', fontSize: '0.78rem', fontWeight: 800, color: isLight ? '#065f46' : '#34d399' }}>
+              <ChevronRight size={13} color={t.textSubtle} style={{ flexShrink: 0 }} />
+              <div
+                className="cadet-formation-pill cadet-formation-pill-platoon"
+                style={{
+                  background: isLight ? '#fef3c7' : 'rgba(120, 53, 15, 0.35)',
+                  border: isLight ? '1px solid #fcd34d' : '1px solid rgba(245, 158, 11, 0.4)',
+                  color: isLight ? '#78350f' : '#fde68a',
+                  borderRadius: '8px',
+                  padding: '3px 8px',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0
+                }}
+              >
                 {platoon}
               </div>
             </div>
@@ -912,81 +997,106 @@ export default function CadetPortal({ cadet, onLogout }) {
         {/* 4. ATTENDANCE STANDING & PERFORMANCE STATUS BANNER           */}
         {/* ============================================================ */}
         <div
+          className="cadet-standing-card"
           style={{
             background: t.cardBg,
             border: `1.5px solid ${isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'}`,
-            borderRadius: '14px',
-            padding: '1rem 1.4rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '1rem',
             boxShadow: t.cardShadow
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div className="cadet-standing-info">
             <div
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '12px',
+                width: 'clamp(34px, 8vw, 42px)',
+                height: 'clamp(34px, 8vw, 42px)',
+                borderRadius: '10px',
                 background: isDropped
                   ? 'rgba(244, 63, 94, 0.12)'
                   : isWarning
-                  ? 'rgba(245, 158, 11, 0.12)'
-                  : 'rgba(16, 185, 129, 0.12)',
+                    ? 'rgba(245, 158, 11, 0.12)'
+                    : 'rgba(16, 185, 129, 0.12)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                color: isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981'
+                color: isDropped ? '#f43f5e' : isWarning ? '#f59e0b' : '#10b981',
+                flexShrink: 0
               }}
             >
-              <Activity size={22} />
+              <Activity size={20} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.74rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                Official ROTC Standing & Performance
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.4px', whiteSpace: 'nowrap' }}>
+                ROTC Standing
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '3px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px', flexWrap: 'nowrap' }}>
                 <span
                   style={{
                     background: isDropped
                       ? 'rgba(244, 63, 94, 0.15)'
                       : isWarning
-                      ? 'rgba(245, 158, 11, 0.15)'
-                      : 'rgba(16, 185, 129, 0.15)',
+                        ? 'rgba(245, 158, 11, 0.15)'
+                        : 'rgba(16, 185, 129, 0.15)',
                     color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
                     border: `1px solid ${isDropped ? 'rgba(244, 63, 94, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`,
-                    padding: '2px 10px',
+                    padding: '2px 8px',
                     borderRadius: '6px',
-                    fontSize: '0.78rem',
-                    fontWeight: 800
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0
                   }}
                 >
-                  {isDropped ? 'DROPPED FROM ROLLS' : isWarning ? 'WARNING STATUS' : 'GOOD STANDING'}
+                  {isDropped ? 'DROPPED' : isWarning ? 'WARNING' : 'GOOD STANDING'}
                 </span>
-                <span style={{ fontSize: '0.8rem', color: t.textMuted }}>
+                <span
+                  className="cadet-standing-subtitle"
+                  style={{
+                    fontSize: '0.78rem',
+                    color: t.textMuted,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
                   {isDropped
                     ? 'Threshold of allowable absences exceeded.'
                     : isWarning
-                    ? 'Approaching allowable unexcused absence limit.'
-                    : 'Compliant with military drill attendance regulations.'}
+                      ? 'Approaching allowable absence limit.'
+                      : 'Compliant with military drill regulations.'}
                 </span>
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexShrink: 0 }}>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>
-                Attendance Rate
+              <div style={{ fontSize: '0.68rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                Rate
               </div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
+              <div
+                style={{
+                  fontFamily: 'Oswald, sans-serif',
+                  fontSize: 'clamp(1.2rem, 3.8vw, 1.55rem)',
+                  fontWeight: 900,
+                  color: isDropped ? '#e11d48' : isWarning ? '#d97706' : '#059669',
+                  lineHeight: 1.1
+                }}
+              >
                 {metrics.complianceRate}%
               </div>
             </div>
-            <div style={{ width: '80px', height: '8px', background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)', borderRadius: '999px', overflow: 'hidden' }}>
+            <div
+              className="cadet-standing-progress-bar"
+              style={{
+                width: 'clamp(44px, 12vw, 60px)',
+                height: '7px',
+                background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)',
+                borderRadius: '999px',
+                overflow: 'hidden',
+                flexShrink: 0,
+                display: 'block'
+              }}
+            >
               <div
                 style={{
                   width: `${metrics.complianceRate}%`,
@@ -1003,242 +1113,269 @@ export default function CadetPortal({ cadet, onLogout }) {
         {/* ============================================================ */}
         {/* 5. INTERACTIVE SUMMARY CARDS (MATCHING ADMIN UI)             */}
         {/* ============================================================ */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-          {/* Card 1: Total Formations */}
+        <section
+          className="cadet-stats-section overflow-hidden"
+          style={{
+            overflow: 'hidden',
+            width: '100%',
+            position: 'relative'
+          }}
+        >
           <div
+            className="cadet-stats-grid grid-cols-2"
             style={{
-              background: statusFilter === 'ALL'
-                ? (isLight ? '#f0fdf4' : 'rgba(6, 78, 46, 0.25)')
-                : t.cardBg,
-              border: `1px solid ${statusFilter === 'ALL' ? '#064e2e' : t.cardBorder}`,
-              borderLeft: `5px solid ${statusFilter === 'ALL' ? '#064e2e' : (isLight ? '#cbd5e1' : '#334155')}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem',
-              cursor: 'pointer',
-              outline: statusFilter === 'ALL' ? '2px solid #064e2e' : 'none',
-              boxShadow: t.cardShadow,
-              transition: 'all 0.15s ease'
+              display: 'grid',
+              gap: '0.75rem',
+              width: '100%'
             }}
-            onClick={() => handleStatusCardClick('ALL')}
-            title="Click to show all formation drill sessions"
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'rgba(6, 78, 46, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: isLight ? '#064e2e' : '#34d399'
-                }}
-              >
-                <Users size={20} />
+            {/* Card 1: Total Formations (Full Width / col-span-2 at top on mobile) */}
+            <div
+              className="cadet-stat-card-total col-span-2"
+              style={{
+                background: statusFilter === 'ALL'
+                  ? (isLight ? '#f0fdf4' : 'rgba(6, 78, 46, 0.25)')
+                  : t.cardBg,
+                border: `1px solid ${statusFilter === 'ALL' ? '#064e2e' : t.cardBorder}`,
+                borderLeft: `5px solid ${statusFilter === 'ALL' ? '#064e2e' : (isLight ? '#cbd5e1' : '#334155')}`,
+                borderRadius: '12px',
+                padding: 'clamp(0.85rem, 2.5vw, 1.1rem) clamp(0.85rem, 2.5vw, 1.25rem)',
+                cursor: 'pointer',
+                outline: statusFilter === 'ALL' ? '2px solid #064e2e' : 'none',
+                boxShadow: t.cardShadow,
+                transition: 'all 0.15s ease',
+                minWidth: 0
+              }}
+              onClick={() => handleStatusCardClick('ALL')}
+              title="Click to show all formation drill sessions"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    background: 'rgba(6, 78, 46, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: isLight ? '#064e2e' : '#34d399',
+                    flexShrink: 0
+                  }}
+                >
+                  <Users size={20} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
+                    Total Formations
+                  </div>
+                  <div style={{ fontSize: 'clamp(1.25rem, 4vw, 1.45rem)', fontWeight: 800, color: t.textMain }}>
+                    {counts.all} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
-                  Total Formations
-                </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: t.textMain }}>
-                  {counts.all} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                </div>
+              <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
+                {statusFilter === 'ALL' ? '✓ Showing all drill dates' : 'Click to filter'}
               </div>
             </div>
-            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {statusFilter === 'ALL' ? '✓ Showing all drill dates' : 'Click to filter → All Formations'}
-            </div>
-          </div>
 
-          {/* Card 2: PRESENT */}
-          <div
-            style={{
-              background: statusFilter === 'PRESENT'
-                ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.2)')
-                : t.cardBg,
-              border: `1px solid ${statusFilter === 'PRESENT' ? '#059669' : t.cardBorder}`,
-              borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : (isLight ? '#d1fae5' : '#065f46')}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem',
-              cursor: 'pointer',
-              outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
-              boxShadow: t.cardShadow,
-              transition: 'all 0.15s ease'
-            }}
-            onClick={() => handleStatusCardClick('PRESENT')}
-            title="Click to filter table: Present (On-Time) sessions only"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'rgba(5, 150, 105, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#059669'
-                }}
-              >
-                <CheckCircle2 size={20} />
+            {/* Card 2: PRESENT */}
+            <div
+              style={{
+                background: statusFilter === 'PRESENT'
+                  ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.2)')
+                  : t.cardBg,
+                border: `1px solid ${statusFilter === 'PRESENT' ? '#059669' : t.cardBorder}`,
+                borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : (isLight ? '#d1fae5' : '#065f46')}`,
+                borderRadius: '12px',
+                padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                cursor: 'pointer',
+                outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
+                boxShadow: t.cardShadow,
+                transition: 'all 0.15s ease',
+                minWidth: 0
+              }}
+              onClick={() => handleStatusCardClick('PRESENT')}
+              title="Click to filter table: Present (On-Time) sessions only"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'rgba(5, 150, 105, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#059669',
+                    flexShrink: 0
+                  }}
+                >
+                  <CheckCircle2 size={19} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Present
+                  </div>
+                  <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#065f46' : '#34d399', whiteSpace: 'nowrap' }}>
+                    {counts.present} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
-                  Present
-                </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#065f46' : '#34d399' }}>
-                  {counts.present} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                </div>
+              <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {statusFilter === 'PRESENT' ? '✓ Filtering by Present' : 'Click to filter'}
               </div>
             </div>
-            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {statusFilter === 'PRESENT' ? '✓ Filtering table by Present' : 'Click to filter → Present'}
-            </div>
-          </div>
 
-          {/* Card 3: LATE */}
-          <div
-            style={{
-              background: statusFilter === 'LATE'
-                ? (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.2)')
-                : t.cardBg,
-              border: `1px solid ${statusFilter === 'LATE' ? '#d97706' : t.cardBorder}`,
-              borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : (isLight ? '#fde68a' : '#78350f')}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem',
-              cursor: 'pointer',
-              outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
-              boxShadow: t.cardShadow,
-              transition: 'all 0.15s ease'
-            }}
-            onClick={() => handleStatusCardClick('LATE')}
-            title="Click to filter table: Late / Tardy sessions only"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'rgba(217, 119, 6, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#d97706'
-                }}
-              >
-                <Clock size={20} />
+            {/* Card 3: LATE */}
+            <div
+              style={{
+                background: statusFilter === 'LATE'
+                  ? (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.2)')
+                  : t.cardBg,
+                border: `1px solid ${statusFilter === 'LATE' ? '#d97706' : t.cardBorder}`,
+                borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : (isLight ? '#fde68a' : '#78350f')}`,
+                borderRadius: '12px',
+                padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                cursor: 'pointer',
+                outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
+                boxShadow: t.cardShadow,
+                transition: 'all 0.15s ease',
+                minWidth: 0
+              }}
+              onClick={() => handleStatusCardClick('LATE')}
+              title="Click to filter table: Late / Tardy sessions only"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'rgba(217, 119, 6, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#d97706',
+                    flexShrink: 0
+                  }}
+                >
+                  <Clock size={19} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Late
+                  </div>
+                  <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24', whiteSpace: 'nowrap' }}>
+                    {counts.late} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
-                  Late
-                </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24' }}>
-                  {counts.late} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                </div>
+              <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {statusFilter === 'LATE' ? '✓ Filtering by Late' : 'Click to filter'}
               </div>
             </div>
-            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {statusFilter === 'LATE' ? '✓ Filtering table by Late' : 'Click to filter → Late'}
-            </div>
-          </div>
 
-          {/* Card 4: NO TIME IN/OUT */}
-          <div
-            style={{
-              background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT')
-                ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
-                : t.cardBg,
-              border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : t.cardBorder}`,
-              borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem',
-              cursor: 'pointer',
-              outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
-              boxShadow: t.cardShadow,
-              transition: 'all 0.15s ease'
-            }}
-            onClick={() => handleStatusCardClick('NO TIME-OUT')}
-            title="Click to filter table: Incomplete time-in/out records"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'rgba(234, 88, 12, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#ea580c'
-                }}
-              >
-                <Activity size={20} />
+            {/* Card 4: NO TIME IN/OUT */}
+            <div
+              style={{
+                background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT')
+                  ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
+                  : t.cardBg,
+                border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : t.cardBorder}`,
+                borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
+                borderRadius: '12px',
+                padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                cursor: 'pointer',
+                outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
+                boxShadow: t.cardShadow,
+                transition: 'all 0.15s ease',
+                minWidth: 0
+              }}
+              onClick={() => handleStatusCardClick('NO TIME-OUT')}
+              title="Click to filter table: Incomplete time-in/out records"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'rgba(234, 88, 12, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ea580c',
+                    flexShrink: 0
+                  }}
+                >
+                  <Activity size={19} />
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    No Time In/Out
+                  </div>
+                  <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#9a3412' : '#fb923c', whiteSpace: 'nowrap' }}>
+                    {counts.noTimeOut} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
-                  No Time In/Out
-                </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#9a3412' : '#fb923c' }}>
-                  {counts.noTimeOut} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                </div>
+              <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Incomplete only' : 'Click to filter'}
               </div>
             </div>
-            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
-            </div>
-          </div>
 
-          {/* Card 5: ABSENT CADETS */}
-          <div
-            style={{
-              background: statusFilter === 'ABSENT'
-                ? (isLight ? '#fef2f2' : 'rgba(220, 38, 38, 0.2)')
-                : t.cardBg,
-              border: `1px solid ${statusFilter === 'ABSENT' ? '#dc2626' : t.cardBorder}`,
-              borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#dc2626' : (isLight ? '#fecaca' : '#7f1d1d')}`,
-              borderRadius: '12px',
-              padding: '1.1rem 1.25rem',
-              cursor: 'pointer',
-              outline: statusFilter === 'ABSENT' ? '2px solid #dc2626' : 'none',
-              boxShadow: t.cardShadow,
-              transition: 'all 0.15s ease'
-            }}
-            onClick={() => handleStatusCardClick('ABSENT')}
-            title="Click to filter table: Absent / Missed sessions only"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  background: 'rgba(220, 38, 38, 0.12)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#dc2626'
-                }}
-              >
-                <AlertTriangle size={20} />
-              </div>
-              <div>
-                <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700 }}>
-                  Absent Cadets
+            {/* Card 5: ABSENT CADETS */}
+            <div
+              style={{
+                background: statusFilter === 'ABSENT'
+                  ? (isLight ? '#fef2f2' : 'rgba(220, 38, 38, 0.2)')
+                  : t.cardBg,
+                border: `1px solid ${statusFilter === 'ABSENT' ? '#dc2626' : t.cardBorder}`,
+                borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#dc2626' : (isLight ? '#fecaca' : '#7f1d1d')}`,
+                borderRadius: '12px',
+                padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                cursor: 'pointer',
+                outline: statusFilter === 'ABSENT' ? '2px solid #dc2626' : 'none',
+                boxShadow: t.cardShadow,
+                transition: 'all 0.15s ease',
+                minWidth: 0
+              }}
+              onClick={() => handleStatusCardClick('ABSENT')}
+              title="Click to filter table: Absent / Missed sessions only"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '10px',
+                    background: 'rgba(220, 38, 38, 0.12)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#dc2626',
+                    flexShrink: 0
+                  }}
+                >
+                  <AlertTriangle size={19} />
                 </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: isLight ? '#b91c1c' : '#f87171' }}>
-                  {counts.absent} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Absences</span>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    Absent Cadets
+                  </div>
+                  <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#b91c1c' : '#f87171', whiteSpace: 'nowrap' }}>
+                    {counts.absent} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Absences</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div style={{ fontSize: '0.72rem', color: t.textMuted }}>
-              {statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent'}
+              <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {statusFilter === 'ABSENT' ? '✓ Filtering by Absent' : 'Click to filter'}
+              </div>
             </div>
           </div>
-        </div>
+        </section>
 
         {/* ============================================================ */}
         {/* 6. FORMATION DRILL SCHEDULE (STUDENT-FRIENDLY TABLE)          */}
@@ -1274,7 +1411,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               </div>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="cadet-drill-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
               {/* Active Filter Pill with Clear button */}
               {statusFilter !== 'ALL' && (
                 <div
@@ -1288,7 +1425,8 @@ export default function CadetPortal({ cadet, onLogout }) {
                     padding: '4px 10px',
                     fontSize: '0.76rem',
                     fontWeight: 700,
-                    color: isLight ? '#065f46' : '#34d399'
+                    color: isLight ? '#065f46' : '#34d399',
+                    whiteSpace: 'nowrap'
                   }}
                 >
                   <span>Active Filter: <strong>{statusFilter}</strong> ({displaySchedule.length})</span>
@@ -1311,116 +1449,153 @@ export default function CadetPortal({ cadet, onLogout }) {
                 </div>
               )}
 
-              {/* Date Filter Input */}
+              {/* Action row stretching 100% on mobile */}
               <div
+                className="cadet-drill-action-row"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  background: isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.05)',
-                  border: `1px solid ${t.cardBorder}`,
-                  borderRadius: '8px',
-                  padding: '0.35rem 0.65rem',
-                  gap: '6px'
+                  gap: '8px',
+                  flex: 1,
+                  minWidth: '220px'
                 }}
               >
-                <Search size={13} color={t.textMuted} />
-                <input
-                  type="text"
-                  placeholder="Filter by date..."
-                  value={searchDate}
-                  onChange={(e) => setSearchDate(e.target.value)}
+                {/* Date Filter Input */}
+                <div
+                  className="cadet-drill-date-filter"
                   style={{
-                    border: 'none',
-                    background: 'transparent',
-                    outline: 'none',
-                    fontSize: '0.76rem',
-                    color: t.textMain,
-                    width: '120px'
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.05)',
+                    border: `1px solid ${t.cardBorder}`,
+                    borderRadius: '8px',
+                    padding: '0.35rem 0.65rem',
+                    gap: '6px',
+                    flex: 1,
+                    minWidth: 0
                   }}
-                />
-                {searchDate && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchDate('')}
+                >
+                  <Search size={13} color={t.textMuted} style={{ flexShrink: 0 }} />
+                  <input
+                    type="date"
+                    value={searchDate}
+                    onChange={(e) => setSearchDate(e.target.value)}
+                    title="Filter by date"
+                    aria-label="Filter by date"
                     style={{
-                      background: 'none',
                       border: 'none',
-                      cursor: 'pointer',
-                      color: t.textMuted,
-                      padding: 0,
-                      display: 'flex',
-                      alignItems: 'center'
+                      background: 'transparent',
+                      outline: 'none',
+                      fontSize: '0.76rem',
+                      color: t.textMain,
+                      width: '100%',
+                      flex: 1,
+                      minWidth: 0,
+                      colorScheme: isLight ? 'light' : 'dark',
+                      cursor: 'pointer'
                     }}
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
+                  />
+                  {searchDate && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchDate('')}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: t.textMuted,
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        flexShrink: 0
+                      }}
+                      title="Clear date filter"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
 
-              {/* Refresh Button */}
-              <button
-                type="button"
-                onClick={handleRefresh}
-                disabled={refreshing || loadingLogs}
-                style={{
-                  background: isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.08)',
-                  border: `1px solid ${t.cardBorder}`,
-                  color: t.textMain,
-                  padding: '0.42rem 0.75rem',
-                  borderRadius: '8px',
-                  fontSize: '0.76rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px'
-                }}
-              >
-                <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
-                <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
-              </button>
+                {/* Refresh Button */}
+                <button
+                  type="button"
+                  onClick={handleRefresh}
+                  disabled={refreshing || loadingLogs}
+                  style={{
+                    background: isLight ? '#f1f5f9' : 'rgba(255, 255, 255, 0.08)',
+                    border: `1px solid ${t.cardBorder}`,
+                    color: t.textMain,
+                    padding: '0.42rem 0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    flexShrink: 0,
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+                  <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* Friendly Data Table (Scrollable Container with Sticky Header) */}
+          {/* Friendly Data Table (Scrollable Container with Sticky Header & Horizontal Scroll) */}
           <div
-            className="max-h-[420px] overflow-y-auto"
+            className="cadet-drill-table-container overflow-x-auto max-h-[420px] overflow-y-auto w-full"
             style={{
               maxHeight: '420px',
               overflowY: 'auto',
               overflowX: 'auto',
-              position: 'relative'
+              WebkitOverflowScrolling: 'touch',
+              position: 'relative',
+              width: '100%'
             }}
           >
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.84rem' }}>
+            <table
+              className="cadet-drill-table"
+              style={{
+                width: '100%',
+                minWidth: '640px',
+                borderCollapse: 'collapse',
+                textAlign: 'left',
+                fontSize: '0.84rem',
+                whiteSpace: 'nowrap'
+              }}
+            >
               <thead
                 style={{
                   position: 'sticky',
                   top: 0,
                   zIndex: 20,
                   background: t.tableHeadBg,
-                  boxShadow: isLight ? '0 1px 3px rgba(0, 0, 0, 0.08)' : '0 2px 6px rgba(0, 0, 0, 0.35)'
+                  boxShadow: isLight ? '0 1px 3px rgba(0, 0, 0, 0.08)' : '0 2px 6px rgba(0, 0, 0, 0.35)',
+                  whiteSpace: 'nowrap'
                 }}
               >
-                <tr style={{ background: t.tableHeadBg, borderBottom: `1px solid ${t.tableRowBorder}` }}>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Drill Date</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Time-In</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Time-Out</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Attendance Status</th>
-                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg }}>Remarks / Rule Impact</th>
+                <tr style={{ background: t.tableHeadBg, borderBottom: `1px solid ${t.tableRowBorder}`, whiteSpace: 'nowrap' }}>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg, whiteSpace: 'nowrap' }}>Drill Date</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg, whiteSpace: 'nowrap' }}>Time-In</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg, whiteSpace: 'nowrap' }}>Time-Out</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg, whiteSpace: 'nowrap' }}>Attendance Status</th>
+                  <th style={{ padding: '0.85rem 1.25rem', color: t.textMuted, fontWeight: 800, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px', background: t.tableHeadBg, whiteSpace: 'nowrap' }}>Remarks / Rule Impact</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingLogs ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '3.5rem', textAlign: 'center', color: t.textMuted }}>
+                    <td colSpan={5} style={{ padding: '3.5rem', textAlign: 'center', color: t.textMuted, whiteSpace: 'nowrap' }}>
                       <RefreshCw size={24} className="animate-spin" style={{ margin: '0 auto 0.5rem auto', color: '#e5a900' }} />
                       <div>Loading attendance evaluation records...</div>
                     </td>
                   </tr>
                 ) : displaySchedule.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ padding: '3rem', textAlign: 'center', color: t.textMuted }}>
+                    <td colSpan={5} style={{ padding: '3rem', textAlign: 'center', color: t.textMuted, whiteSpace: 'nowrap' }}>
                       <Calendar size={32} style={{ margin: '0 auto 0.5rem auto', opacity: 0.4 }} />
                       <div style={{ fontWeight: 700, color: t.textMain }}>No matching formation entries</div>
                       <div style={{ fontSize: '0.76rem', marginTop: '4px' }}>
@@ -1507,15 +1682,16 @@ export default function CadetPortal({ cadet, onLogout }) {
                         style={{
                           borderBottom: `1px solid ${t.tableRowBorder}`,
                           background: idx % 2 === 0 ? 'transparent' : t.tableAltRow,
-                          transition: 'background-color 0.15s ease'
+                          transition: 'background-color 0.15s ease',
+                          whiteSpace: 'nowrap'
                         }}
                       >
                         {/* Friendly Date & Cut-off Time */}
-                        <td style={{ padding: '0.9rem 1.25rem' }}>
-                          <div style={{ fontWeight: 700, color: t.textMain, fontSize: '0.86rem' }}>
+                        <td style={{ padding: '0.9rem 1.25rem', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontWeight: 700, color: t.textMain, fontSize: '0.86rem', whiteSpace: 'nowrap' }}>
                             {friendlyDate}
                           </div>
-                          <div style={{ marginTop: '4px' }}>
+                          <div style={{ marginTop: '4px', whiteSpace: 'nowrap' }}>
                             <span
                               style={{
                                 fontSize: '0.72rem',
@@ -1527,23 +1703,21 @@ export default function CadetPortal({ cadet, onLogout }) {
                                 borderRadius: '4px',
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '4px'
+                                whiteSpace: 'nowrap'
                               }}
                             >
-                              <Clock size={10} color={isLight ? '#92400e' : '#d97706'} />
                               <span>Cut-off: {formattedCutoff}</span>
                             </span>
                           </div>
                         </td>
 
                         {/* Time In */}
-                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                        <td style={{ padding: '0.9rem 1.25rem', whiteSpace: 'nowrap' }}>
                           {timeInStr ? (
                             <div
                               style={{
                                 display: 'inline-flex',
                                 alignItems: 'center',
-                                gap: '5px',
                                 background: isLate
                                   ? (isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.15)')
                                   : (isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.1)'),
@@ -1552,43 +1726,75 @@ export default function CadetPortal({ cadet, onLogout }) {
                                   : (isLight ? '#bbf7d0' : 'rgba(16, 185, 129, 0.25)')
                                   }`,
                                 padding: '2px 8px',
-                                borderRadius: '6px'
+                                borderRadius: '6px',
+                                whiteSpace: 'nowrap'
                               }}
                             >
-                              <Clock size={12} color={isLate ? '#d97706' : (isLight ? '#15803d' : '#34d399')} />
                               <span
                                 style={{
                                   fontFamily: 'monospace',
                                   fontWeight: 800,
-                                  color: isLate ? '#d97706' : (isLight ? '#15803d' : '#34d399')
+                                  color: isLate ? '#d97706' : (isLight ? '#15803d' : '#34d399'),
+                                  whiteSpace: 'nowrap'
                                 }}
                               >
                                 {timeInStr}
                               </span>
                             </div>
                           ) : (
-                            <span style={{ color: t.textSubtle, fontSize: '0.8rem' }}>—</span>
+                            <span style={{ color: t.textSubtle, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>—</span>
                           )}
                         </td>
 
                         {/* Time Out */}
-                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                        <td style={{ padding: '0.9rem 1.25rem', whiteSpace: 'nowrap' }}>
                           {timeOutStr ? (
-                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', background: isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.1)', border: isLight ? '1px solid #bbf7d0' : '1px solid rgba(16, 185, 129, 0.25)', padding: '2px 8px', borderRadius: '6px' }}>
-                              <Clock size={12} color={isLight ? '#15803d' : '#34d399'} />
-                              <span style={{ fontFamily: 'monospace', fontWeight: 800, color: isLight ? '#15803d' : '#34d399' }}>{timeOutStr}</span>
+                            <div
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                background: isLight ? '#dcfce7' : 'rgba(16, 185, 129, 0.1)',
+                                border: isLight ? '1px solid #bbf7d0' : '1px solid rgba(16, 185, 129, 0.25)',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
+                              <span
+                                style={{
+                                  fontFamily: 'monospace',
+                                  fontWeight: 800,
+                                  color: isLight ? '#15803d' : '#34d399',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {timeOutStr}
+                              </span>
                             </div>
                           ) : hasTimeIn ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: isLight ? '#ffedd5' : 'rgba(249, 115, 22, 0.12)', border: isLight ? '1px solid #fed7aa' : '1px solid rgba(249, 115, 22, 0.3)', color: isLight ? '#c2410c' : '#fb923c', padding: '2px 8px', borderRadius: '6px', fontSize: '0.72rem', fontWeight: 700 }}>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                background: isLight ? '#ffedd5' : 'rgba(249, 115, 22, 0.12)',
+                                border: isLight ? '1px solid #fed7aa' : '1px solid rgba(249, 115, 22, 0.3)',
+                                color: isLight ? '#c2410c' : '#fb923c',
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                whiteSpace: 'nowrap'
+                              }}
+                            >
                               No Time-Out
                             </span>
                           ) : (
-                            <span style={{ color: t.textSubtle, fontSize: '0.8rem' }}>—</span>
+                            <span style={{ color: t.textSubtle, fontSize: '0.8rem', whiteSpace: 'nowrap' }}>—</span>
                           )}
                         </td>
 
                         {/* Status Badge */}
-                        <td style={{ padding: '0.9rem 1.25rem' }}>
+                        <td style={{ padding: '0.9rem 1.25rem', whiteSpace: 'nowrap' }}>
                           <span
                             style={{
                               display: 'inline-flex',
@@ -1600,16 +1806,24 @@ export default function CadetPortal({ cadet, onLogout }) {
                               padding: '3px 9px',
                               borderRadius: '6px',
                               fontSize: '0.74rem',
-                              fontWeight: 800
+                              fontWeight: 800,
+                              whiteSpace: 'nowrap'
                             }}
                           >
                             {badgeIcon}
-                            <span>{badgeLabel}</span>
+                            <span style={{ whiteSpace: 'nowrap' }}>{badgeLabel}</span>
                           </span>
                         </td>
 
                         {/* Remarks */}
-                        <td style={{ padding: '0.9rem 1.25rem', fontSize: '0.8rem', color: isRecorded ? t.textMain : isLight ? '#b91c1c' : '#fca5a5' }}>
+                        <td
+                          style={{
+                            padding: '0.9rem 1.25rem',
+                            fontSize: '0.8rem',
+                            color: isRecorded ? t.textMain : isLight ? '#b91c1c' : '#fca5a5',
+                            whiteSpace: 'nowrap'
+                          }}
+                        >
                           {remarkText}
                         </td>
                       </tr>
@@ -1622,48 +1836,205 @@ export default function CadetPortal({ cadet, onLogout }) {
         </div>
 
         {/* ============================================================ */}
-        {/* 6. FRIENDLY CADET GUIDELINES & POLICIES FOOTER SECTION       */}
+        {/* 6. ATTENDANCE PERFORMANCE POLICY RULES REFERENCE CARD        */}
         {/* ============================================================ */}
         <div
+          className="cadet-policy-card-wrapper"
           style={{
-            background: t.cardBg,
+            backgroundColor: t.cardBg,
             border: `1px solid ${t.cardBorder}`,
             borderRadius: '16px',
-            padding: '1.25rem 1.5rem',
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-            gap: '1rem',
+            padding: 'clamp(1.15rem, 3vw, 1.75rem)',
             boxShadow: t.cardShadow,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1.25rem',
+            boxSizing: 'border-box',
+            width: '100%',
             transition: 'background-color 0.2s ease, border-color 0.2s ease'
           }}
         >
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <Clock size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: t.textMain }}>Drill Formation Hours</div>
-              <div style={{ fontSize: '0.76rem', color: t.textMuted, marginTop: '2px', lineHeight: 1.45 }}>
-                Time-In starts at 06:00 AM. Scans past 07:00 AM are tagged as Tardy/Late. Dismissal time-out starts at 12:00 PM.
+          {/* Section Title Header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+              borderBottom: `1px solid ${t.tableRowBorder}`,
+              paddingBottom: '0.85rem'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  backgroundColor: isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.35)',
+                  border: isLight ? '1px solid #a7f3d0' : '1px solid rgba(16, 185, 129, 0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: isLight ? '#047857' : '#34d399',
+                  flexShrink: 0
+                }}
+              >
+                <Info size={17} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <span
+                  style={{
+                    fontWeight: 800,
+                    color: t.textMain,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    fontSize: 'clamp(0.8rem, 2.5vw, 0.86rem)',
+                    fontFamily: "'Oswald', sans-serif",
+                    lineHeight: 1.2
+                  }}
+                >
+                  Attendance Performance Policy Rules Reference
+                </span>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, lineHeight: 1.3 }}>
+                  Standard Operating Procedures & Automated Demerit Conversions
+                </div>
               </div>
             </div>
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                color: isLight ? '#064e2e' : '#facc15',
+                background: isLight ? 'rgba(6, 78, 46, 0.08)' : 'rgba(229, 169, 0, 0.12)',
+                padding: '3px 8px',
+                borderRadius: '6px',
+                border: isLight ? '1px solid rgba(6, 78, 46, 0.18)' : '1px solid rgba(229, 169, 0, 0.3)',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              Official ROTC Training Manual Guidelines
+            </span>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <FileText size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: t.textMain }}>Official Excuse Justifications</div>
-              <div style={{ fontSize: '0.76rem', color: t.textMuted, marginTop: '2px', lineHeight: 1.45 }}>
-                Submit medical certificates or university official duty excuse letters to your Platoon Leader or S1 within 5 school days.
+          {/* 3-Column Policy Grid Cards (Responsive minmax) */}
+          <div
+            className="cadet-policy-grid"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+              gap: '1rem',
+              boxSizing: 'border-box'
+            }}
+          >
+            {/* Card 1: Official Drop Policy (Crimson) */}
+            <div
+              style={{
+                backgroundColor: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.45)',
+                border: isLight ? '1px solid #fecdd3' : '1px solid rgba(244, 63, 94, 0.3)',
+                borderRadius: '10px',
+                padding: '1rem',
+                boxShadow: isLight ? '0 1px 2px rgba(0, 0, 0, 0.03)' : 'none',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    color: isLight ? '#9f1239' : '#fca5a5',
+                    backgroundColor: isLight ? '#ffe4e6' : 'rgba(244, 63, 94, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  <AlertOctagon size={12} style={{ flexShrink: 0 }} /> Official Drop (Discharge)
+                </span>
+                <span style={{ fontSize: '0.68rem', color: t.textSubtle, fontWeight: 700 }}>Rule 1 & 2</span>
               </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: t.textMain, lineHeight: '1.55' }}>
+                <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Absences:</strong> Triggers immediate official drop status.</li>
+                <li><strong>&gt; 3 Interval Absences:</strong> More than 3 total accumulated unexcused absences results in drop.</li>
+              </ul>
             </div>
-          </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <MapPin size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: t.textMain }}>Unit Command Office</div>
-              <div style={{ fontSize: '0.76rem', color: t.textMuted, marginTop: '2px', lineHeight: 1.45 }}>
-                Caraga State University 1501st CDC ROTC Unit Headquarters, Main Campus, Ampayon, Butuan City.
+            {/* Card 2: Warning Threshold Policy (Amber) */}
+            <div
+              style={{
+                backgroundColor: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.45)',
+                border: isLight ? '1px solid #fde68a' : '1px solid rgba(245, 158, 11, 0.3)',
+                borderRadius: '10px',
+                padding: '1rem',
+                boxShadow: isLight ? '0 1px 2px rgba(0, 0, 0, 0.03)' : 'none',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    color: isLight ? '#92400e' : '#fcd34d',
+                    backgroundColor: isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  <AlertTriangle size={12} style={{ flexShrink: 0 }} /> Warning Threshold
+                </span>
+                <span style={{ fontSize: '0.68rem', color: t.textSubtle, fontWeight: 700 }}>Rule 3 & 4</span>
               </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: t.textMain, lineHeight: '1.55' }}>
+                <li style={{ marginBottom: '4px' }}><strong>3 Interval Absences:</strong> First official warning issued for impending drop.</li>
+                <li><strong>2 Absences:</strong> Early notification advisory for unit commander intervention.</li>
+              </ul>
+            </div>
+
+            {/* Card 3: Tardiness & Missing Scans Conversions (Emerald / Teal) */}
+            <div
+              style={{
+                backgroundColor: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.45)',
+                border: isLight ? '1px solid #cbd5e1' : '1px solid rgba(16, 185, 129, 0.3)',
+                borderRadius: '10px',
+                padding: '1rem',
+                boxShadow: isLight ? '0 1px 2px rgba(0, 0, 0, 0.03)' : 'none',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.7rem',
+                    fontWeight: 800,
+                    color: isLight ? '#0f766e' : '#5eead4',
+                    backgroundColor: isLight ? '#ccfbf1' : 'rgba(20, 184, 166, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '6px',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  <Clock size={12} style={{ flexShrink: 0 }} /> Tardiness & Missing Scans
+                </span>
+                <span style={{ fontSize: '0.68rem', color: t.textSubtle, fontWeight: 700 }}>Rule 5, 6 & 7</span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: t.textMain, lineHeight: '1.55' }}>
+                <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Lates:</strong> Automatically penalized and converted to <strong>1 Absent</strong>.</li>
+                <li style={{ marginBottom: '4px' }}><strong>4 Interval Lates:</strong> Every 4 cumulative late scans converts to <strong>1 Absent</strong>.</li>
+                <li><strong>4 Interval No Time-In/Out:</strong> Every 4 missing scans converts to <strong>1 Absent</strong>.</li>
+              </ul>
             </div>
           </div>
         </div>

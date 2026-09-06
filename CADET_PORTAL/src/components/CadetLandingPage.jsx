@@ -16,7 +16,9 @@ import {
   Users,
   QrCode,
   LogIn,
-  Info
+  Info,
+  FileText,
+  MapPin
 } from 'lucide-react';
 
 export default function CadetLandingPage({ onOpenLogin }) {
@@ -26,18 +28,18 @@ export default function CadetLandingPage({ onOpenLogin }) {
   const faqs = [
     {
       q: 'What is the minimum attendance required to pass CSU ROTC?',
-      a: 'Cadets must complete at least 12 of the 15 scheduled formation drills. Accumulating four (4) unexcused absences results in being officially Dropped from the Roll (DRP) in accordance with ARESCOM directives and NSTP RA 9163 regulations.'
+      a: 'Cadets must complete at least 80% attendance rate from the scheduled formation drills. Accumulating four (4) unexcused absences results in being officially Dropped from the Roll (DRP).'
     },
     {
       q: 'How does the morning formation cut-off time work?',
-      a: 'Sunday morning formation calls begin promptly at 0700H (07:00 AM). Scans completed after the configured cut-off time (e.g., 07:15 AM or 07:30 AM as designated by the Commandant) are marked as Late / Tardy with amber badges and incur demerit points.'
+      a: 'Saturday/Sunday morning formation calls begin promptly at 0700H (07:00 AM). Scans completed after the configured cut-off time (e.g., 07:15 AM or 07:30 AM as designated by the Admin) are marked as Late / Tardy with amber badges and incur demerit points.'
     },
     {
       q: 'How can I submit an excuse letter or medical certificate?',
-      a: 'Excused absences must be filed within 7 calendar days to the S1 Personnel / Adjutant Section. Medical slips must be verified and stamped by the Caraga State University Medical Clinic.'
+      a: 'Excused absences must be filed within 5 calendar days after the formation date to the Platoon Leader / S1 Personnel. Medical receipt must be verified.'
     },
     {
-      q: 'How do I present my digital Cadet ID during Sunday formation?',
+      q: 'How do I present my digital Cadet ID during Saturday/Sunday formation?',
       a: 'Log into this portal with your Cadet ID, navigate to the Digital ID Card tab, and present the high-density QR code on your mobile phone screen for immediate optical scanning by duty officers.'
     }
   ];
@@ -248,37 +250,45 @@ export default function CadetLandingPage({ onOpenLogin }) {
         <div style={{ maxWidth: '860px', margin: '0 auto', position: 'relative', zIndex: 1, padding: '0 0.5rem' }}>
           {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
           <div
+            className="cadet-logos-banner-container"
             style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: 'clamp(0.4rem, 2vw, 1.4rem)',
+              justifyContent: 'safe center',
+              gap: 'clamp(0.25rem, 1.4vw, 1.4rem)',
               margin: '0 auto 1.5rem auto',
-              flexWrap: 'wrap',
-              maxWidth: '920px'
+              flexWrap: 'nowrap',
+              overflowX: 'auto',
+              overflowY: 'hidden',
+              WebkitOverflowScrolling: 'touch',
+              scrollBehavior: 'smooth',
+              maxWidth: '100%',
+              width: '100%',
+              padding: '6px 8px 12px 8px',
+              boxSizing: 'border-box'
             }}
           >
             {/* 1. Far Left: RCDG Logo */}
             <div
               title="15th Regional Community Defense Group (15RCDG)"
               style={{
-                width: 'clamp(64px, 8.5vw, 100px)',
-                height: 'clamp(64px, 8.5vw, 100px)',
+                width: 'clamp(42px, 7vw, 100px)',
+                height: 'clamp(42px, 7vw, 100px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: '2.5px solid rgba(229, 169, 0, 0.6)',
+                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.6)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '6px',
+                padding: 'clamp(3px, 0.6vw, 6px)',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
             >
               <img
                 src="/rcdg-logo.png"
-                alt="15th RCDG Logo"
+                alt="15th Regional Community Defense Group"
                 style={{
                   width: '100%',
                   height: '100%',
@@ -294,23 +304,23 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="1501st Community Defense Center (1501st CDC)"
               style={{
-                width: 'clamp(74px, 10vw, 116px)',
-                height: 'clamp(74px, 10vw, 116px)',
+                width: 'clamp(50px, 8.5vw, 116px)',
+                height: 'clamp(50px, 8.5vw, 116px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: '2.5px solid rgba(229, 169, 0, 0.7)',
+                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.7)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '7px',
+                padding: 'clamp(4px, 0.7vw, 7px)',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
             >
               <img
                 src="/cdc-logo.png"
-                alt="1501st CDC Logo"
+                alt="1501st Community Defense Center"
                 style={{
                   width: '100%',
                   height: '100%',
@@ -327,16 +337,16 @@ export default function CadetLandingPage({ onOpenLogin }) {
               className="cadet-hero-seal"
               title="Caraga State University ROTC Unit"
               style={{
-                width: 'clamp(170px, 23vw, 235px)',
-                height: 'clamp(170px, 23vw, 235px)',
+                width: 'clamp(95px, 17vw, 235px)',
+                height: 'clamp(95px, 17vw, 235px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
-                border: '4.5px solid #e5a900',
+                border: 'clamp(2.5px, 0.4vw, 4.5px) solid #e5a900',
                 boxShadow: '0 18px 52px rgba(0, 0, 0, 0.7), 0 0 48px rgba(229, 169, 0, 0.6), 0 0 90px rgba(250, 204, 21, 0.35)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '12px',
+                padding: 'clamp(6px, 1.2vw, 12px)',
                 flexShrink: 0,
                 zIndex: 2,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
@@ -344,7 +354,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
             >
               <img
                 src="/rotc-seal-transparent.png"
-                alt="CSU ROTC Official Seal"
+                alt="Caraga State University Reserve Officers' Training Corps"
                 style={{
                   width: '100%',
                   height: '100%',
@@ -359,23 +369,23 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="National Service Training Program (NSTP CSU)"
               style={{
-                width: 'clamp(74px, 10vw, 116px)',
-                height: 'clamp(74px, 10vw, 116px)',
+                width: 'clamp(50px, 8.5vw, 116px)',
+                height: 'clamp(50px, 8.5vw, 116px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: '2.5px solid rgba(229, 169, 0, 0.7)',
+                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.7)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '7px',
+                padding: 'clamp(4px, 0.7vw, 7px)',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
             >
               <img
                 src="/nstp-logo.png"
-                alt="CSU NSTP Logo"
+                alt="National Service Training Program"
                 style={{
                   width: '100%',
                   height: '100%',
@@ -391,23 +401,23 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="Caraga State University (CSU Main)"
               style={{
-                width: 'clamp(64px, 8.5vw, 100px)',
-                height: 'clamp(64px, 8.5vw, 100px)',
+                width: 'clamp(42px, 7vw, 100px)',
+                height: 'clamp(42px, 7vw, 100px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: '2.5px solid rgba(229, 169, 0, 0.6)',
+                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.6)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '6px',
+                padding: 'clamp(3px, 0.6vw, 6px)',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
             >
               <img
                 src="/csu-logo.png"
-                alt="Caraga State University Logo"
+                alt="Caraga State University"
                 style={{
                   width: '100%',
                   height: '100%',
@@ -457,7 +467,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
               wordBreak: 'break-word'
             }}
           >
-            Caraga State University<br />
+            Caraga State University<br />Reserve Officers' Training Corps<br />
             <span style={{ color: '#e5a900' }}>Cadet Attendance Portal</span>
           </h1>
 
@@ -516,213 +526,57 @@ export default function CadetLandingPage({ onOpenLogin }) {
       </section>
 
       {/* ========================================================================= */}
-      {/* ATTENDANCE PERFORMANCE POLICY RULES REFERENCE (No Edge Clipping)          */}
+      {/* FORMATION HOURS, EXCUSES & COMMAND OFFICE INFO BAR (3-Column Info Bar)    */}
       {/* ========================================================================= */}
       <section
         className="cadet-section-container"
         style={{
           maxWidth: '1100px',
           margin: '0 auto',
-          padding: '3rem clamp(1rem, 3.5vw, 1.5rem) 1.5rem clamp(1rem, 3.5vw, 1.5rem)',
+          padding: '2.5rem clamp(1rem, 3.5vw, 1.5rem) 1.5rem clamp(1rem, 3.5vw, 1.5rem)',
           boxSizing: 'border-box'
         }}
       >
         <div
-          className="cadet-policy-card-wrapper"
           style={{
             backgroundColor: '#ffffff',
             border: '1px solid #e2e8f0',
             borderRadius: '16px',
-            padding: 'clamp(1.15rem, 3vw, 1.75rem)',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
-            display: 'flex',
-            flexDirection: 'column',
+            padding: '1.25rem 1.5rem',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
             gap: '1.25rem',
-            boxSizing: 'border-box',
-            width: '100%'
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+            boxSizing: 'border-box'
           }}
         >
-          {/* Section Title Header */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-              borderBottom: '1px solid #f1f5f9',
-              paddingBottom: '0.85rem'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: '#ecfdf5',
-                  border: '1px solid #a7f3d0',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#047857',
-                  flexShrink: 0
-                }}
-              >
-                <Info size={17} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <span
-                  style={{
-                    fontWeight: 800,
-                    color: '#0f172a',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    fontSize: 'clamp(0.8rem, 2.5vw, 0.86rem)',
-                    fontFamily: "'Oswald', sans-serif",
-                    lineHeight: 1.2
-                  }}
-                >
-                  Attendance Performance Policy Rules Reference
-                </span>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.3 }}>
-                  Standard Operating Procedures & Automated Demerit Conversions
-                </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <Clock size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#064e2e' }}>Drill Formation Hours</div>
+              <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px', lineHeight: 1.45 }}>
+                Time-In starts at 07:00 AM. Scans past 07:30 AM are tagged as Tardy/Late. Dismissal time-out starts at 12:00 PM or 5:00 PM.
               </div>
             </div>
-            <span
-              style={{
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                color: '#064e2e',
-                background: 'rgba(6, 78, 46, 0.08)',
-                padding: '3px 8px',
-                borderRadius: '6px',
-                border: '1px solid rgba(6, 78, 46, 0.18)',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              Official ROTC Training Manual Guidelines
-            </span>
           </div>
 
-          {/* 3-Column Policy Grid Cards (Responsive minmax) */}
-          <div
-            className="cadet-policy-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: '1rem',
-              boxSizing: 'border-box'
-            }}
-          >
-            {/* Card 1: Official Drop Policy (Crimson) */}
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #fecdd3',
-                borderRadius: '10px',
-                padding: '1rem',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '0.7rem',
-                    fontWeight: 800,
-                    color: '#9f1239',
-                    backgroundColor: '#ffe4e6',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  <AlertOctagon size={12} style={{ flexShrink: 0 }} /> Official Drop (Discharge)
-                </span>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 1 & 2</span>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <FileText size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#064e2e' }}>Official Excuse Justifications</div>
+              <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px', lineHeight: 1.45 }}>
+                Submit medical certificates or university official duty excuse letters to your Platoon Leader or S1 within 5 school days.
               </div>
-              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: '#334155', lineHeight: '1.55' }}>
-                <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Absences:</strong> Triggers immediate official drop status.</li>
-                <li><strong>&gt; 3 Interval Absences:</strong> More than 3 total accumulated unexcused absences results in drop.</li>
-              </ul>
             </div>
+          </div>
 
-            {/* Card 2: Warning Threshold Policy (Amber) */}
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #fde68a',
-                borderRadius: '10px',
-                padding: '1rem',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '0.7rem',
-                    fontWeight: 800,
-                    color: '#92400e',
-                    backgroundColor: '#fef3c7',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  <AlertTriangle size={12} style={{ flexShrink: 0 }} /> Warning Threshold
-                </span>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 3 & 4</span>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <MapPin size={20} color="#e5a900" style={{ flexShrink: 0, marginTop: '2px' }} />
+            <div>
+              <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#064e2e' }}>Unit Command Office</div>
+              <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px', lineHeight: 1.45 }}>
+                Caraga State University Main ROTC Unit, Main Campus, Ampayon, Butuan City.
               </div>
-              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: '#334155', lineHeight: '1.55' }}>
-                <li style={{ marginBottom: '4px' }}><strong>3 Interval Absences:</strong> First official warning issued for impending drop.</li>
-                <li><strong>2 Absences:</strong> Early notification advisory for unit commander intervention.</li>
-              </ul>
-            </div>
-
-            {/* Card 3: Tardiness & Missing Scans Conversions (Emerald / Teal) */}
-            <div
-              style={{
-                backgroundColor: '#ffffff',
-                border: '1px solid #cbd5e1',
-                borderRadius: '10px',
-                padding: '1rem',
-                boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)',
-                boxSizing: 'border-box'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    fontSize: '0.7rem',
-                    fontWeight: 800,
-                    color: '#0f766e',
-                    backgroundColor: '#ccfbf1',
-                    padding: '2px 8px',
-                    borderRadius: '6px',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  <Clock size={12} style={{ flexShrink: 0 }} /> Tardiness & Missing Scans
-                </span>
-                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 5, 6 & 7</span>
-              </div>
-              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: '#334155', lineHeight: '1.55' }}>
-                <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Lates:</strong> Automatically penalized and converted to <strong>1 Absent</strong>.</li>
-                <li style={{ marginBottom: '4px' }}><strong>4 Interval Lates:</strong> Every 4 cumulative late scans converts to <strong>1 Absent</strong>.</li>
-                <li><strong>4 Interval No Time-In/Out:</strong> Every 4 missing scans converts to <strong>1 Absent</strong>.</li>
-              </ul>
             </div>
           </div>
         </div>
@@ -788,11 +642,11 @@ export default function CadetLandingPage({ onOpenLogin }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.84rem', color: '#334155' }}>
                   <CheckCircle2 size={16} color="#059669" style={{ marginTop: '2px', flexShrink: 0 }} />
-                  <span><strong>Valid Medical Excuses:</strong> Must be countersigned by the Caraga State University Medical Clinic within 7 days.</span>
+                  <span><strong>Valid Medical Excuses:</strong> State that valid medical excuses require attached proof (e.g., medical receipts) submitted within 5 days.</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.84rem', color: '#334155' }}>
                   <CheckCircle2 size={16} color="#059669" style={{ marginTop: '2px', flexShrink: 0 }} />
-                  <span><strong>Official School Business:</strong> Academic competitions, research conventions, or varsity meets require dean endorsement.</span>
+                  <span><strong>Official School Business:</strong> Academic competitions, research conventions, varsity meets or etc, requires a memorandum or dean endorsement.</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.84rem', color: '#334155' }}>
                   <CheckCircle2 size={16} color="#059669" style={{ marginTop: '2px', flexShrink: 0 }} />
@@ -999,10 +853,10 @@ export default function CadetLandingPage({ onOpenLogin }) {
               lineHeight: 1.3
             }}
           >
-            Caraga State University Main ROTC Unit
+            Caraga State University Main ROTCU
           </div>
           <p style={{ margin: '0 0 1rem 0', fontSize: '0.78rem', lineHeight: 1.5 }}>
-            Department of Military Science & Tactics (DMST), Ampayon, Butuan City, Agusan del Norte, Philippines
+            Department of Military Science & Tactics (DMST) <br /> Ampayon, Butuan City, Agusan del Norte, Philippines
           </p>
           <div
             style={{
