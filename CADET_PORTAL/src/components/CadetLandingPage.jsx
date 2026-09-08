@@ -86,11 +86,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
             justify-content: center !important;
             align-items: center !important;
           }
-          .cadet-hero-seal {
-            width: 140px !important;
-            height: 140px !important;
-            margin-bottom: 1rem !important;
-          }
+
           .cadet-hero-title {
             font-size: 1.6rem !important;
             line-height: 1.22 !important;
@@ -181,7 +177,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                   lineHeight: 1.2
                 }}
               >
-                CARAGA STATE UNIVERSITY
+                CSU MAIN ROTC UNIT
               </span>
               <span
                 style={{
@@ -247,41 +243,33 @@ export default function CadetLandingPage({ onOpenLogin }) {
           }}
         />
 
-        <div style={{ maxWidth: '860px', margin: '0 auto', position: 'relative', zIndex: 1, padding: '0 0.5rem' }}>
+        <div style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%' }}>
           {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
           <div
-            className="cadet-logos-banner-container"
             style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'safe center',
-              gap: 'clamp(0.25rem, 1.4vw, 1.4rem)',
+              justifyContent: 'center',
+              gap: 'clamp(0.4rem, 2vw, 1.4rem)',
               margin: '0 auto 1.5rem auto',
-              flexWrap: 'nowrap',
-              overflowX: 'auto',
-              overflowY: 'hidden',
-              WebkitOverflowScrolling: 'touch',
-              scrollBehavior: 'smooth',
-              maxWidth: '100%',
-              width: '100%',
-              padding: '6px 8px 12px 8px',
-              boxSizing: 'border-box'
+              flexWrap: 'wrap',
+              maxWidth: '920px'
             }}
           >
             {/* 1. Far Left: RCDG Logo */}
             <div
               title="15th Regional Community Defense Group (15RCDG)"
               style={{
-                width: 'clamp(42px, 7vw, 100px)',
-                height: 'clamp(42px, 7vw, 100px)',
+                width: 'clamp(64px, 8.5vw, 100px)',
+                height: 'clamp(64px, 8.5vw, 100px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.6)',
+                border: '2.5px solid rgba(229, 169, 0, 0.6)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: 'clamp(3px, 0.6vw, 6px)',
+                padding: '6px',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
@@ -304,16 +292,16 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="1501st Community Defense Center (1501st CDC)"
               style={{
-                width: 'clamp(50px, 8.5vw, 116px)',
-                height: 'clamp(50px, 8.5vw, 116px)',
+                width: 'clamp(74px, 10vw, 116px)',
+                height: 'clamp(74px, 10vw, 116px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.7)',
+                border: '2.5px solid rgba(229, 169, 0, 0.7)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: 'clamp(4px, 0.7vw, 7px)',
+                padding: '7px',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
@@ -334,19 +322,18 @@ export default function CadetLandingPage({ onOpenLogin }) {
 
             {/* 3. Center: Featured Main ROTC Emblem (Significantly Enlarged) */}
             <div
-              className="cadet-hero-seal"
               title="Caraga State University ROTC Unit"
               style={{
-                width: 'clamp(95px, 17vw, 235px)',
-                height: 'clamp(95px, 17vw, 235px)',
+                width: 'clamp(170px, 23vw, 235px)',
+                height: 'clamp(170px, 23vw, 235px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
-                border: 'clamp(2.5px, 0.4vw, 4.5px) solid #e5a900',
+                border: '4.5px solid #e5a900',
                 boxShadow: '0 18px 52px rgba(0, 0, 0, 0.7), 0 0 48px rgba(229, 169, 0, 0.6), 0 0 90px rgba(250, 204, 21, 0.35)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: 'clamp(6px, 1.2vw, 12px)',
+                padding: '12px',
                 flexShrink: 0,
                 zIndex: 2,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
@@ -369,16 +356,16 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="National Service Training Program (NSTP CSU)"
               style={{
-                width: 'clamp(50px, 8.5vw, 116px)',
-                height: 'clamp(50px, 8.5vw, 116px)',
+                width: 'clamp(74px, 10vw, 116px)',
+                height: 'clamp(74px, 10vw, 116px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.7)',
+                border: '2.5px solid rgba(229, 169, 0, 0.7)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: 'clamp(4px, 0.7vw, 7px)',
+                padding: '7px',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
@@ -401,16 +388,16 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div
               title="Caraga State University (CSU Main)"
               style={{
-                width: 'clamp(42px, 7vw, 100px)',
-                height: 'clamp(42px, 7vw, 100px)',
+                width: 'clamp(64px, 8.5vw, 100px)',
+                height: 'clamp(64px, 8.5vw, 100px)',
                 borderRadius: '50%',
                 background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                border: 'clamp(1.5px, 0.25vw, 2.5px) solid rgba(229, 169, 0, 0.6)',
+                border: '2.5px solid rgba(229, 169, 0, 0.6)',
                 boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: 'clamp(3px, 0.6vw, 6px)',
+                padding: '6px',
                 flexShrink: 0,
                 transition: 'transform 0.3s ease, box-shadow 0.3s ease'
               }}
@@ -438,18 +425,16 @@ export default function CadetLandingPage({ onOpenLogin }) {
               gap: '6px',
               background: 'rgba(255, 255, 255, 0.12)',
               border: '1px solid rgba(229, 169, 0, 0.4)',
-              padding: '4px 12px',
+              padding: '5px 14px',
               borderRadius: '9999px',
-              fontSize: 'clamp(0.7rem, 2.2vw, 0.78rem)',
+              fontSize: '0.78rem',
               fontWeight: 700,
               color: '#e5a900',
-              marginBottom: '1.15rem',
-              textTransform: 'uppercase',
-              maxWidth: '100%',
-              boxSizing: 'border-box'
+              marginBottom: '1.5rem',
+              textTransform: 'uppercase'
             }}
           >
-            <Shield size={13} style={{ flexShrink: 0 }} />
+            <Shield size={14} style={{ flexShrink: 0 }} />
             <span>HONOR • PATRIOTISM • DUTY</span>
           </div>
 
@@ -482,7 +467,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
               fontWeight: 400
             }}
           >
-            Check your formation drill logs, monitor cut-off times, inspect merits and demerits,
+            Check your formation drill logs, monitor cut-off times,
             and access your official digital cadet identification pass.
           </p>
 
@@ -869,7 +854,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
               color: '#64748b'
             }}
           >
-            <span style={{ color: '#e5a900', fontWeight: 700 }}>HONOR • PATRIOTISM • DUTY</span>
+            <span style={{ color: '#e5a900', fontWeight: 700 }}>Cpl Christian B Abamo PA (Res)</span>
 
 
           </div>

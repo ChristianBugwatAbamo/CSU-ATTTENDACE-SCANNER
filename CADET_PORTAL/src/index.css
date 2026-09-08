@@ -2019,8 +2019,30 @@ body {
   }
 }
 
+.cadet-standing-rate-container {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
 .cadet-standing-progress-bar {
   display: block !important;
+  width: clamp(90px, 20vw, 160px);
+  max-width: 160px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+@media (min-width: 640px) {
+  .cadet-standing-rate-container {
+    gap: 1rem;
+  }
+  .cadet-standing-progress-bar {
+    width: 160px;
+    max-width: 160px;
+    height: 9px;
+  }
 }
 
 /* Formation Drill Schedule: Horizontal Scroll & No-Wrap Cell Enforcement */

@@ -82,11 +82,50 @@ const formatCutoffDisplay = (cutoffStr) => {
 };
 
 export default function CadetPortal({ cadet, onLogout }) {
+  const cid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
   const [cadetProfile, setCadetProfile] = useState(cadet || {});
-  const [logs, setLogs] = useState([]);
-  const [formationDates, setFormationDates] = useState([]);
-  const [dbSessions, setDbSessions] = useState([]);
-  const [loadingLogs, setLoadingLogs] = useState(true);
+
+  // 1. Instant Cache Initialization (0ms UI render)
+  const [logs, setLogs] = useState(() => {
+    if (!cid) return [];
+    try {
+      const cached = localStorage.getItem(`csu_rotc_cadet_logs_${cid}`);
+      return cached ? JSON.parse(cached) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [formationDates, setFormationDates] = useState(() => {
+    try {
+      const cached = localStorage.getItem('csu_rotc_formation_dates');
+      return cached ? JSON.parse(cached) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  const [dbSessions, setDbSessions] = useState(() => {
+    try {
+      const cached = localStorage.getItem('csu_rotc_db_sessions');
+      return cached ? JSON.parse(cached) : [];
+    } catch (_) {
+      return [];
+    }
+  });
+
+  // Only show blocking loader if we have ZERO cached logs to display
+  const [loadingLogs, setLoadingLogs] = useState(() => {
+    if (!cid) return true;
+    try {
+      const cached = localStorage.getItem(`csu_rotc_cadet_logs_${cid}`);
+      return !cached || JSON.parse(cached).length === 0;
+    } catch (_) {
+      return true;
+    }
+  });
+
+  const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const [showIdModal, setShowIdModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchDate, setSearchDate] = useState('');
@@ -141,21 +180,31 @@ export default function CadetPortal({ cadet, onLogout }) {
     }
   });
 
-  const loadData = async () => {
-    const cid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
-    if (!cid) return;
-    setLoadingLogs(true);
+  const loadData = async (isManual = false) => {
+    const activeCid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
+    if (!activeCid) return;
+    
+    // If cached data is present, sync quietly without blocking the screen
+    if (logs.length > 0 && !isManual) {
+      setIsBackgroundSyncing(true);
+    } else {
+      setLoadingLogs(true);
+    }
+
     try {
       const [historyLogs, sbSettings, mDates, sessionsRes, liveCadetRes] = await Promise.allSettled([
-        fetchCadetAttendanceHistory(cid),
-        fetchSettingsFromSupabase(),
-        fetchMandatoryFormationDates(),
-        fetchAttendanceSessionsFromSupabase(),
-        fetchCadetByCadetId(cid)
+        fetchCadetAttendanceHistory(activeCid, isManual),
+        fetchSettingsFromSupabase(isManual),
+        fetchMandatoryFormationDates(isManual),
+        fetchAttendanceSessionsFromSupabase(isManual),
+        fetchCadetByCadetId(activeCid)
       ]);
 
       if (historyLogs.status === 'fulfilled' && Array.isArray(historyLogs.value)) {
         setLogs(historyLogs.value);
+        try {
+          localStorage.setItem(`csu_rotc_cadet_logs_${activeCid}`, JSON.stringify(historyLogs.value));
+        } catch (_) {}
       }
       if (sbSettings.status === 'fulfilled' && sbSettings.value) {
         setSettings(sbSettings.value);
@@ -174,16 +223,17 @@ export default function CadetPortal({ cadet, onLogout }) {
     } finally {
       setLoadingLogs(false);
       setRefreshing(false);
+      setIsBackgroundSyncing(false);
     }
   };
 
   useEffect(() => {
-    loadData();
+    loadData(false);
   }, [cadet?.id, cadet?.cadetId, cadet?.cadet_id, cadet?.student_id]);
 
   const handleRefresh = () => {
     setRefreshing(true);
-    loadData();
+    loadData(true);
   };
 
   const handleStatusCardClick = (status) => {
@@ -1243,9 +1293,9 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexShrink: 0 }}>
+          <div className="cadet-standing-rate-container" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.68rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+              <div style={{ fontSize: '0.68rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', letterSpacing: '0.3px' }}>
                 Rate
               </div>
               <div
@@ -1254,7 +1304,8 @@ export default function CadetPortal({ cadet, onLogout }) {
                   fontSize: 'clamp(1.2rem, 3.8vw, 1.55rem)',
                   fontWeight: 900,
                   color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669',
-                  lineHeight: 1.1
+                  lineHeight: 1.1,
+                  whiteSpace: 'nowrap'
                 }}
               >
                 {metrics.complianceRate}%
@@ -1263,8 +1314,6 @@ export default function CadetPortal({ cadet, onLogout }) {
             <div
               className="cadet-standing-progress-bar"
               style={{
-                width: 'clamp(44px, 12vw, 60px)',
-                height: '7px',
                 background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)',
                 borderRadius: '999px',
                 overflow: 'hidden',
@@ -1690,6 +1739,29 @@ export default function CadetPortal({ cadet, onLogout }) {
                     </button>
                   )}
                 </div>
+
+                {/* Background Cloud Syncing Status */}
+                {isBackgroundSyncing && (
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      fontSize: '0.72rem',
+                      color: '#e5a900',
+                      background: 'rgba(229, 169, 0, 0.1)',
+                      border: '1px solid rgba(229, 169, 0, 0.25)',
+                      padding: '0.35rem 0.65rem',
+                      borderRadius: '8px',
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0
+                    }}
+                  >
+                    <RefreshCw size={11} className="animate-spin" />
+                    <span>Syncing...</span>
+                  </div>
+                )}
 
                 {/* Refresh Button */}
                 <button

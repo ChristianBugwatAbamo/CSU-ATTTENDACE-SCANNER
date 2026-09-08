@@ -137,11 +137,13 @@ export default function PublicLandingPage({
     <div
       style={{
         minHeight: '100vh',
-        width: '100vw',
+        width: '100%',
+        maxWidth: '100%',
         background: '#f8fafc',
         color: '#1e293b',
         fontFamily: 'Inter, system-ui, sans-serif',
-        overflowX: 'hidden'
+        overflowX: 'hidden',
+        boxSizing: 'border-box'
       }}
     >
       {/* Top Public Navigation Bar */}
@@ -158,7 +160,9 @@ export default function PublicLandingPage({
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          boxSizing: 'border-box'
+          boxSizing: 'border-box',
+          width: '100%',
+          maxWidth: '100%'
         }}
       >
         {/* Unit Branding Container */}
@@ -196,7 +200,23 @@ export default function PublicLandingPage({
                   lineHeight: 1.2
                 }}
               >
-                CARAGA STATE UNIVERSITY ROTCU
+                CSU MAIN ROTC UNIT
+              </span>
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  background: 'rgba(229, 169, 0, 0.2)',
+                  color: '#facc15',
+                  border: '1px solid rgba(229, 169, 0, 0.5)',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  letterSpacing: '0.5px',
+                  textTransform: 'uppercase',
+                  whiteSpace: 'nowrap'
+                }}
+              >
+                ADMIN
               </span>
             </div>
             <div
@@ -277,7 +297,8 @@ export default function PublicLandingPage({
           position: 'relative',
           overflow: 'hidden',
           boxSizing: 'border-box',
-          width: '100%'
+          width: '100%',
+          maxWidth: '100%'
         }}
       >
         {/* Subtle Background Camo Grid Overlay */}
@@ -294,7 +315,7 @@ export default function PublicLandingPage({
         {/* Top Spacer for flex justify-between */}
         <div style={{ flexShrink: 0, height: '1px' }} />
 
-        <div style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%' }}>
+        <div style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%', boxSizing: 'border-box' }}>
           {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
           <div
             style={{
@@ -304,7 +325,9 @@ export default function PublicLandingPage({
               gap: 'clamp(0.4rem, 2vw, 1.4rem)',
               margin: '0 auto 1.5rem auto',
               flexWrap: 'wrap',
-              maxWidth: '920px'
+              maxWidth: '920px',
+              width: '100%',
+              boxSizing: 'border-box'
             }}
           >
             {/* 1. Far Left: RCDG Logo */}
@@ -423,7 +446,7 @@ export default function PublicLandingPage({
             >
               <img
                 src="/nstp-logo.png"
-                alt="CSU NSTP Logo"
+                alt=""
                 style={{
                   width: '100%',
                   height: '100%',
@@ -486,7 +509,7 @@ export default function PublicLandingPage({
             }}
           >
             <Shield size={14} />
-            <span>HONOR • PATRIOTISM • DUTY</span>
+            <span>HONOR • PATRIOTISM • DUTY </span>
           </div>
 
           <h1
@@ -500,8 +523,8 @@ export default function PublicLandingPage({
               textTransform: 'uppercase'
             }}
           >
-            Caraga State University<br />
-            <span style={{ color: '#e5a900' }}>ROTC Corps of Cadets</span>
+            Caraga State University<br />Reserve Officers' Training Corps<br />
+            <span style={{ color: '#e5a900' }}>Corps of Cadets</span>
           </h1>
 
           <p
@@ -514,7 +537,7 @@ export default function PublicLandingPage({
               fontWeight: 400
             }}
           >
-            The official centralized digital muster system for CSU Main Campus. Built for real-time echelon attendance scanning, automated multi-sheet military exports, and master roster management.
+            The official centralized digital muster system for CSU Main Campus. Built for real-time attendance scanning, automated multi-sheet military exports, and master roster management.
           </p>
 
           {/* Call to Action Buttons */}
@@ -576,16 +599,21 @@ export default function PublicLandingPage({
           background: '#ffffff',
           borderBottom: '1px solid #e2e8f0',
           padding: '1.5rem 1.5rem',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+          boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+          width: '100%',
+          maxWidth: '100%',
+          boxSizing: 'border-box'
         }}
       >
         <div
           style={{
             maxWidth: '1100px',
+            width: '100%',
             margin: '0 auto',
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-            gap: '1.25rem'
+            gap: '1.25rem',
+            boxSizing: 'border-box'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -621,7 +649,7 @@ export default function PublicLandingPage({
       </section>
 
       {/* Core System Capabilities Feature Grid */}
-      <section style={{ maxWidth: '1100px', margin: '0 auto', padding: '3.5rem 1.5rem' }}>
+      <section style={{ maxWidth: '1100px', width: '100%', margin: '0 auto', padding: '3.5rem 1.5rem', boxSizing: 'border-box' }}>
         <div style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
           <h2 style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.85rem', color: '#064e2e', margin: 0, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Military-Grade Attendance Architecture
@@ -679,26 +707,50 @@ export default function PublicLandingPage({
         </div>
       </section>
 
-      {/* Public Footer */}
+      {/* ========================================================================= */}
+      {/* FOOTER (Mobile-Wrapped Layout)                                            */}
+      {/* ========================================================================= */}
       <footer
         style={{
           background: '#0f172a',
           color: '#94a3b8',
-          padding: '2.5rem 1.5rem',
-          borderTop: '1px solid #1e293b',
+          padding: '2.25rem clamp(1rem, 3vw, 1.5rem)',
+          borderTop: '2px solid #e5a900',
           textAlign: 'center',
-          fontSize: '0.8rem'
+          fontSize: '0.8rem',
+          boxSizing: 'border-box',
+          width: '100%',
+          maxWidth: '100%'
         }}
       >
-        <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-          <div style={{ color: '#ffffff', fontWeight: 700, fontSize: '0.95rem', marginBottom: '4px' }}>
-            Caraga State University Main ROTC Unit
+        <div style={{ maxWidth: '800px', margin: '0 auto', boxSizing: 'border-box' }}>
+          <div
+            style={{
+              color: '#ffffff',
+              fontWeight: 700,
+              fontSize: 'clamp(0.88rem, 2.5vw, 0.95rem)',
+              marginBottom: '4px',
+              lineHeight: 1.3
+            }}
+          >
+            Caraga State University Main ROTCU
           </div>
-          <p style={{ margin: '0 0 1rem 0' }}>
-            Ampayon, Butuan City, Agusan del Norte, Philippines
+          <p style={{ margin: '0 0 1rem 0', fontSize: '0.78rem', lineHeight: 1.5 }}>
+            Department of Military Science & Tactics (DMST) <br /> Ampayon, Butuan City, Agusan del Norte, Philippines
           </p>
-          <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.75rem', color: '#64748b' }}>
-            <span>© {currentYear} CSU ROTC Unit. All Rights Reserved.</span>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              gap: '0.85rem',
+              flexWrap: 'wrap',
+              fontSize: '0.75rem',
+              color: '#64748b'
+            }}
+          >
+            <span style={{ color: '#e5a900', fontWeight: 700 }}>Cpl Christian B Abamo PA (Res) </span>
+
 
           </div>
         </div>

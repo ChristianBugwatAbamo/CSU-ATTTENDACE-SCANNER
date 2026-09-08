@@ -378,16 +378,41 @@ export async function fetchAttendanceFromSupabase() {
   }
 }
 
+let _cachedSessions = null;
+let _cachedSessionsTime = 0;
+const SESSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 /**
- * Fetches all attendance sessions from Supabase.
+ * Fetches all attendance sessions from Supabase with caching.
  * Used by AttendanceHistory to determine which formation dates exist
  * independently of whether attendance_logs has been populated yet.
  */
-export async function fetchAttendanceSessionsFromSupabase() {
+export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && _cachedSessions && (now - _cachedSessionsTime < SESSIONS_CACHE_TTL)) {
+    return _cachedSessions;
+  }
+
+  // Check localStorage first for instant load
+  if (!forceRefresh) {
+    try {
+      const saved = localStorage.getItem('csu_rotc_db_sessions');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          _cachedSessions = parsed;
+          _cachedSessionsTime = now;
+          // Trigger background update silently
+          setTimeout(() => fetchAttendanceSessionsFromSupabase(true), 200);
+          return parsed;
+        }
+      }
+    } catch (_) {}
+  }
+
   const client = getSupabaseClient();
   if (!client) {
-    console.warn('[Supabase] Client is null — no URL/key configured');
-    return [];
+    return _cachedSessions || [];
   }
 
   try {
@@ -397,11 +422,8 @@ export async function fetchAttendanceSessionsFromSupabase() {
       .order('session_date', { ascending: false })
       .limit(500);
 
-    // Log raw response for diagnosis (visible in browser DevTools → Console)
-    console.log('[Supabase] attendance_sessions query →', { rowCount: (data || []).length, error, data });
-
     if (error) throw error;
-    return (data || []).map(s => ({
+    const formatted = (data || []).map(s => ({
       dateKey: s.session_date,
       sessionDate: s.session_date,
       session_date: s.session_date,
@@ -413,9 +435,16 @@ export async function fetchAttendanceSessionsFromSupabase() {
       cutoff_time: s.cutoff_time,
       totalScanned: s.total_scanned || 0
     }));
+
+    _cachedSessions = formatted;
+    _cachedSessionsTime = Date.now();
+    try {
+      localStorage.setItem('csu_rotc_db_sessions', JSON.stringify(formatted));
+    } catch (_) {}
+    return formatted;
   } catch (err) {
     console.error('[Supabase] fetchAttendanceSessionsFromSupabase error:', err);
-    return [];
+    return _cachedSessions || [];
   }
 }
 
@@ -1226,12 +1255,37 @@ export const subscribeToHistoryRealtime = subscribeToAttendanceRealtime;
 // 3. SYSTEM SETTINGS CRUD (Supabase Cloud)
 // ==============================================================================
 
+let _cachedSettings = null;
+let _cachedSettingsTime = 0;
+const SETTINGS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 /**
- * Fetches system settings from Supabase
+ * Fetches system settings from Supabase with caching.
  */
-export async function fetchSettingsFromSupabase() {
+export async function fetchSettingsFromSupabase(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && _cachedSettings && (now - _cachedSettingsTime < SETTINGS_CACHE_TTL)) {
+    return _cachedSettings;
+  }
+
+  // Check localStorage first
+  if (!forceRefresh) {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed) {
+          _cachedSettings = parsed;
+          _cachedSettingsTime = now;
+          setTimeout(() => fetchSettingsFromSupabase(true), 200);
+          return parsed;
+        }
+      }
+    } catch (_) {}
+  }
+
   const client = getSupabaseClient();
-  if (!client) return null;
+  if (!client) return _cachedSettings;
 
   try {
     const { data, error } = await client
@@ -1241,10 +1295,18 @@ export async function fetchSettingsFromSupabase() {
       .limit(1);
 
     if (error) throw error;
-    return (data && data.length > 0) ? data[0] : null;
+    if (data && data.length > 0) {
+      _cachedSettings = data[0];
+      _cachedSettingsTime = Date.now();
+      try {
+        localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(data[0]));
+      } catch (_) {}
+      return data[0];
+    }
+    return _cachedSettings;
   } catch (err) {
     console.error('Supabase fetch settings error:', err);
-    return null;
+    return _cachedSettings;
   }
 }
 
@@ -1496,47 +1558,45 @@ export async function fetchCadetByCadetId(rawCadetId) {
   const digitsOnly = cleanId.replace(/[^0-9]/g, '');
   const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
-  // 1. Query Supabase directly
+  // 0. Instant Cache Check for instant login/return
+  try {
+    const cachedCadet = localStorage.getItem(`csu_rotc_cadet_profile_${cleanId}`) ||
+                        (dashedId !== cleanId ? localStorage.getItem(`csu_rotc_cadet_profile_${dashedId}`) : null);
+    if (cachedCadet) {
+      const parsed = JSON.parse(cachedCadet);
+      if (parsed && parsed.id) {
+        return parsed;
+      }
+    }
+  } catch (_) {}
+
+  // 1. Query Supabase directly using a single combined query
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      // Direct exact match on primary key `id` (e.g. "221-00003")
+      const orConditions = [
+        `id.eq.${cleanId}`,
+        `student_id.eq.${cleanId}`,
+        `email.eq.${cleanId.toLowerCase()}`
+      ];
+      if (dashedId !== cleanId) {
+        orConditions.push(`id.eq.${dashedId}`);
+        orConditions.push(`student_id.eq.${dashedId}`);
+      }
+
       let { data, error } = await supabase
         .from('cadets')
         .select('*')
-        .eq('id', cleanId)
+        .or(orConditions.join(','))
+        .limit(1)
         .maybeSingle();
 
-      // If not found by id, query by student_id or email
-      if (!data) {
-        const studentRes = await supabase
-          .from('cadets')
-          .select('*')
-          .or(`student_id.eq.${cleanId},email.eq.${cleanId.toLowerCase()}`)
-          .maybeSingle();
-        if (studentRes.data) {
-          data = studentRes.data;
-          error = studentRes.error;
-        }
-      }
-
-      // If not found with raw input, try with dashed format (e.g. "22100003" -> "221-00003")
-      if (!data && dashedId !== cleanId) {
-        const dashedRes = await supabase
-          .from('cadets')
-          .select('*')
-          .or(`id.eq.${dashedId},student_id.eq.${dashedId}`)
-          .maybeSingle();
-        data = dashedRes.data;
-        error = dashedRes.error;
-      }
-
-      // If still not found, try ilike match on id, student_id, or email
+      // Only if not found with exact match, try partial match as fallback
       if (!data) {
         const ilikeRes = await supabase
           .from('cadets')
           .select('*')
-          .or(`id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%,email.ilike.%${cleanId}%`)
+          .or(`id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%`)
           .limit(1)
           .maybeSingle();
         data = ilikeRes.data;
@@ -1544,7 +1604,7 @@ export async function fetchCadetByCadetId(rawCadetId) {
       }
 
       if (!error && data) {
-        return {
+        const profile = {
           id: data.id,
           cadetId: data.id,
           name: data.name,
@@ -1568,6 +1628,13 @@ export async function fetchCadetByCadetId(rawCadetId) {
           status: data.is_active !== false ? 'ACTIVE' : 'INACTIVE',
           ...data
         };
+        try {
+          localStorage.setItem(`csu_rotc_cadet_profile_${cleanId}`, JSON.stringify(profile));
+          if (dashedId !== cleanId) {
+            localStorage.setItem(`csu_rotc_cadet_profile_${dashedId}`, JSON.stringify(profile));
+          }
+        } catch (_) {}
+        return profile;
       }
     }
   } catch (err) {
@@ -1608,40 +1675,46 @@ export async function fetchCadetByCadetId(rawCadetId) {
  * Fetches attendance history for a single cadet.
  * Checks Supabase first, falls back to local master attendance cache.
  */
-export async function fetchCadetAttendanceHistory(rawCadetId) {
+export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = false) {
   if (!rawCadetId) return [];
   const cleanId = String(rawCadetId).trim().toUpperCase();
   const digitsOnly = cleanId.replace(/[^0-9]/g, '');
   const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
+  // 0. Check local cache first for instant UI load (0ms)
+  if (!forceRefresh) {
+    try {
+      const cached = localStorage.getItem(`csu_rotc_cadet_logs_${cleanId}`) ||
+                     (dashedId !== cleanId ? localStorage.getItem(`csu_rotc_cadet_logs_${dashedId}`) : null);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Trigger background update silently
+          setTimeout(() => fetchCadetAttendanceHistory(rawCadetId, true), 300);
+          return parsed;
+        }
+      }
+    } catch (_) {}
+  }
+
   let logs = [];
 
-  // 1. Try Supabase
+  // 1. Try Supabase with single consolidated OR query
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      // Direct exact match on cadet_id
+      const orCond = dashedId !== cleanId
+        ? `cadet_id.eq.${cleanId},cadet_id.eq.${dashedId}`
+        : `cadet_id.eq.${cleanId}`;
+
       let { data, error } = await supabase
         .from('attendance_logs')
         .select('*')
-        .eq('cadet_id', cleanId)
+        .or(orCond)
         .order('date', { ascending: false });
 
-      // Fallback with dashedId if different
-      if ((!data || data.length === 0) && dashedId !== cleanId) {
-        const dashedRes = await supabase
-          .from('attendance_logs')
-          .select('*')
-          .eq('cadet_id', dashedId)
-          .order('date', { ascending: false });
-        if (dashedRes.data && dashedRes.data.length > 0) {
-          data = dashedRes.data;
-          error = dashedRes.error;
-        }
-      }
-
-      // Fallback with ilike match on cadet_id
-      if (!data || data.length === 0) {
+      // Fallback with ilike match only if nothing matched
+      if ((!data || data.length === 0) && cleanId.length >= 4) {
         const ilikeRes = await supabase
           .from('attendance_logs')
           .select('*')
@@ -1667,6 +1740,13 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
           sessionName: l.session_name,
           scanMode: l.scan_mode
         }));
+
+        try {
+          localStorage.setItem(`csu_rotc_cadet_logs_${cleanId}`, JSON.stringify(logs));
+          if (dashedId !== cleanId) {
+            localStorage.setItem(`csu_rotc_cadet_logs_${dashedId}`, JSON.stringify(logs));
+          }
+        } catch (_) {}
       }
     }
   } catch (err) {
@@ -1703,38 +1783,67 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
   } catch (_) {}
 
   // Sort descending by date
-  return logs.sort((a, b) => {
+  const sorted = logs.sort((a, b) => {
     const dateA = a.date || a.session_date || a.created_at || '';
     const dateB = b.date || b.session_date || b.created_at || '';
     return dateB.localeCompare(dateA);
   });
+
+  if (sorted.length > 0) {
+    try {
+      localStorage.setItem(`csu_rotc_cadet_logs_${cleanId}`, JSON.stringify(sorted));
+      if (dashedId !== cleanId) {
+        localStorage.setItem(`csu_rotc_cadet_logs_${dashedId}`, JSON.stringify(sorted));
+      }
+    } catch (_) {}
+  }
+
+  return sorted;
 }
 
+let _cachedDates = null;
+let _cachedDatesTime = 0;
+const DATES_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 /**
- * Fetches all scheduled/recorded mandatory formation dates across sessions, logs, and default schedule.
+ * Fetches all scheduled/recorded mandatory formation dates with caching.
  */
-export async function fetchMandatoryFormationDates() {
+export async function fetchMandatoryFormationDates(forceRefresh = false) {
+  const now = Date.now();
+  if (!forceRefresh && _cachedDates && (now - _cachedDatesTime < DATES_CACHE_TTL)) {
+    return _cachedDates;
+  }
+
   const datesSet = new Set(ACTIVE_FORMATION_DATES);
 
-  // 1. Try Supabase attendance_sessions and attendance_logs
+  // Check local cache first
+  if (!forceRefresh) {
+    try {
+      const saved = localStorage.getItem('csu_rotc_formation_dates');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          _cachedDates = parsed;
+          _cachedDatesTime = now;
+          setTimeout(() => fetchMandatoryFormationDates(true), 300);
+          return parsed;
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Query Supabase attendance_sessions efficiently (no heavy full table log scan)
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const [sessionsRes, logsRes] = await Promise.allSettled([
-        supabase.from('attendance_sessions').select('session_date').limit(500),
-        supabase.from('attendance_logs').select('date').order('date', { ascending: false }).limit(1000)
-      ]);
+      const { data, error } = await supabase
+        .from('attendance_sessions')
+        .select('session_date')
+        .limit(200);
 
-      if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value.data)) {
-        sessionsRes.value.data.forEach(s => {
+      if (!error && Array.isArray(data)) {
+        data.forEach(s => {
           const dk = toDateKey(s.session_date);
-          if (dk) datesSet.add(dk);
-        });
-      }
-
-      if (logsRes.status === 'fulfilled' && Array.isArray(logsRes.value.data)) {
-        logsRes.value.data.forEach(l => {
-          const dk = toDateKey(l.date);
           if (dk) datesSet.add(dk);
         });
       }
@@ -1743,7 +1852,7 @@ export async function fetchMandatoryFormationDates() {
     console.warn('Error fetching formation dates from Supabase:', e);
   }
 
-  // 2. Add local storage master attendance dates
+  // Add local storage master attendance dates if available
   try {
     const localLogs = localStorage.getItem('csu_rotc_master_attendance');
     if (localLogs) {
@@ -1757,5 +1866,12 @@ export async function fetchMandatoryFormationDates() {
     }
   } catch (_) {}
 
-  return Array.from(datesSet).sort();
+  const result = Array.from(datesSet).sort();
+  _cachedDates = result;
+  _cachedDatesTime = Date.now();
+  try {
+    localStorage.setItem('csu_rotc_formation_dates', JSON.stringify(result));
+  } catch (_) {}
+
+  return result;
 }

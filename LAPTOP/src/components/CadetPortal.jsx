@@ -569,7 +569,9 @@ export default function CadetPortal({ cadet, onLogout }) {
         fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
         transition: 'background-color 0.2s ease, color 0.2s ease',
         position: 'relative',
-        width: '100vw',
+        width: '100%',
+        maxWidth: '100%',
+        boxSizing: 'border-box',
         overflowX: 'hidden'
       }}
     >
@@ -1509,16 +1511,16 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexShrink: 0 }}>
             <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase' }}>
+              <div style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px', whiteSpace: 'nowrap' }}>
                 Attendance Rate
               </div>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1 }}>
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.6rem', fontWeight: 900, color: isDropped ? '#e11d48' : isPenalty ? '#ea580c' : isWarning ? '#d97706' : '#059669', lineHeight: 1.1, whiteSpace: 'nowrap' }}>
                 {metrics.complianceRate}%
               </div>
             </div>
-            <div style={{ width: '80px', height: '8px', background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)', borderRadius: '999px', overflow: 'hidden' }}>
+            <div style={{ width: 'clamp(100px, 20vw, 160px)', maxWidth: '160px', height: '9px', background: isLight ? '#e2e8f0' : 'rgba(255, 255, 255, 0.1)', borderRadius: '999px', overflow: 'hidden', flexShrink: 0 }}>
               <div
                 style={{
                   width: `${metrics.complianceRate}%`,

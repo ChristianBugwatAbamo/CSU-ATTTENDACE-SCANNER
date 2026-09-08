@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Camera, X, CheckCircle2, AlertTriangle, ShieldCheck, Layers, Users, ArrowRight, Clock } from 'lucide-react';
+import { Camera, X, CheckCircle2, AlertTriangle, AlertCircle, ShieldCheck, Layers, Users, ArrowRight, Clock } from 'lucide-react';
 import { evaluateSingleScan, getActiveFormationCutoff } from '../utils/attendanceStatus';
 
 export default function BatchScannerModal({
@@ -19,6 +19,7 @@ export default function BatchScannerModal({
   const totalPagesRef = useRef(null);
   const activeBatchKeyRef = useRef(null);
   const lastScannedQrRef = useRef({ text: '', timestamp: 0 });
+  const feedbackTimeoutRef = useRef(null);
 
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
@@ -28,7 +29,7 @@ export default function BatchScannerModal({
   const [collectedRecords, setCollectedRecords] = useState([]);
   const [pagesScanned, setPagesScanned] = useState([]);
   const [totalPages, setTotalPages] = useState(null);
-  const [feedbackMessage, setFeedbackMessage] = useState(null); // { type: 'success' | 'warning' | 'info', text: string }
+  const [feedbackMessage, setFeedbackMessage] = useState(null); // { type: 'success' | 'warning' | 'error', text: string }
 
   // Audio beep for rapid scan detection
   const playQueueBeep = () => {
@@ -55,189 +56,231 @@ export default function BatchScannerModal({
     } catch (_) { }
   };
 
-  // Expand minified payload keys back to full names
+  // Audio buzz for rejected/invalid scan
+  const playErrorBeep = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, now); // Low A3
+      osc.frequency.setValueAtTime(146.83, now + 0.12); // Lower D3
+
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (_) { }
+  };
+
+  // Strict Schema Validator for Official Offline Batch Sync QR Codes
+  const validateBatchSyncPayload = (decodedText) => {
+    let raw;
+    try {
+      raw = JSON.parse(decodedText);
+    } catch (_) {
+      // Non-JSON payload: test if it's an individual cadet ID string or external QR
+      const trimmed = String(decodedText || '').trim();
+      const isCadetIdString = /^\d{3}-\d{4,5}$/i.test(trimmed) || /^cadet/i.test(trimmed);
+      return {
+        isValid: false,
+        reason: isCadetIdString ? 'individual_cadet' : 'external',
+        message: isCadetIdString
+          ? 'Scan Rejected: Individual Cadet ID QR detected. The Batch Scanner only accepts Official Offline Batch Sync QRs (T: RBS).'
+          : 'Scan Rejected: External or invalid QR code. Only Official Offline Batch Sync QRs (T: RBS) are accepted.',
+        raw: null
+      };
+    }
+
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {
+        isValid: false,
+        reason: 'external',
+        message: 'Scan Rejected: Unrecognized QR payload. Only Official Offline Batch Sync QRs (T: RBS) are accepted.',
+        raw: null
+      };
+    }
+
+    // Explicitly detect and reject individual Cadet ID QR formats
+    if (
+      raw.id !== undefined ||
+      raw.cadetId !== undefined ||
+      raw.cadet_id !== undefined ||
+      raw.bat !== undefined ||
+      raw.coy !== undefined ||
+      raw.type === 'CADET_ID' ||
+      raw.type === 'INDIVIDUAL_PASS'
+    ) {
+      return {
+        isValid: false,
+        reason: 'individual_cadet',
+        message: 'Scan Rejected: Individual Cadet ID QR detected. The Batch Scanner only accepts Official Offline Batch Sync QRs (T: RBS).',
+        raw: null
+      };
+    }
+
+    // 1. Must contain key "T": "RBS"
+    if (raw.T !== 'RBS') {
+      return {
+        isValid: false,
+        reason: 'invalid_type',
+        message: 'Scan Rejected: Invalid QR schema. Missing required key "T": "RBS".',
+        raw: null
+      };
+    }
+
+    // 2. Must contain all required batch metadata fields: (b, d, m, bn, co, pl, p, n, r)
+    const missingFields = [];
+    if (raw.b === undefined || raw.b === null || String(raw.b).trim() === '') missingFields.push('b');
+    if (raw.d === undefined || raw.d === null || String(raw.d).trim() === '') missingFields.push('d');
+    if (raw.m === undefined || raw.m === null || String(raw.m).trim() === '') missingFields.push('m');
+    if (raw.bn === undefined || raw.bn === null || String(raw.bn).trim() === '') missingFields.push('bn');
+    if (raw.co === undefined || raw.co === null || String(raw.co).trim() === '') missingFields.push('co');
+    if (raw.pl === undefined || raw.pl === null || String(raw.pl).trim() === '') missingFields.push('pl');
+    if (raw.p === undefined || raw.p === null || isNaN(Number(raw.p)) || Number(raw.p) < 1) missingFields.push('p');
+    if (raw.n === undefined || raw.n === null || isNaN(Number(raw.n)) || Number(raw.n) < 1) missingFields.push('n');
+    if (!Array.isArray(raw.r)) missingFields.push('r');
+
+    if (missingFields.length > 0) {
+      return {
+        isValid: false,
+        reason: 'missing_fields',
+        message: `Scan Rejected: Incomplete Batch Sync schema. Missing required field(s): ${missingFields.join(', ')}.`,
+        raw: null
+      };
+    }
+
+    return {
+      isValid: true,
+      reason: null,
+      message: null,
+      raw: raw
+    };
+  };
+
+  // Expand validated RBS payload to internal batch structure
   const expandPayload = (raw) => {
-    if (raw.T === 'RBS') {
-      const bn = raw.bn || '1st Battalion';
-      const co = raw.co || 'Alpha Company';
-      const pl = raw.pl || '1st Platoon';
-      const dutyOfficer = raw.d || 'Duty Officer';
-      const sessionName = raw.s || `${bn} - ${co} (${pl})`;
-      const rawMode = String(raw.m || '').toUpperCase();
-      const resolvedScanMode = rawMode.includes('OUT') ? 'Time-Out' : 'Time-In';
-      const batchId = raw.b || raw.bid || raw.batchId || null;
+    if (!raw || raw.T !== 'RBS') return null;
 
-      return {
-        type: 'ROTC_BATCH_SYNC',
-        batchId: batchId,
-        dutyOfficer: dutyOfficer,
-        sessionName: sessionName,
-        battalion: bn,
-        company: co,
-        platoon: pl,
-        scanMode: resolvedScanMode,
-        mode: resolvedScanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN',
-        page: raw.p || 1,
-        totalPages: raw.n || 1,
-        records: (raw.r || []).map((rec) => {
-          if (typeof rec === 'string') {
-            // Support string format with optional embedded timestamp "ID@epoch"
-            let cId = rec.trim();
-            let parsedTime = null;
-            if (cId.includes('@')) {
-              const parts = cId.split('@');
-              cId = parts[0].trim();
-              const num = Number(parts[1]);
-              if (!isNaN(num) && num > 0) {
-                parsedTime = num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString();
-              }
+    const bn = String(raw.bn).trim();
+    const co = String(raw.co).trim();
+    const pl = String(raw.pl).trim();
+    const dutyOfficer = String(raw.d).trim();
+    const sessionName = raw.s ? String(raw.s).trim() : `${bn} - ${co} (${pl})`;
+    const rawMode = String(raw.m || '').toUpperCase();
+    const resolvedScanMode = rawMode.includes('OUT') ? 'Time-Out' : 'Time-In';
+    const batchId = String(raw.b).trim();
+    const page = Math.floor(Number(raw.p));
+    const totalPages = Math.floor(Number(raw.n));
+
+    return {
+      type: 'ROTC_BATCH_SYNC',
+      batchId: batchId,
+      dutyOfficer: dutyOfficer,
+      sessionName: sessionName,
+      battalion: bn,
+      company: co,
+      platoon: pl,
+      scanMode: resolvedScanMode,
+      mode: resolvedScanMode === 'Time-Out' ? 'TIME-OUT' : 'TIME-IN',
+      page: page,
+      totalPages: totalPages,
+      records: raw.r.map((rec) => {
+        if (typeof rec === 'string') {
+          let cId = rec.trim();
+          let parsedTime = null;
+          if (cId.includes('@')) {
+            const parts = cId.split('@');
+            cId = parts[0].trim();
+            const num = Number(parts[1]);
+            if (!isNaN(num) && num > 0) {
+              parsedTime = num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString();
             }
-            return {
-              cadetId: cId,
-              name: '',
-              battalion: bn,
-              company: co,
-              platoon: pl,
-              rank: 'Cadet',
-              scanMode: resolvedScanMode,
-              timestamp: parsedTime || new Date().toISOString()
-            };
           }
+          return {
+            cadetId: cId,
+            name: '',
+            battalion: bn,
+            company: co,
+            platoon: pl,
+            rank: 'Cadet',
+            scanMode: resolvedScanMode,
+            timestamp: parsedTime || new Date().toISOString()
+          };
+        }
 
-          if (Array.isArray(rec)) {
-            const cid = String(rec[0] || '').trim();
-            let itemMode = resolvedScanMode;
-            let itemTimestamp = null;
+        if (Array.isArray(rec)) {
+          const cid = String(rec[0] || '').trim();
+          let itemMode = resolvedScanMode;
+          let itemTimestamp = null;
 
-            if (rec.length === 2) {
-              // Format: [cadetId, epochSeconds]
-              const tVal = rec[1];
-              if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
-                itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
-              } else if (typeof tVal === 'string' && tVal.trim()) {
-                const num = Number(tVal);
-                itemTimestamp = !isNaN(num) && num > 0
-                  ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
-                  : tVal;
-              }
-            } else if (rec.length >= 3) {
-              // Format: [cadetId, mode, epochSeconds]
-              itemMode = rec[1] === 0 || String(rec[1]).toUpperCase().includes('OUT') ? 'Time-Out' : resolvedScanMode;
-              const tVal = rec[2];
-              if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
-                itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
-              } else if (typeof tVal === 'string' && tVal.trim()) {
-                const num = Number(tVal);
-                itemTimestamp = !isNaN(num) && num > 0
-                  ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
-                  : tVal;
-              }
+          if (rec.length === 2) {
+            const tVal = rec[1];
+            if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
+              itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
+            } else if (typeof tVal === 'string' && tVal.trim()) {
+              const num = Number(tVal);
+              itemTimestamp = !isNaN(num) && num > 0
+                ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+                : tVal;
             }
-
-            return {
-              cadetId: cid,
-              name: '',
-              battalion: bn,
-              company: co,
-              platoon: pl,
-              rank: 'Cadet',
-              scanMode: itemMode,
-              timestamp: itemTimestamp || new Date().toISOString()
-            };
-          }
-
-          const itemMode = rec.m !== undefined ? (rec.m === 0 || String(rec.m).toUpperCase().includes('OUT') ? 'Time-Out' : 'Time-In') : resolvedScanMode;
-          const rawT = rec.t !== undefined ? rec.t : rec.timestamp;
-          let objTimestamp = null;
-          if (typeof rawT === 'number' && !isNaN(rawT) && rawT > 0) {
-            objTimestamp = rawT > 1e11 ? new Date(rawT).toISOString() : new Date(rawT * 1000).toISOString();
-          } else if (typeof rawT === 'string' && rawT.trim()) {
-            const num = Number(rawT);
-            objTimestamp = !isNaN(num) && num > 0
-              ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
-              : rawT;
+          } else if (rec.length >= 3) {
+            itemMode = rec[1] === 0 || String(rec[1]).toUpperCase().includes('OUT') ? 'Time-Out' : resolvedScanMode;
+            const tVal = rec[2];
+            if (typeof tVal === 'number' && !isNaN(tVal) && tVal > 0) {
+              itemTimestamp = tVal > 1e11 ? new Date(tVal).toISOString() : new Date(tVal * 1000).toISOString();
+            } else if (typeof tVal === 'string' && tVal.trim()) {
+              const num = Number(tVal);
+              itemTimestamp = !isNaN(num) && num > 0
+                ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+                : tVal;
+            }
           }
 
           return {
-            cadetId: rec.i || rec.cadetId || rec.id,
-            name: rec.n || rec.name || '',
-            battalion: rec.bn || bn,
-            company: rec.co || co,
-            platoon: rec.pl || pl,
-            rank: rec.rk || 'Cadet',
+            cadetId: cid,
+            name: '',
+            battalion: bn,
+            company: co,
+            platoon: pl,
+            rank: 'Cadet',
             scanMode: itemMode,
-            timestamp: objTimestamp || new Date().toISOString()
+            timestamp: itemTimestamp || new Date().toISOString()
           };
-        })
-      };
-    }
+        }
 
-    if (raw.type === 'ROTC_BATCH_SYNC' || raw.records) {
-      return {
-        ...raw,
-        dutyOfficer: raw.dutyOfficer || raw.d || 'Duty Officer',
-        sessionName: raw.sessionName || raw.s || 'Field Session',
-        page: raw.page || raw.p || 1,
-        totalPages: raw.totalPages || raw.n || 1,
-        records: (raw.records || raw.r || []).map((rec) => {
-          if (typeof rec === 'string') {
-            return {
-              cadetId: rec.trim(),
-              name: '',
-              battalion: raw.battalion || raw.bn || '1st Battalion',
-              company: raw.company || raw.co || 'Alpha Company',
-              platoon: raw.platoon || raw.pl || '1st Platoon',
-              rank: 'Cadet',
-              scanMode: 'Time-In',
-              timestamp: new Date().toISOString()
-            };
-          }
-          return {
-            cadetId: rec.cadetId || rec.i || rec.id,
-            name: rec.name || rec.n || '',
-            battalion: rec.battalion || rec.bn || '1st Battalion',
-            company: rec.company || rec.co || 'Alpha Company',
-            platoon: rec.platoon || rec.pl || '1st Platoon',
-            rank: rec.rank || rec.rk || 'Cadet',
-            scanMode: rec.scanMode || (rec.m === 0 ? 'Time-Out' : 'Time-In'),
-            timestamp: rec.timestamp || (rec.t ? new Date(rec.t * 1000).toISOString() : new Date().toISOString())
-          };
-        })
-      };
-    }
+        const itemMode = rec.m !== undefined ? (rec.m === 0 || String(rec.m).toUpperCase().includes('OUT') ? 'Time-Out' : 'Time-In') : resolvedScanMode;
+        const rawT = rec.t !== undefined ? rec.t : rec.timestamp;
+        let objTimestamp = null;
+        if (typeof rawT === 'number' && !isNaN(rawT) && rawT > 0) {
+          objTimestamp = rawT > 1e11 ? new Date(rawT).toISOString() : new Date(rawT * 1000).toISOString();
+        } else if (typeof rawT === 'string' && rawT.trim()) {
+          const num = Number(rawT);
+          objTimestamp = !isNaN(num) && num > 0
+            ? (num > 1e11 ? new Date(num).toISOString() : new Date(num * 1000).toISOString())
+            : rawT;
+        }
 
-    // Support single compact Cadet ID QR Code (e.g. {"id":"221-00006","name":"SAMONTE","bat":1,"coy":1,"pl":2})
-    if (raw.id && (raw.bat !== undefined || raw.coy !== undefined || raw.pl !== undefined || raw.name)) {
-      const companyMap = { 1: 'Alpha Company', 2: 'Bravo Company', 3: 'Charlie Company', 4: 'Delta Company' };
-      const bnNum = typeof raw.bat === 'number' ? raw.bat : parseInt(raw.bat, 10);
-      const bn = bnNum === 2 ? '2nd Battalion' : '1st Battalion';
-      const co = companyMap[raw.coy] || (typeof raw.coy === 'string' ? raw.coy : 'Alpha Company');
-      const plNum = typeof raw.pl === 'number' ? raw.pl : parseInt(raw.pl, 10);
-      const pl = plNum === 1 ? '1st Platoon' : plNum === 2 ? '2nd Platoon' : plNum === 3 ? '3rd Platoon' : plNum === 4 ? '4th Platoon' : '1st Platoon';
-
-      return {
-        type: 'ROTC_BATCH_SYNC',
-        dutyOfficer: raw.dutyOfficer || raw.d || 'Duty Officer',
-        sessionName: raw.sessionName || `${bn} - ${co} (${pl})`,
-        battalion: bn,
-        company: co,
-        platoon: pl,
-        page: 1,
-        totalPages: 1,
-        records: [{
-          cadetId: raw.id,
-          name: raw.name || '',
-          battalion: bn,
-          company: co,
-          platoon: pl,
-          rank: 'Cadet',
-          scanMode: raw.scanMode || 'Time-In',
-          timestamp: new Date().toISOString()
-        }]
-      };
-    }
-
-    return null;
+        return {
+          cadetId: rec.i || rec.cadetId || rec.id,
+          name: rec.n || rec.name || '',
+          battalion: rec.bn || bn,
+          company: rec.co || co,
+          platoon: rec.pl || pl,
+          rank: rec.rk || 'Cadet',
+          scanMode: itemMode,
+          timestamp: objTimestamp || new Date().toISOString()
+        };
+      })
+    };
   };
 
   // Match scanned records against registered Cadets Roster
@@ -317,35 +360,56 @@ export default function BatchScannerModal({
   const handleBatchScanned = async (decodedText) => {
     if (isProcessingRef.current) return;
 
-    // 3-second cooldown buffer per identical QR payload to prevent rapid 30fps camera loop
+    // Cooldown buffer per identical QR payload to prevent rapid 30fps camera loop
     const now = Date.now();
     if (
       lastScannedQrRef.current.text === decodedText &&
-      now - lastScannedQrRef.current.timestamp < 3000
+      now - lastScannedQrRef.current.timestamp < 2500
     ) {
       return;
     }
 
-    try {
-      let raw;
-      try {
-        raw = JSON.parse(decodedText);
-      } catch (_) {
-        return;
-      }
+    // 1. Strict Schema & Header Validation
+    const validation = validateBatchSyncPayload(decodedText);
+    if (!validation.isValid) {
+      lastScannedQrRef.current = { text: decodedText, timestamp: now };
+      playErrorBeep();
 
-      const payload = expandPayload(raw);
+      if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+      setFeedbackMessage({
+        type: 'error',
+        text: validation.message
+      });
+
+      feedbackTimeoutRef.current = setTimeout(() => {
+        setFeedbackMessage((prev) => (prev?.type === 'error' ? null : prev));
+      }, 4000);
+      return;
+    }
+
+    try {
+      const payload = expandPayload(validation.raw);
       if (!payload || !payload.records || payload.records.length === 0) {
+        lastScannedQrRef.current = { text: decodedText, timestamp: now };
+        playErrorBeep();
+
+        if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
+        setFeedbackMessage({
+          type: 'error',
+          text: 'Scan Rejected: Batch contains 0 attendance records.'
+        });
+
+        feedbackTimeoutRef.current = setTimeout(() => {
+          setFeedbackMessage((prev) => (prev?.type === 'error' ? null : prev));
+        }, 4000);
         return;
       }
 
       const pageNum = payload.page;
       const total = payload.totalPages;
       const echelonKey = `${payload.dutyOfficer}__${payload.battalion}__${payload.company}__${payload.platoon}`;
-      const batchId = payload.batchId || raw.b || raw.bid || null;
-      const batchAccumulatorKey = batchId
-        ? `${echelonKey}__${batchId}`
-        : `${echelonKey}__total${total}`;
+      const batchId = payload.batchId;
+      const batchAccumulatorKey = `${echelonKey}__${batchId}`;
 
       // Reset accumulation if different officer/echelon OR different batch session is presented
       if (activeBatchKeyRef.current && activeBatchKeyRef.current !== batchAccumulatorKey) {
@@ -571,6 +635,9 @@ export default function BatchScannerModal({
 
     return () => {
       clearTimeout(timer);
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
       if (scannerRef.current) {
         try {
           if (scannerRef.current.isScanning) {
@@ -758,6 +825,38 @@ export default function BatchScannerModal({
             </div>
           )}
 
+          {/* Prominent Error Toast Bar */}
+          {feedbackMessage && feedbackMessage.type === 'error' && (
+            <div
+              style={{
+                marginBottom: '0.75rem',
+                background: '#fef2f2',
+                border: '1.5px solid #ef4444',
+                color: '#991b1b',
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
+                animation: 'fadeIn 0.2s ease-in'
+              }}
+            >
+              <AlertCircle size={18} style={{ flexShrink: 0, color: '#dc2626' }} />
+              <span style={{ flex: 1, lineHeight: 1.4 }}>{feedbackMessage.text}</span>
+              <button
+                type="button"
+                onClick={() => setFeedbackMessage(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#991b1b', padding: '2px' }}
+                aria-label="Dismiss error"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+
           {/* Camera Viewport */}
           <div
             style={{
@@ -767,8 +866,17 @@ export default function BatchScannerModal({
               background: '#0a0f0d',
               borderRadius: '12px',
               overflow: 'hidden',
-              border: isProcessingChunk ? '3px solid #10b981' : '3px solid var(--rotc-green-dark)',
-              boxShadow: 'inset 0 2px 8px rgba(0,0,0,0.6)',
+              border:
+                feedbackMessage?.type === 'error'
+                  ? '3px solid #ef4444'
+                  : isProcessingChunk
+                  ? '3px solid #10b981'
+                  : '3px solid var(--rotc-green-dark)',
+              boxShadow:
+                feedbackMessage?.type === 'error'
+                  ? '0 0 16px rgba(239, 68, 68, 0.4), inset 0 2px 8px rgba(0,0,0,0.6)'
+                  : 'inset 0 2px 8px rgba(0,0,0,0.6)',
+              transition: 'border-color 0.2s ease, box-shadow 0.2s ease',
               marginBottom: '0.75rem'
             }}
           >
@@ -793,21 +901,30 @@ export default function BatchScannerModal({
                   left: '10px',
                   right: '10px',
                   background:
-                    feedbackMessage.type === 'warning'
+                    feedbackMessage.type === 'error'
+                      ? 'rgba(220, 38, 38, 0.96)'
+                      : feedbackMessage.type === 'warning'
                       ? 'rgba(217, 119, 6, 0.95)'
                       : 'rgba(5, 150, 105, 0.95)',
                   color: '#ffffff',
-                  padding: '8px 12px',
+                  padding: '9px 13px',
                   borderRadius: '8px',
-                  fontSize: '0.8rem',
+                  fontSize: '0.82rem',
                   fontWeight: 700,
-                  textAlign: 'center',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.35)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
                   backdropFilter: 'blur(4px)',
-                  animation: 'fadeIn 0.2s ease-in'
+                  animation: 'fadeIn 0.2s ease-in',
+                  zIndex: 20
                 }}
               >
-                {feedbackMessage.text}
+                {feedbackMessage.type === 'error' && <AlertCircle size={16} style={{ flexShrink: 0 }} />}
+                {feedbackMessage.type === 'warning' && <AlertTriangle size={16} style={{ flexShrink: 0 }} />}
+                {feedbackMessage.type === 'success' && <CheckCircle2 size={16} style={{ flexShrink: 0 }} />}
+                <span>{feedbackMessage.text}</span>
               </div>
             )}
           </div>
