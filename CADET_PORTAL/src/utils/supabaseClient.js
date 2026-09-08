@@ -1574,15 +1574,8 @@ export async function fetchCadetByCadetId(rawCadetId) {
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const orConditions = [
-        `id.eq.${cleanId}`,
-        `student_id.eq.${cleanId}`,
-        `email.eq.${cleanId.toLowerCase()}`
-      ];
-      if (dashedId !== cleanId) {
-        orConditions.push(`id.eq.${dashedId}`);
-        orConditions.push(`student_id.eq.${dashedId}`);
-      }
+      const candidates = Array.from(new Set([cleanId, dashedId, digitsOnly])).filter(Boolean);
+      const orConditions = candidates.map(c => `id.eq.${c}`);
 
       let { data, error } = await supabase
         .from('cadets')
@@ -1591,12 +1584,12 @@ export async function fetchCadetByCadetId(rawCadetId) {
         .limit(1)
         .maybeSingle();
 
-      // Only if not found with exact match, try partial match as fallback
-      if (!data) {
+      // Only if not found with exact match, try partial match on id as fallback
+      if (!data && cleanId.length >= 3) {
         const ilikeRes = await supabase
           .from('cadets')
           .select('*')
-          .or(`id.ilike.%${cleanId}%,student_id.ilike.%${cleanId}%`)
+          .ilike('id', `%${cleanId}%`)
           .limit(1)
           .maybeSingle();
         data = ilikeRes.data;

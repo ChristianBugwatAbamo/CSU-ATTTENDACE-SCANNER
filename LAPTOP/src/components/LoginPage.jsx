@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   Shield,
   Lock,
@@ -11,9 +11,11 @@ import {
   Sparkles,
   KeyRound,
   Building,
-  ArrowLeft
+  ArrowLeft,
+  Loader2
 } from 'lucide-react';
 import { getSupabaseClient } from '../utils/supabaseClient';
+import MilitaryLoader from './MilitaryLoader';
 
 export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
   const [identifier, setIdentifier] = useState('');
@@ -22,6 +24,19 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navPhrase, setNavPhrase] = useState('');
+  const navCallbackRef = useRef(null);
+
+  const navigateWithLoader = useCallback((phrase, callback, delay = 700) => {
+    setNavPhrase(phrase);
+    setIsNavigating(true);
+    navCallbackRef.current = callback;
+    setTimeout(() => {
+      setIsNavigating(false);
+      if (navCallbackRef.current) navCallbackRef.current();
+    }, delay);
+  }, []);
 
   const handleLogin = async (e) => {
     if (e) e.preventDefault();
@@ -89,9 +104,13 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
         };
 
         localStorage.setItem('csu_rotc_auth_session', JSON.stringify(sessionPayload));
-        if (onLoginSuccess) {
-          onLoginSuccess(userData);
-        }
+        setTimeout(() => {
+          setIsLoading(false);
+          navigateWithLoader('Initializing Command Center...', () => {
+            if (onLoginSuccess) onLoginSuccess(userData);
+          }, 800);
+        }, 300);
+        return;
       } else {
         setErrorMsg('Invalid Username/Email or Password. Please verify your credentials.');
       }
@@ -110,7 +129,21 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
   };
 
   return (
-    <div
+    <>
+      {isNavigating && (
+        <MilitaryLoader
+          mode="admin"
+          variant="fullscreen"
+          staticPhrase={navPhrase}
+        />
+      )}
+      <style>{`
+        @keyframes ml-btn-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+      <div
       style={{
         minHeight: '100vh',
         width: '100%',
@@ -123,7 +156,7 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
         boxSizing: 'border-box',
         position: 'fixed',
         inset: 0,
-        zIndex: 99999
+        zIndex: 10
       }}
     >
       {/* Background Subtle Camo Grid Overlay */}
@@ -156,21 +189,34 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
         {onBackToPublic && (
           <button
             type="button"
-            onClick={onBackToPublic}
+            disabled={isNavigating || isLoading}
+            onClick={() => navigateWithLoader('Returning to Public Home...', onBackToPublic, 700)}
             style={{
               background: 'none',
               border: 'none',
               fontSize: '0.78rem',
               fontWeight: 700,
               color: '#064e2e',
-              cursor: 'pointer',
+              cursor: (isNavigating || isLoading) ? 'not-allowed' : 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '0 0 1rem 0'
+              gap: '6px',
+              padding: '0 0 1rem 0',
+              transition: 'opacity 0.2s ease',
+              opacity: isNavigating ? 0.7 : 1
             }}
           >
-            <ArrowLeft size={14} /> Back to Public Home
+            {isNavigating ? (
+              <>
+                <Loader2 size={14} style={{ animation: 'ml-btn-spin 0.8s linear infinite' }} />
+                <span>Returning to Public Home...</span>
+              </>
+            ) : (
+              <>
+                <ArrowLeft size={14} />
+                <span>Back to Public Home</span>
+              </>
+            )}
           </button>
         )}
 
@@ -404,21 +450,21 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
             </label>
           </div>
 
-          {/* Submit Sign-In Button */}
+          {/* Submit Sign-In Button with Inline Spinner */}
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || isNavigating}
             style={{
               marginTop: '0.4rem',
               padding: '0.75rem 1.25rem',
               borderRadius: '8px',
-              background: isLoading ? '#4b7a62' : '#005a2b',
+              background: (isLoading || isNavigating) ? '#2d6a4f' : '#005a2b',
               color: '#ffffff',
               border: 'none',
               fontWeight: 800,
               fontSize: '0.92rem',
               letterSpacing: '0.5px',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
+              cursor: (isLoading || isNavigating) ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -427,12 +473,21 @@ export default function LoginPage({ onLoginSuccess, onBackToPublic }) {
               transition: 'all 0.15s ease'
             }}
           >
-            <LogIn size={18} />
-            <span>{isLoading ? 'Verifying Credentials...' : 'Sign In to Command Center'}</span>
+            {isLoading ? (
+              <>
+                <Loader2 size={18} style={{ animation: 'ml-btn-spin 0.8s linear infinite', flexShrink: 0 }} />
+                <span>Verifying Credentials...</span>
+              </>
+            ) : (
+              <>
+                <LogIn size={18} />
+                <span>Sign In to Command Center</span>
+              </>
+            )}
           </button>
         </form>
 
       </div>
     </div>
-  );
-}
+  </>
+);}

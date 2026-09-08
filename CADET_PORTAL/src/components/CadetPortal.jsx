@@ -37,6 +37,7 @@ import {
 import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey } from '../utils/attendanceRules';
 import { formatDisplayTime, parseTimeToMinutes, parseCutoffMinutes } from '../utils/attendanceStatus';
 import IDCardPreview from './IDCardPreview';
+import MilitaryLoader from './MilitaryLoader';
 
 // Format YYYY-MM-DD into a friendly, student-readable date (e.g., "Thu, Sep 3, 2026")
 const formatFriendlyDate = (dateStr) => {
@@ -84,6 +85,19 @@ const formatCutoffDisplay = (cutoffStr) => {
 export default function CadetPortal({ cadet, onLogout }) {
   const cid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
   const [cadetProfile, setCadetProfile] = useState(cadet || {});
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const handleLogoutClick = () => {
+    setIsLoggingOut(true);
+    setTimeout(() => {
+      try {
+        localStorage.removeItem('csu_rotc_cadet_session');
+      } catch (_) {}
+      if (onLogout) {
+        onLogout();
+      }
+    }, 750);
+  };
 
   // 1. Instant Cache Initialization (0ms UI render)
   const [logs, setLogs] = useState(() => {
@@ -577,10 +591,18 @@ export default function CadetPortal({ cadet, onLogout }) {
   };
 
   return (
-    <div
-      style={{
-        minHeight: '100vh',
-        backgroundColor: t.bg,
+    <>
+      {isLoggingOut && (
+        <MilitaryLoader
+          mode="cadet"
+          variant="fullscreen"
+          staticPhrase="Terminating Cadet Session..."
+        />
+      )}
+      <div
+        style={{
+          minHeight: '100vh',
+          backgroundColor: t.bg,
         color: t.textMain,
         display: 'flex',
         flexDirection: 'column',
@@ -683,7 +705,8 @@ export default function CadetPortal({ cadet, onLogout }) {
           {/* Sign Out Button (Icon-Only Action) */}
           <button
             type="button"
-            onClick={onLogout}
+            disabled={isLoggingOut}
+            onClick={handleLogoutClick}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -691,10 +714,10 @@ export default function CadetPortal({ cadet, onLogout }) {
               width: '36px',
               height: '36px',
               background: 'rgba(239, 68, 68, 0.18)',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
+              border: '1.5px solid rgba(239, 68, 68, 0.5)',
               color: '#fecdd3',
               borderRadius: '8px',
-              cursor: 'pointer',
+              cursor: isLoggingOut ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s ease',
               flexShrink: 0
             }}
@@ -2512,5 +2535,6 @@ export default function CadetPortal({ cadet, onLogout }) {
         </div>
       )}
     </div>
-  );
+  </>
+);
 }

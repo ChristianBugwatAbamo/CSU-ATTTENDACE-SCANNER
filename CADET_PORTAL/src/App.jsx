@@ -2,8 +2,16 @@ import React, { useState, useEffect } from 'react';
 import CadetLandingPage from './components/CadetLandingPage';
 import CadetLogin from './components/CadetLogin';
 import CadetPortal from './components/CadetPortal';
+import MilitaryLoader from './components/MilitaryLoader';
 
 export default function App() {
+  // Startup loading splash — shows military loader for minimum 1.5 s on first mount
+  const [isAppLoading, setIsAppLoading] = useState(true);
+  useEffect(() => {
+    const timer = setTimeout(() => setIsAppLoading(false), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const [currentView, setCurrentView] = useState(() => {
     // Check if cadet is already logged in
     try {
@@ -57,6 +65,11 @@ export default function App() {
     setCadetUser(null);
     setCurrentView('landing');
   };
+
+  // 0. Startup Military Loader splash
+  if (isAppLoading) {
+    return <MilitaryLoader mode="cadet" variant="fullscreen" label="Cadet Portal" />;
+  }
 
   // 1. Cadet Dashboard View
   if (currentView === 'portal' && cadetUser) {

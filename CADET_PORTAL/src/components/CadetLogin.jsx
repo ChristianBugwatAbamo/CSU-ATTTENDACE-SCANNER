@@ -1,11 +1,27 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useRef, useCallback } from 'react';
 import { Shield, ArrowLeft, User, AlertCircle, Loader2, ChevronRight } from 'lucide-react';
 import { fetchCadetByCadetId } from '../utils/supabaseClient';
+import MilitaryLoader from './MilitaryLoader';
 
 export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
   const [cadetIdInput, setCadetIdInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Navigation overlay state
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [navPhrase, setNavPhrase] = useState('');
+  const navCallbackRef = useRef(null);
+
+  const navigateWithLoader = useCallback((phrase, callback, delay = 650) => {
+    setNavPhrase(phrase);
+    setIsNavigating(true);
+    navCallbackRef.current = callback;
+    setTimeout(() => {
+      setIsNavigating(false);
+      if (navCallbackRef.current) navCallbackRef.current();
+    }, delay);
+  }, []);
 
   // Auto-formatting mask: XXX-XXXXX (digits only, max 8 digits)
   const handleInputChange = (e) => {
@@ -43,9 +59,11 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
         try {
           localStorage.setItem('csu_rotc_cadet_session', JSON.stringify(sessionPayload));
         } catch (_) {}
-        if (onCadetLoginSuccess) {
-          onCadetLoginSuccess(cadet);
-        }
+        setLoading(false);
+        navigateWithLoader('Verifying Cadet Credentials...', () => {
+          if (onCadetLoginSuccess) onCadetLoginSuccess(cadet);
+        }, 800);
+        return;
       } else {
         setErrorMsg(`Cadet ID "${cleanId}" was not found in the official CSU ROTC database. Please verify your ID number or report to your Platoon Sergeant.`);
       }
@@ -58,7 +76,16 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
   };
 
   return (
-    <div
+    <>
+      {/* Tactical Radar Overlay for Cadet Login */}
+      {isNavigating && (
+        <MilitaryLoader
+          mode="cadet"
+          variant="fullscreen"
+          staticPhrase={navPhrase}
+        />
+      )}
+      <div
       style={{
         minHeight: '100vh',
         width: '100%',
@@ -89,7 +116,7 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
       <div style={{ position: 'absolute', top: '1.25rem', left: '1.25rem', zIndex: 10 }}>
         <button
           type="button"
-          onClick={onBackToHome}
+          onClick={() => navigateWithLoader('Returning to Home...', onBackToHome, 500)}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -348,5 +375,5 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
         </div>
       </div>
     </div>
-  );
-}
+  </>
+);}
