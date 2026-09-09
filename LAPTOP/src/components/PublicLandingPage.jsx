@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Shield,
   LogIn,
@@ -291,40 +291,73 @@ export default function PublicLandingPage({
           min-height: 100dvh;
         }
         .admin-hero-section {
-          min-height: calc(100vh - 72px) !important;
-          min-height: calc(100dvh - 72px) !important;
+          min-height: calc(100vh - 68px) !important;
+          min-height: calc(100dvh - 68px) !important;
           display: flex !important;
           flex-direction: column !important;
-          justify-content: space-between !important;
           align-items: center !important;
+          justify-content: space-between !important;
         }
-        @media (max-width: 640px) {
+        .admin-seal-side {
+          width: 3.5rem !important;  /* w-14 (56px) */
+          height: 3.5rem !important; /* h-14 (56px) */
+          padding: 5px !important;
+          flex-shrink: 0 !important;
+        }
+        .admin-seal-center {
+          width: 8rem !important;    /* w-32 (128px) */
+          height: 8rem !important;   /* h-32 (128px) */
+          padding: 10px !important;
+          flex-shrink: 0 !important;
+        }
+        @media (min-width: 768px) {
+          .admin-seal-side {
+            width: 5rem !important;   /* md:w-20 (80px) */
+            height: 5rem !important;  /* md:h-20 (80px) */
+            padding: 7px !important;
+          }
+          .admin-seal-center {
+            width: 11rem !important;  /* md:w-44 (176px) */
+            height: 11rem !important; /* md:h-44 (176px) */
+            padding: 12px !important;
+          }
+        }
+        @media (max-width: 648px) {
           .admin-hero-section {
-            min-height: calc(100vh - 64px) !important;
-            min-height: calc(100dvh - 64px) !important;
-            padding: 2rem 1rem !important;
+            min-height: calc(100vh - 60px) !important;
+            min-height: calc(100dvh - 60px) !important;
+            padding: 1.25rem 0.75rem !important;
+          }
+          .admin-seal-side {
+            width: 2.25rem !important;
+            height: 2.25rem !important;
+            padding: 2px !important;
+          }
+          .admin-seal-center {
+            width: 7rem !important;
+            height: 7rem !important;
+            padding: 8px !important;
           }
         }
       `}</style>
 
         {/* Hero Section */}
         <section
-          className="min-h-screen flex flex-col justify-between admin-hero-section"
+          className="admin-hero-section min-h-screen flex-1 flex flex-col items-center justify-between"
           style={{
             background: 'radial-gradient(circle at 50% 20%, #064e2e 0%, #043820 60%, #021a0f 100%)',
             color: '#ffffff',
-            minHeight: 'calc(100vh - 72px)',
+            minHeight: 'calc(100vh - 68px)',
             display: 'flex',
             flexDirection: 'column',
-            justifyContent: 'space-between',
             alignItems: 'center',
-            padding: '2.5rem 1.5rem 2.25rem 1.5rem',
+            justifyContent: 'space-between',
+            padding: '2rem 1.25rem 2.5rem 1.25rem',
             textAlign: 'center',
             position: 'relative',
-            overflow: 'hidden',
+            overflow: 'visible',
             boxSizing: 'border-box',
-            width: '100%',
-            maxWidth: '100%'
+            width: '100%'
           }}
         >
           {/* Subtle Background Camo Grid Overlay */}
@@ -338,19 +371,17 @@ export default function PublicLandingPage({
             }}
           />
 
-          {/* Top Spacer for flex justify-between */}
-          <div style={{ flexShrink: 0, height: '1px' }} />
-
-          <div style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%', boxSizing: 'border-box' }}>
-            {/* 5-Logo Row Banner: RCDG â†’ CDC â†’ ROTC (Featured Center) â†’ NSTP â†’ CSU */}
+          <div className="flex-1 flex flex-col items-center justify-between" style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%' }}>
+            {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
             <div
+              className="admin-seals-row my-6"
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: 'clamp(0.4rem, 2vw, 1.4rem)',
-                margin: '0 auto 1.5rem auto',
-                flexWrap: 'wrap',
+                gap: 'clamp(0.45rem, 1.8vw, 1.4rem)',
+                margin: '1.5rem auto',
+                flexWrap: 'nowrap',
                 maxWidth: '920px',
                 width: '100%',
                 boxSizing: 'border-box'
@@ -359,9 +390,10 @@ export default function PublicLandingPage({
               {/* 1. Far Left: RCDG Logo */}
               <div
                 title="15th Regional Community Defense Group (15RCDG)"
+                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
                 style={{
-                  width: 'clamp(64px, 8.5vw, 100px)',
-                  height: 'clamp(64px, 8.5vw, 100px)',
+                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
+                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
                   border: '2.5px solid rgba(229, 169, 0, 0.6)',
@@ -391,9 +423,10 @@ export default function PublicLandingPage({
               {/* 2. Left Center: CDC Logo */}
               <div
                 title="1501st Community Defense Center (1501st CDC)"
+                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
                 style={{
-                  width: 'clamp(74px, 10vw, 116px)',
-                  height: 'clamp(74px, 10vw, 116px)',
+                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
+                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
                   border: '2.5px solid rgba(229, 169, 0, 0.7)',
@@ -420,12 +453,13 @@ export default function PublicLandingPage({
                 />
               </div>
 
-              {/* 3. Center: Featured Main ROTC Emblem (Significantly Enlarged) */}
+              {/* 3. Center: Featured Main ROTC Emblem (w-32 h-32 md:w-44 md:h-44) */}
               <div
                 title="Caraga State University ROTC Unit"
+                className="admin-seal-center w-32 h-32 md:w-44 md:h-44"
                 style={{
-                  width: 'clamp(170px, 23vw, 235px)',
-                  height: 'clamp(170px, 23vw, 235px)',
+                  width: 'clamp(8rem, 15vw, 11rem)',
+                  height: 'clamp(8rem, 15vw, 11rem)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
                   border: '4.5px solid #e5a900',
@@ -436,6 +470,7 @@ export default function PublicLandingPage({
                   padding: '12px',
                   flexShrink: 0,
                   zIndex: 2,
+                  overflow: 'visible',
                   transition: 'transform 0.3s ease, box-shadow 0.3s ease'
                 }}
               >
@@ -455,9 +490,10 @@ export default function PublicLandingPage({
               {/* 4. Right Center: NSTP Logo */}
               <div
                 title="National Service Training Program (NSTP CSU)"
+                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
                 style={{
-                  width: 'clamp(74px, 10vw, 116px)',
-                  height: 'clamp(74px, 10vw, 116px)',
+                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
+                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
                   border: '2.5px solid rgba(229, 169, 0, 0.7)',
@@ -487,9 +523,10 @@ export default function PublicLandingPage({
               {/* 5. Far Right: CSU Logo */}
               <div
                 title="Caraga State University (CSU Main)"
+                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
                 style={{
-                  width: 'clamp(64px, 8.5vw, 100px)',
-                  height: 'clamp(64px, 8.5vw, 100px)',
+                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
+                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
                   borderRadius: '50%',
                   background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
                   border: '2.5px solid rgba(229, 169, 0, 0.6)',
@@ -519,6 +556,7 @@ export default function PublicLandingPage({
 
             {/* Official Badge Pill */}
             <div
+              className="admin-badge-pill mb-6"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -534,19 +572,21 @@ export default function PublicLandingPage({
                 textTransform: 'uppercase'
               }}
             >
-              <Shield size={14} />
+              <Shield size={14} style={{ flexShrink: 0 }} />
               <span>HONOR • PATRIOTISM • DUTY</span>
             </div>
 
             <h1
+              className="admin-hero-title"
               style={{
-                fontFamily: 'Oswald, sans-serif',
-                fontSize: 'clamp(2rem, 5vw, 3.25rem)',
+                fontFamily: "'Oswald', sans-serif",
+                fontSize: 'clamp(1.65rem, 5.5vw, 3.1rem)',
                 fontWeight: 800,
-                letterSpacing: '1px',
-                lineHeight: 1.15,
-                margin: '0 0 1.25rem 0',
-                textTransform: 'uppercase'
+                letterSpacing: '0.5px',
+                lineHeight: 1.18,
+                margin: '0 0 1rem 0',
+                textTransform: 'uppercase',
+                wordBreak: 'break-word'
               }}
             >
               Caraga State University<br />Reserve Officers' Training Corps<br />
@@ -554,69 +594,92 @@ export default function PublicLandingPage({
             </h1>
 
             <p
+              className="admin-hero-sub mt-4 mb-8"
               style={{
-                fontSize: 'clamp(0.95rem, 2vw, 1.15rem)',
+                fontSize: 'clamp(0.88rem, 2.6vw, 1.1rem)',
                 color: '#e2e8f0',
                 maxWidth: '680px',
-                margin: '0 auto 2.25rem auto',
+                margin: '1rem auto 2rem auto',
                 lineHeight: 1.6,
                 fontWeight: 400
               }}
             >
-              The official centralized digital muster system for CSU Main ROTCU.  Built for real-time attendance scanning, automated multi-sheet military exports, and master roster management.
+              The official centralized digital muster system for CSU Main ROTCU. Built for real-time attendance scanning, automated multi-sheet military exports, and master roster management.
             </p>
 
             {/* Call to Action Buttons */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: '0.5rem' }}>
               {isAuthenticated ? (
                 <button
                   type="button"
+                  className="admin-cta-btn"
                   onClick={() => navigateWithLoader('Initializing Command Center...', onNavigateToDashboard)}
                   style={{
                     background: 'linear-gradient(135deg, #e5a900 0%, #b45309 100%)',
                     color: '#064e2e',
                     border: 'none',
-                    padding: '0.85rem 1.85rem',
-                    borderRadius: '10px',
+                    padding: '0.95rem 2.4rem',
+                    minHeight: '48px',
+                    borderRadius: '12px',
                     fontWeight: 800,
-                    fontSize: '1rem',
+                    fontSize: 'clamp(0.98rem, 2.8vw, 1.08rem)',
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 15px rgba(229, 169, 0, 0.4)'
+                    gap: '10px',
+                    boxShadow: '0 4px 20px rgba(229, 169, 0, 0.45)',
+                    transition: 'all 0.15s ease',
+                    letterSpacing: '0.3px',
+                    boxSizing: 'border-box'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 24px rgba(229, 169, 0, 0.55)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 4px 20px rgba(229, 169, 0, 0.45)';
                   }}
                 >
-                  <Shield size={18} /> Open Command Center Dashboard <ChevronRight size={18} />
+                  <Shield size={20} style={{ flexShrink: 0 }} /> Open Command Center Dashboard <ChevronRight size={20} style={{ flexShrink: 0 }} />
                 </button>
               ) : (
                 <button
                   type="button"
+                  className="admin-cta-btn"
                   onClick={() => navigateWithLoader('Initializing Command Center...', onNavigateToLogin)}
                   style={{
                     background: 'linear-gradient(135deg, #e5a900 0%, #d97706 100%)',
                     color: '#064e2e',
                     border: 'none',
-                    padding: '0.85rem 1.85rem',
-                    borderRadius: '10px',
+                    padding: '0.95rem 2.4rem',
+                    minHeight: '48px',
+                    borderRadius: '12px',
                     fontWeight: 800,
-                    fontSize: '1rem',
+                    fontSize: 'clamp(0.98rem, 2.8vw, 1.08rem)',
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 15px rgba(229, 169, 0, 0.4)',
-                    transition: 'all 0.15s ease'
+                    gap: '10px',
+                    boxShadow: '0 4px 20px rgba(229, 169, 0, 0.45)',
+                    transition: 'all 0.15s ease',
+                    letterSpacing: '0.3px',
+                    boxSizing: 'border-box'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = '0 6px 24px rgba(229, 169, 0, 0.55)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = '0 4px 20px rgba(229, 169, 0, 0.45)';
                   }}
                 >
-                  <LogIn size={18} /> Access Command Center <ChevronRight size={18} />
+                  <LogIn size={20} style={{ flexShrink: 0 }} /> Access Command Center <ChevronRight size={20} style={{ flexShrink: 0 }} />
                 </button>
               )}
             </div>
           </div>
-
-          {/* Bottom Spacer for flex justify-between */}
-          <div style={{ flexShrink: 0, height: '1px' }} />
         </section>
 
         {/* Quick Unit Command Overview Bar */}

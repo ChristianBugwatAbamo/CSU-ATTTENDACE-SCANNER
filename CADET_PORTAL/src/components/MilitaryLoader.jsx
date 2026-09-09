@@ -267,7 +267,7 @@ function FullscreenLoader({ mode = "admin", label, subtitle, staticPhrase }) {
         fontWeight: 700, letterSpacing: "0.3em",
         color: "rgba(234,179,8,0.45)", textTransform: "uppercase",
       }}>
-        CSU ROTC UNIT· {systemLabel}
+        CSU ROTC UNIT {systemLabel}
       </p>
       <div style={{ marginBottom: 36, marginTop: 8 }}>
         <RadarScanner size={size} />
