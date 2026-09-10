@@ -1,12 +1,12 @@
-﻿import React, { useState, useRef, useCallback } from 'react';
-import { LayoutDashboard, QrCode, History, Camera, Plus, ScanLine } from 'lucide-react';
+import React, { useState, useRef, useCallback } from 'react';
+import { LayoutDashboard, QrCode, History, Camera, Plus, ScanLine, ClipboardList } from 'lucide-react';
 import MilitaryLoader from './MilitaryLoader';
 
 const TAB_PHRASES = {
   dashboard: 'Loading Command Dashboard...',
   history: 'Loading Attendance History...',
   scanner: 'Activating Webcam Scanner...',
-  idcards: 'Generating ROTC ID Cards...',
+  registration: 'Loading Cadet Registration...',
 };
 
 export default function MobileBottomNav({ activeTab, setActiveTab, onOpenScanner }) {
@@ -37,7 +37,7 @@ export default function MobileBottomNav({ activeTab, setActiveTab, onOpenScanner
 
   const rightNavItems = [
     { id: 'scanner', label: 'Scanner', icon: Camera },
-    { id: 'idcards', label: 'ID Cards', icon: QrCode },
+    { id: 'registration', label: 'Register', icon: ClipboardList },
   ];
 
   return (
@@ -49,7 +49,7 @@ export default function MobileBottomNav({ activeTab, setActiveTab, onOpenScanner
           staticPhrase={navPhrase}
         />
       )}
-      <nav className="mobile-bottom-nav no-print" aria-label="Mobile Navigation">
+      <nav className="mobile-bottom-nav no-print print:hidden" aria-label="Mobile Navigation">
         <div className="mobile-nav-container">
           {/* Left Navigation Group */}
           <div className="mobile-nav-group left-group">

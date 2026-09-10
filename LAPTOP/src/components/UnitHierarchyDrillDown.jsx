@@ -10,7 +10,11 @@ export default function UnitHierarchyDrillDown({
   setSelectedCompany,
   selectedPlatoon,
   setSelectedPlatoon,
-  unitStructure: propUnitStructure
+  unitStructure: propUnitStructure,
+  title = 'Unit Hierarchy Drill-Down & Cadet Roster',
+  subtitle = 'Inspect echelon assignments, edit cadet details (Gender, Department, Program, Contact Number), and sync to Supabase',
+  icon: Icon = Users,
+  allowToggle = false
 }) {
   const { unitStructure: contextStructure } = useUnitStructure();
 
@@ -51,39 +55,36 @@ export default function UnitHierarchyDrillDown({
     activeBnObj = activeStructure.find((b) => matchBattalion(b, selectedBattalion));
   }
 
-  // Fallback to first battalion for company selector list if none selected
-  const displayBnObj = activeBnObj || activeStructure[0] || null;
+  // 2. Dynamically extract companies from the currently active Battalion (or all if none selected)
+  const companies = selectedBattalion
+    ? (activeBnObj && Array.isArray(activeBnObj.companies) && activeBnObj.companies.length > 0
+        ? activeBnObj.companies.map(c => (c.name || c).toUpperCase().replace(/ COMPANY$/i, ' COY'))
+        : [])
+    : Array.from(new Set(activeStructure.flatMap(b => (b.companies || []).map(c => (c.name || c).toUpperCase().replace(/ COMPANY$/i, ' COY')))));
 
-  // 2. Dynamically extract companies from the currently active Battalion (NO STATIC FALLBACK)
-  const companies = (displayBnObj && Array.isArray(displayBnObj.companies) && displayBnObj.companies.length > 0)
-    ? displayBnObj.companies.map(c => (c.name || c).toUpperCase().replace(/ COMPANY$/i, ' COY'))
-    : [];
-
-  // 3. Resolve active company from displayBnObj.companies
+  // 3. Resolve active company from display list
   let activeCoObj = null;
-  if (selectedCompany && displayBnObj && Array.isArray(displayBnObj.companies)) {
+  if (selectedCompany) {
     const normCo = cleanStr(selectedCompany);
-    activeCoObj = displayBnObj.companies.find(
+    const searchPool = activeBnObj ? (activeBnObj.companies || []) : activeStructure.flatMap(b => b.companies || []);
+    activeCoObj = searchPool.find(
       (c) => String(c.id || '').toUpperCase() === String(selectedCompany).toUpperCase() ||
              cleanStr(c.name) === normCo
     );
   }
 
-  // If no company selected or if selectedCompany does not exist in this battalion,
-  // default to the first company of the active battalion so platoons can be displayed
-  if (!activeCoObj && displayBnObj && Array.isArray(displayBnObj.companies) && displayBnObj.companies.length > 0) {
-    activeCoObj = displayBnObj.companies[0];
-  }
-
-  // 4. Dynamically extract platoons from the active company (NO STATIC FALLBACK)
-  const platoons = (activeCoObj && Array.isArray(activeCoObj.platoons) && activeCoObj.platoons.length > 0)
-    ? activeCoObj.platoons.map(p => (p.name || p).toUpperCase())
-    : [];
+  // 4. Dynamically extract platoons from the active company (or all if none selected)
+  const platoons = selectedCompany
+    ? (activeCoObj && Array.isArray(activeCoObj.platoons) && activeCoObj.platoons.length > 0
+        ? activeCoObj.platoons.map(p => (p.name || p).toUpperCase())
+        : [])
+    : Array.from(new Set(activeStructure.flatMap(b => (b.companies || []).flatMap(c => (c.platoons || []).map(p => (p.name || p).toUpperCase())))));
 
   return (
     <div
-      className="bg-white p-6 rounded-2xl border border-slate-200/90 shadow-xs mb-6 space-y-4"
+      className="w-full bg-white p-6 rounded-2xl border border-slate-200/90 shadow-xs mb-6 space-y-4"
       style={{
+        width: '100%',
         backgroundColor: '#ffffff',
         padding: '1.5rem',
         borderRadius: '1rem',
@@ -97,48 +98,50 @@ export default function UnitHierarchyDrillDown({
     >
       {/* Title Header */}
       <div
-        className="flex items-center gap-3 mb-2"
-        style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}
+        className="flex items-center justify-between flex-wrap gap-3 mb-2"
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.5rem' }}
       >
-        <div
-          className="p-2 bg-emerald-50 text-emerald-800 rounded-xl"
-          style={{
-            padding: '0.5rem',
-            backgroundColor: '#ecfdf5',
-            color: '#065f46',
-            borderRadius: '0.75rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <Users className="w-5 h-5" size={20} />
-        </div>
-        <div>
-          <h3
-            className="text-base font-black text-emerald-950 tracking-tight uppercase"
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div
+            className="p-2 bg-emerald-50 text-emerald-800 rounded-xl"
             style={{
-              fontSize: '1rem',
-              fontWeight: 900,
-              color: '#022c22',
-              letterSpacing: '-0.025em',
-              textTransform: 'uppercase',
-              margin: 0
+              padding: '0.5rem',
+              backgroundColor: '#ecfdf5',
+              color: '#065f46',
+              borderRadius: '0.75rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
-            Unit Hierarchy Drill-Down & Cadet Roster
-          </h3>
-          <p
-            className="text-xs font-semibold text-slate-400"
-            style={{
-              fontSize: '0.75rem',
-              fontWeight: 600,
-              color: '#94a3b8',
-              margin: '2px 0 0 0'
-            }}
-          >
-            Inspect echelon assignments, edit cadet details (Gender, Department, Program, Contact Number), and sync to Supabase
-          </p>
+            <Icon className="w-5 h-5" size={20} />
+          </div>
+          <div>
+            <h3
+              className="text-base font-black text-emerald-950 tracking-tight uppercase"
+              style={{
+                fontSize: '1rem',
+                fontWeight: 900,
+                color: '#022c22',
+                letterSpacing: '-0.025em',
+                textTransform: 'uppercase',
+                margin: 0
+              }}
+            >
+              {title}
+            </h3>
+            <p
+              className="text-xs font-semibold text-slate-400"
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: '#94a3b8',
+                margin: '2px 0 0 0'
+              }}
+            >
+              {subtitle}
+            </p>
+          </div>
         </div>
       </div>
 
@@ -157,7 +160,7 @@ export default function UnitHierarchyDrillDown({
             <button
               key={b}
               type="button"
-              onClick={() => setSelectedBattalion(b)}
+              onClick={() => setSelectedBattalion(allowToggle && selectedBattalion === b ? null : b)}
               className={`py-3.5 px-6 rounded-xl font-black text-sm tracking-wide transition-all border-2 ${
                 isSelected
                   ? 'bg-emerald-700 text-white border-emerald-700 shadow-md shadow-emerald-700/20'
@@ -198,7 +201,7 @@ export default function UnitHierarchyDrillDown({
             <button
               key={c}
               type="button"
-              onClick={() => setSelectedCompany(c)}
+              onClick={() => setSelectedCompany(allowToggle && selectedCompany === c ? null : c)}
               className={`py-3 px-4 rounded-xl font-black text-xs tracking-wider transition-all border-2 ${
                 isSelected
                   ? 'bg-emerald-800 text-white border-emerald-800 shadow-sm'
@@ -239,7 +242,7 @@ export default function UnitHierarchyDrillDown({
             <button
               key={p}
               type="button"
-              onClick={() => setSelectedPlatoon(p)}
+              onClick={() => setSelectedPlatoon(allowToggle && selectedPlatoon === p ? null : p)}
               className={`py-3 px-4 rounded-xl font-black text-xs tracking-wider transition-all border-2 ${
                 isSelected
                   ? 'bg-emerald-950 text-white border-emerald-950 shadow-sm'

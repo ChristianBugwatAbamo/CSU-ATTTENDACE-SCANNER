@@ -5,6 +5,8 @@ import DashboardView from './components/DashboardView';
 import AnalyticsView from './components/AnalyticsView';
 import AttendanceHistory from './components/AttendanceHistory';
 import IDGenerator from './components/IDGenerator';
+import BasicCadetRegistration from './components/BasicCadetRegistration';
+import QRCodeGenerator from './components/QRCodeGenerator';
 import ScannerPage from './components/ScannerPage';
 import AdminSettings from './components/AdminSettings';
 import LoginPage from './components/LoginPage';
@@ -21,7 +23,7 @@ import { recalculateAttendanceLogs, getActiveFormationCutoff, reconcileCadetDail
 import { ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'analytics', 'cadets', 'history', 'idcards', 'scanner', 'settings'];
+  const VALID_TABS = ['dashboard', 'analytics', 'cadets', 'qrgenerator', 'history', 'registration', 'idcards', 'scanner', 'settings'];
 
   // Startup loading splash — shows military loader for minimum 1.8 s on first mount
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -512,9 +514,9 @@ export default function App() {
       />
 
       <main className="main-wrapper">
-        <header className="top-header no-print">
+        <header className="top-header no-print print:hidden">
           <div className="page-title-group">
-            <h2>CSU ROTC ATTENDANCE & ROSTER SYSTEM</h2>
+            <h2>CSU ROTC ATTENDANCE</h2>
             <p>Admin HQ Desktop</p>
           </div>
 
@@ -576,12 +578,23 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'idcards' && (
-            <IDGenerator
+          {activeTab === 'registration' && (
+            <BasicCadetRegistration
               cadets={cadets}
               onRefresh={fetchData}
-              refreshCadetsRoster={fetchData}
             />
+          )}
+
+          {/* Legacy 'idcards' hash → redirect silently to registration */}
+          {activeTab === 'idcards' && (
+            <BasicCadetRegistration
+              cadets={cadets}
+              onRefresh={fetchData}
+            />
+          )}
+
+          {activeTab === 'qrgenerator' && (
+            <QRCodeGenerator />
           )}
 
           {activeTab === 'scanner' && (

@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { LayoutDashboard, TrendingUp, BarChart3, History, Users, QrCode, FileSpreadsheet, Camera, Settings, Database, Cloud, LogOut, ShieldCheck, User } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { LayoutDashboard, TrendingUp, BarChart3, History, Users, QrCode, Camera, Settings, LogOut, ClipboardList } from 'lucide-react';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { getSupabaseConfig } from '../utils/supabaseClient';
 import MilitaryLoader from './MilitaryLoader';
@@ -8,8 +8,9 @@ const TAB_PHRASES = {
   dashboard: 'Loading Command Dashboard...',
   analytics: 'Loading Analytics & Reports...',
   cadets: 'Loading Roster Data...',
+  qrgenerator: 'Loading QR Code Generator...',
   history: 'Loading Attendance History...',
-  idcards: 'Generating ROTC ID Cards...',
+  registration: 'Loading Cadet Registration...',
   scanner: 'Activating Webcam Scanner...',
   settings: 'Loading System Settings...',
 };
@@ -45,8 +46,9 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
     { id: 'dashboard', label: 'Command Dashboard', icon: LayoutDashboard },
     { id: 'analytics', label: 'Analytics & Reports', icon: BarChart3 },
     { id: 'cadets', label: 'Cadets Roster', icon: Users },
+    { id: 'qrgenerator', label: 'QR Code Generator', icon: QrCode },
     { id: 'history', label: 'Attendance History', icon: History },
-    { id: 'idcards', label: 'ROTC ID Card Generator', icon: QrCode },
+    { id: 'registration', label: 'Cadet Registration', icon: ClipboardList },
     { id: 'scanner', label: 'Webcam Batch Scanner', icon: Camera },
     { id: 'settings', label: 'Settings', icon: Settings }
   ];
@@ -73,7 +75,7 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
           staticPhrase={navPhrase}
         />
       )}
-      <aside className="sidebar">
+      <aside className="sidebar print:hidden">
         <div className="sidebar-header">
           <img
             src={logoSrc}

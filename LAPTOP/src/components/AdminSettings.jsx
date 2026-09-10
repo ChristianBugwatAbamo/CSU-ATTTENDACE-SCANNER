@@ -186,6 +186,25 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const [saveSuccessToast, setSaveSuccessToast] = useState(null);
   const [isLetterheadModalOpen, setIsLetterheadModalOpen] = useState(false);
 
+  // Print Orientation State for QR Pass & Layout Setup ('portrait' | 'landscape')
+  const [orientation, setOrientation] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_print_orientation');
+      if (saved === 'portrait' || saved === 'landscape') return saved;
+    } catch (_) {}
+    return 'landscape';
+  });
+
+  const handleOrientationChange = (newOrientation) => {
+    setOrientation(newOrientation);
+    handleChange('cardOrientation', newOrientation === 'portrait' ? 'vertical' : 'horizontal');
+    handleChange('printOrientation', newOrientation);
+    try {
+      localStorage.setItem('csu_rotc_print_orientation', newOrientation);
+      window.dispatchEvent(new Event('csu_rotc_orientation_change'));
+    } catch (_) {}
+  };
+
   const hasUnsavedChanges = JSON.stringify(settings) !== JSON.stringify(savedSettings);
 
   // Echelon Navigation in Structure Tab
@@ -316,6 +335,12 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
         } catch (_) { }
       }
 
+      const loadedOri = finalSettings.printOrientation || finalSettings.print_orientation || (finalSettings.cardOrientation === 'vertical' || finalSettings.id_card_orientation === 'vertical' ? 'portrait' : 'landscape');
+      if (loadedOri === 'portrait' || loadedOri === 'landscape') {
+        setOrientation(loadedOri);
+        try { localStorage.setItem('csu_rotc_print_orientation', loadedOri); } catch (_) {}
+      }
+
       setSettings(finalSettings);
       setSavedSettings(finalSettings);
     };
@@ -332,7 +357,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings]);
+  }, [settings, orientation]);
 
   const handleChange = (field, value) => {
     setSettings(prev => {
@@ -369,6 +394,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
 
     const toSave = {
       ...rawToSave,
+      printOrientation: orientation,
+      print_orientation: orientation,
+      cardOrientation: orientation === 'portrait' ? 'vertical' : 'horizontal',
+      id_card_orientation: orientation === 'portrait' ? 'vertical' : 'horizontal',
       commandingOfficer: activeCommandingOfficer,
       commanding_officer: activeCommandingOfficer,
       commandingOfficerTitle: activeOfficerTitle,
@@ -385,6 +414,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     };
 
     try {
+      try {
+        localStorage.setItem('csu_rotc_print_orientation', orientation);
+        window.dispatchEvent(new Event('csu_rotc_orientation_change'));
+      } catch (_) {}
       // 1. Re-evaluate and update all master attendance records against the new cutoff setting
       try {
         const savedLogsJson = localStorage.getItem('csu_rotc_master_attendance');
@@ -1006,7 +1039,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     { id: 'structure', label: 'Muster & Unit Configuration', icon: Layers, desc: 'Formation schedules & battalion structure' },
     { id: 'branding', label: 'Unit Branding', icon: Award, desc: 'Command profile & official seals' },
     { id: 'storage', label: 'Data Management & Exports', icon: Database, desc: 'Excel paths, backups & letterhead settings' },
-    { id: 'idprinting', label: 'ID Printing Setup', icon: Printer, desc: 'Signatories & CR80 specs' }
+    { id: 'idprinting', label: 'QR Pass & Layout Setup', icon: Printer, desc: 'Page orientations & CR80 card specs' }
   ];
 
   return (
@@ -2082,151 +2115,125 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       )}
 
       {/* =========================================================================
-          TAB 5: ID PRINTING SETUP
+          TAB 5: QR PASS & LAYOUT SETUP
           ========================================================================= */}
       {activeTab === 'idprinting' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          {/* Top Row: 2 Equal-Width Columns (Command Signatory & Physical Card Specs) */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 420px), 1fr))', gap: '1.5rem' }}>
-            {/* Card 1: Signatory Profile */}
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                  <Printer size={20} />
-                  <span>Command Signatory Profile</span>
-                </div>
-                <span className="badge badge-present">CARD SIGNATORY</span>
+          <div className="card" style={{ maxWidth: '780px' }}>
+            <div className="card-header">
+              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
+                <Sliders size={20} />
+                <span>QR Pass & Layout Setup</span>
               </div>
+              <span className="badge badge-present">CR80 & PRINT CONFIG</span>
+            </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                    Authorized Signatory Full Name & Rank
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={settings.signatoryName}
-                    onChange={(e) => handleChange('signatoryName', e.target.value)}
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                    Signatory Designation / Position
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={settings.signatoryDesignation}
-                    onChange={(e) => handleChange('signatoryDesignation', e.target.value)}
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                    Digital Signature Image
-                  </label>
-                  <input
-                    type="file"
-                    ref={signatureInputRef}
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => handleImageUpload(e, 'signatureImageUrl')}
-                  />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.35rem', padding: '0.5rem 0' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 800, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                  Print Orientation
+                </label>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '0 0 0.85rem 0' }}>
+                  Configure the default physical sheet page orientation when generating or printing QR pass batches.
+                </p>
+                {/* Segmented Control Button Group (Zero Spacing, Joined Corners) */}
+                <div
+                  className="flex gap-0 max-w-[500px] w-full rounded-xl shadow-xs"
+                  style={{
+                    display: 'flex',
+                    gap: '0px',
+                    maxWidth: '500px',
+                    width: '100%'
+                  }}
+                >
+                  {/* Vertical (Portrait) Button */}
                   <button
                     type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => signatureInputRef.current?.click()}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem' }}
+                    onClick={() => handleOrientationChange('portrait')}
+                    className={`flex-1 py-3 px-4 rounded-l-xl rounded-r-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      orientation === 'portrait'
+                        ? 'border-2 border-[#004d25] bg-emerald-100 text-[#004d25] font-black z-10 shadow-xs'
+                        : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 font-bold border-r-0'
+                    }`}
+                    style={{
+                      flex: 1,
+                      padding: '0.85rem 1rem',
+                      borderTopLeftRadius: '12px',
+                      borderBottomLeftRadius: '12px',
+                      borderTopRightRadius: '0px',
+                      borderBottomRightRadius: '0px',
+                      border: orientation === 'portrait' ? '2px solid #004d25' : '1.5px solid #cbd5e1',
+                      borderRight: orientation === 'portrait' ? '2px solid #004d25' : 'none',
+                      backgroundColor: orientation === 'portrait' ? '#d1fae5' : '#ffffff',
+                      color: orientation === 'portrait' ? '#004d25' : '#475569',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      position: 'relative',
+                      zIndex: orientation === 'portrait' ? 2 : 1,
+                      transition: 'all 0.15s ease'
+                    }}
                   >
-                    <Upload size={14} /> Upload Transparent PNG Signature
+                    {orientation === 'portrait' && <Check size={18} color="#004d25" strokeWidth={3} />}
+                    <span>Vertical (Portrait)</span>
+                  </button>
+
+                  {/* Horizontal (Landscape) Button */}
+                  <button
+                    type="button"
+                    onClick={() => handleOrientationChange('landscape')}
+                    className={`flex-1 py-3 px-4 rounded-r-xl rounded-l-none transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      orientation === 'landscape'
+                        ? 'border-2 border-[#004d25] bg-emerald-100 text-[#004d25] font-black z-10 shadow-xs'
+                        : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 font-bold border-l-0'
+                    }`}
+                    style={{
+                      flex: 1,
+                      padding: '0.85rem 1rem',
+                      borderTopRightRadius: '12px',
+                      borderBottomRightRadius: '12px',
+                      borderTopLeftRadius: '0px',
+                      borderBottomLeftRadius: '0px',
+                      border: orientation === 'landscape' ? '2px solid #004d25' : '1.5px solid #cbd5e1',
+                      borderLeft: orientation === 'landscape' ? '2px solid #004d25' : 'none',
+                      backgroundColor: orientation === 'landscape' ? '#d1fae5' : '#ffffff',
+                      color: orientation === 'landscape' ? '#004d25' : '#475569',
+                      fontWeight: 900,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      position: 'relative',
+                      zIndex: orientation === 'landscape' ? 2 : 1,
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {orientation === 'landscape' && <Check size={18} color="#004d25" strokeWidth={3} />}
+                    <span>Horizontal (Landscape)</span>
                   </button>
                 </div>
               </div>
-            </div>
 
-            {/* Card 2: CR80 Card Dimensions */}
-            <div className="card">
-              <div className="card-header">
-                <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                  <Sliders size={20} />
-                  <span>CR80 Physical Card Specs</span>
+              <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-dark)' }}>Card Format Specification</span>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
+                    ISO/IEC 7810 ID-1 • CR80
+                  </span>
                 </div>
-                <span className="badge badge-present">CR80 PVC FORMAT</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
-                    Print Orientation
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <button
-                      type="button"
-                      onClick={() => handleChange('cardOrientation', 'vertical')}
-                      style={{
-                        padding: '0.75rem',
-                        borderRadius: '8px',
-                        border: settings.cardOrientation === 'vertical' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                        background: settings.cardOrientation === 'vertical' ? '#ecfdf5' : '#ffffff',
-                        color: settings.cardOrientation === 'vertical' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      {settings.cardOrientation === 'vertical' && <Check size={16} />}
-                      <span>Vertical (Portrait)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleChange('cardOrientation', 'horizontal')}
-                      style={{
-                        padding: '0.75rem',
-                        borderRadius: '8px',
-                        border: settings.cardOrientation === 'horizontal' ? '2px solid var(--rotc-green-dark)' : '1px solid var(--border-light)',
-                        background: settings.cardOrientation === 'horizontal' ? '#ecfdf5' : '#ffffff',
-                        color: settings.cardOrientation === 'horizontal' ? 'var(--rotc-green-dark)' : 'var(--text-dark)',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '6px'
-                      }}
-                    >
-                      {settings.cardOrientation === 'horizontal' && <Check size={16} />}
-                      <span>Horizontal (Landscape)</span>
-                    </button>
-                  </div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
+                  Standard CR80 (85.60 mm × 53.98 mm • 3.370" × 2.125")
                 </div>
-
-                <div style={{ padding: '0.85rem', background: '#f8fafc', borderRadius: '10px', border: '1px solid var(--border-light)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
-                    <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)' }}>Card Format Specification</span>
-                    <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--rotc-green-dark)', background: '#d1fae5', padding: '2px 8px', borderRadius: '4px' }}>
-                      ISO/IEC 7810 ID-1
-                    </span>
-                  </div>
-                  <div style={{ fontSize: '0.88rem', fontWeight: 800, color: '#1e293b' }}>
-                    Standard CR80 (85.60 mm × 53.98 mm • 3.370" × 2.125")
-                  </div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Calibrated for PVC ID Card Printers (Evolis, Zebra, Fargo) and A4 8-card sheets.
-                  </div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '4px', lineHeight: 1.4 }}>
+                  Calibrated for standard physical sheet printing (A4 / Letter) with 4 passes per row. Current sheet print orientation is set to <strong style={{ color: '#064e2e', textTransform: 'uppercase' }}>{orientation}</strong>.
                 </div>
               </div>
             </div>
           </div>
-
-
         </div>
       )}
 

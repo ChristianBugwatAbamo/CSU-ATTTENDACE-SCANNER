@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Shield,
   User,
@@ -9,7 +9,6 @@ import {
   AlertOctagon,
   XCircle,
   LogOut,
-  CreditCard,
   X,
   Award,
   BookOpen,
@@ -25,8 +24,12 @@ import {
   Phone,
   GraduationCap,
   Users,
-  Info
+  Info,
+  Download,
+  Printer
 } from 'lucide-react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import {
   fetchCadetAttendanceHistory,
   fetchSettingsFromSupabase,
@@ -141,6 +144,8 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   const [isBackgroundSyncing, setIsBackgroundSyncing] = useState(false);
   const [showIdModal, setShowIdModal] = useState(false);
+  const passCardRef = useRef(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchDate, setSearchDate] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -577,6 +582,7 @@ export default function CadetPortal({ cadet, onLogout }) {
     id: cadetId,
     cadetId: cadetId,
     name: fullName,
+    lastName: activeCadet.lastName || activeCadet.last_name || '',
     rank: rank,
     battalion: battalion,
     company: company,
@@ -588,6 +594,105 @@ export default function CadetPortal({ cadet, onLogout }) {
     signatoryName: settings?.id_signatory_name || settings?.commanding_officer,
     signatoryTitle: settings?.id_signatory_title || settings?.commanding_officer_title,
     signatureUrl: settings?.id_signature_url
+  };
+
+  const handleDownloadPdf = async () => {
+    const cardElem = passCardRef.current;
+    if (!cardElem) return;
+
+    try {
+      setIsExportingPdf(true);
+
+      const canvas = await html2canvas(cardElem, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+      });
+
+      const imgData = canvas.toDataURL('image/png');
+
+      // Proportions matching the Admin QR Code Generator (~60mm width)
+      const cardWidthMm = 60;
+      const cardHeightMm = (canvas.height / canvas.width) * cardWidthMm;
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: [cardWidthMm + 10, cardHeightMm + 10],
+      });
+
+      pdf.addImage(imgData, 'PNG', 5, 5, cardWidthMm, cardHeightMm);
+
+      const safeLastName = (activeCadet.lastName || activeCadet.last_name || '').toUpperCase().trim();
+      const fallbackLastName = (activeCadet.name || 'CADET').split(',')[0].trim().toUpperCase();
+      const finalName = (safeLastName || fallbackLastName || 'CADET').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const safeId = (cadetId || 'ID').replace(/[^a-zA-Z0-9_-]/g, '_');
+      pdf.save(`ROTC_QR_PASS_${finalName}_${safeId}.pdf`);
+    } catch (err) {
+      console.error('Failed to export QR pass to PDF:', err);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
+  const handlePrintPass = () => {
+    const cardElem = passCardRef.current;
+    if (!cardElem) return;
+
+    const safeLastName = (activeCadet.lastName || activeCadet.last_name || '').toUpperCase().trim();
+    const fallbackLastName = (activeCadet.name || 'CADET').split(',')[0].trim().toUpperCase();
+    const printTitle = `Official ROTC QR Pass - ${safeLastName || fallbackLastName || cadetId}`;
+
+    const printWin = window.open('', '_blank');
+    if (printWin) {
+      printWin.document.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>${printTitle}</title>
+            <style>
+              @page { size: auto; margin: 10mm; }
+              body {
+                margin: 0;
+                padding: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 100vh;
+                background: #ffffff;
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              }
+              .print-container {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 10mm;
+              }
+              .qr-pass-tile {
+                box-shadow: none !important;
+                border: 1.5px solid #064e2e !important;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="print-container">
+              ${cardElem.outerHTML}
+            </div>
+            <script>
+              window.onload = function() {
+                window.focus();
+                window.print();
+                setTimeout(function() { window.close(); }, 500);
+              };
+            </script>
+          </body>
+        </html>
+      `);
+      printWin.document.close();
+    } else {
+      window.print();
+    }
   };
 
   return (
@@ -1042,7 +1147,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               </div>
             </div>
 
-            {/* Digital ID Button */}
+            {/* Digital QR Pass Button */}
             <button
               type="button"
               className="cadet-profile-id-btn"
@@ -1067,7 +1172,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               onMouseEnter={(e) => { e.currentTarget.style.background = '#d97706'; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = '#e5a900'; }}
             >
-              <CreditCard size={16} /> View Digital ROTC ID Card
+              <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🔲</span> View Digital QR Pass
             </button>
           </div>
 
@@ -2498,7 +2603,7 @@ export default function CadetPortal({ cadet, onLogout }) {
               border: '1.5px solid #e5a900',
               borderRadius: '16px',
               padding: '1.5rem',
-              maxWidth: '480px',
+              maxWidth: '360px',
               width: '100%',
               boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.75)',
               position: 'relative'
@@ -2506,8 +2611,8 @@ export default function CadetPortal({ cadet, onLogout }) {
             onClick={(e) => e.stopPropagation()}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.25rem', fontWeight: 800, color: '#e5a900' }}>
-                OFFICIAL DIGITAL ROTC ID
+              <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.25rem', fontWeight: 800, color: '#e5a900', letterSpacing: '0.03em' }}>
+                OFFICIAL DIGITAL QR PASS
               </div>
               <button
                 type="button"
@@ -2524,12 +2629,64 @@ export default function CadetPortal({ cadet, onLogout }) {
               </button>
             </div>
 
-            <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto', padding: '0.5rem 0' }}>
-              <IDCardPreview card={cardPayload} />
+            {/* QR Pass Card Preview (with ref for PDF and Print capture) */}
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '0.25rem 0' }}>
+              <IDCardPreview ref={passCardRef} card={cardPayload} />
             </div>
 
-            <div style={{ textAlign: 'center', fontSize: '0.75rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '1rem' }}>
-              Present this digital badge or QR code during formation scanning.
+            <div style={{ textAlign: 'center', fontSize: '0.74rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '0.85rem' }}>
+              Present this digital QR pass during formation scanning.
+            </div>
+
+            {/* Action Buttons: Download PDF and Print Pass */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '1.25rem' }}>
+              <button
+                type="button"
+                onClick={handleDownloadPdf}
+                disabled={isExportingPdf}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '0.65rem 0.75rem',
+                  borderRadius: '10px',
+                  border: 'none',
+                  background: isExportingPdf ? '#94a3b8' : 'linear-gradient(135deg, #064e2e, #065f46)',
+                  color: '#ffffff',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: isExportingPdf ? 'not-allowed' : 'pointer',
+                  boxShadow: '0 2px 8px rgba(6, 78, 46, 0.25)',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Download size={15} />
+                <span>{isExportingPdf ? 'Saving PDF...' : 'Download PDF'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePrintPass}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '0.65rem 0.75rem',
+                  borderRadius: '10px',
+                  border: isLight ? '1.5px solid #cbd5e1' : '1.5px solid rgba(255,255,255,0.18)',
+                  background: isLight ? '#f8fafc' : 'rgba(255,255,255,0.06)',
+                  color: isLight ? '#0f172a' : '#f8fafc',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Printer size={15} />
+                <span>Print Pass</span>
+              </button>
             </div>
           </div>
         </div>
