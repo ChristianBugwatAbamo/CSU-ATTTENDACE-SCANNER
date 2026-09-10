@@ -68,9 +68,11 @@ export default function CadetRosterTable({
 
   return (
     <div
-      className="overflow-x-auto rounded-xl border border-slate-200 shadow-xs"
+      className="max-h-[500px] overflow-y-auto border border-slate-200 rounded-xl shadow-xs"
       style={{
         width: '100%',
+        maxHeight: '500px',
+        overflowY: 'auto',
         overflowX: 'auto',
         borderRadius: '0.75rem',
         border: '1px solid #e2e8f0',
@@ -82,11 +84,19 @@ export default function CadetRosterTable({
         style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}
       >
         {/* Table Header */}
-        <thead>
+        <thead
+          className="sticky top-0 z-10 bg-[#002d18]"
+          style={{
+            position: 'sticky',
+            top: 0,
+            zIndex: 10,
+            backgroundColor: '#002d18'
+          }}
+        >
           <tr
-            className="bg-emerald-950 text-white text-[11px] font-black uppercase tracking-wider"
+            className="bg-[#002d18] text-white text-[11px] font-black uppercase tracking-wider"
             style={{
-              backgroundColor: '#022c22',
+              backgroundColor: '#002d18',
               color: '#ffffff',
               fontSize: '11px',
               fontWeight: 900,
@@ -94,16 +104,16 @@ export default function CadetRosterTable({
               letterSpacing: '0.05em'
             }}
           >
-            <th className="py-3.5 px-4 text-center w-12" style={{ padding: '0.875rem 1rem', textAlign: 'center', width: '3rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>#</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet ID</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet Name</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Gender</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Department</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Academic Program</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Permanent Address</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Religion</th>
-            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Contact Number</th>
-            <th className="py-3.5 px-4 text-center" style={{ padding: '0.875rem 1rem', textAlign: 'center', backgroundColor: '#022c22', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Action</th>
+            <th className="py-3.5 px-4 text-center w-12" style={{ padding: '0.875rem 1rem', textAlign: 'center', width: '3rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>#</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet ID</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Cadet Name</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Gender</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Department</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Academic Program</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Permanent Address</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Religion</th>
+            <th className="py-3.5 px-4" style={{ padding: '0.875rem 1rem', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Contact Number</th>
+            <th className="py-3.5 px-4 text-center" style={{ padding: '0.875rem 1rem', textAlign: 'center', backgroundColor: '#002d18', color: '#ffffff', position: 'sticky', top: 0, zIndex: 10 }}>Action</th>
           </tr>
         </thead>
 

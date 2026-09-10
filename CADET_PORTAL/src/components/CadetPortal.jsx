@@ -612,17 +612,18 @@ export default function CadetPortal({ cadet, onLogout }) {
 
       const imgData = canvas.toDataURL('image/png');
 
-      // Proportions matching the Admin QR Code Generator (~60mm width)
-      const cardWidthMm = 60;
-      const cardHeightMm = (canvas.height / canvas.width) * cardWidthMm;
-
+      // Standard A4 document in portrait mode positioned at top-left
+      // Matching Admin pass dimensions (44mm width) and 8mm page margin positioning
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
-        format: [cardWidthMm + 10, cardHeightMm + 10],
+        format: 'a4',
       });
 
-      pdf.addImage(imgData, 'PNG', 5, 5, cardWidthMm, cardHeightMm);
+      const cardWidthMm = 44;
+      const cardHeightMm = (canvas.height / canvas.width) * cardWidthMm;
+
+      pdf.addImage(imgData, 'PNG', 8, 8, cardWidthMm, cardHeightMm);
 
       const safeLastName = (activeCadet.lastName || activeCadet.last_name || '').toUpperCase().trim();
       const fallbackLastName = (activeCadet.name || 'CADET').split(',')[0].trim().toUpperCase();
@@ -652,26 +653,47 @@ export default function CadetPortal({ cadet, onLogout }) {
           <head>
             <title>${printTitle}</title>
             <style>
-              @page { size: auto; margin: 10mm; }
-              body {
-                margin: 0;
-                padding: 0;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 100vh;
-                background: #ffffff;
+              @page {
+                size: portrait;
+                margin: 8mm;
+              }
+              * {
+                box-sizing: border-box;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100%;
+                height: 100%;
+                background: #ffffff !important;
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
               }
               .print-container {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 10mm;
+                position: absolute;
+                top: 0;
+                left: 0;
+                margin: 0;
+                padding: 0;
+                display: block;
               }
+              #printable-qr-pass,
+              #cadet-digital-qr-pass,
               .qr-pass-tile {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                margin: 0 !important;
+                width: 164px !important;
+                max-width: 168px !important;
                 box-shadow: none !important;
-                border: 1.5px solid #064e2e !important;
+                border: 1.5px solid #1a3a2a !important;
+                border-radius: 6px !important;
+                padding: 10px 8px !important;
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+                box-sizing: border-box !important;
               }
             </style>
           </head>
@@ -2584,6 +2606,7 @@ export default function CadetPortal({ cadet, onLogout }) {
       {/* Digital ID Card Modal */}
       {showIdModal && (
         <div
+          className="id-modal-backdrop"
           style={{
             position: 'fixed',
             inset: 0,
@@ -2598,6 +2621,7 @@ export default function CadetPortal({ cadet, onLogout }) {
           onClick={() => setShowIdModal(false)}
         >
           <div
+            className="id-modal-content"
             style={{
               background: isLight ? '#ffffff' : '#0f172a',
               border: '1.5px solid #e5a900',
@@ -2610,7 +2634,7 @@ export default function CadetPortal({ cadet, onLogout }) {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
               <div style={{ fontFamily: 'Oswald, sans-serif', fontSize: '1.25rem', fontWeight: 800, color: '#e5a900', letterSpacing: '0.03em' }}>
                 OFFICIAL DIGITAL QR PASS
               </div>
@@ -2630,16 +2654,16 @@ export default function CadetPortal({ cadet, onLogout }) {
             </div>
 
             {/* QR Pass Card Preview (with ref for PDF and Print capture) */}
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '0.25rem 0' }}>
+            <div className="qr-pass-preview-container" style={{ display: 'flex', justifyContent: 'center', padding: '0.25rem 0' }}>
               <IDCardPreview ref={passCardRef} card={cardPayload} />
             </div>
 
-            <div style={{ textAlign: 'center', fontSize: '0.74rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '0.85rem' }}>
+            <div className="no-print" style={{ textAlign: 'center', fontSize: '0.74rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '0.85rem' }}>
               Present this digital QR pass during formation scanning.
             </div>
 
             {/* Action Buttons: Download PDF and Print Pass */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '1.25rem' }}>
+            <div className="no-print" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '1.25rem' }}>
               <button
                 type="button"
                 onClick={handleDownloadPdf}
@@ -2691,6 +2715,81 @@ export default function CadetPortal({ cadet, onLogout }) {
           </div>
         </div>
       )}
+
+      {/* Print Layout Rules (Matching Admin): Force standard A4 portrait top-left alignment */}
+      <style>{`
+        @media print {
+          @page {
+            size: portrait;
+            margin: 8mm;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            width: 100% !important;
+            height: 100% !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .no-print,
+          header,
+          nav,
+          aside,
+          button,
+          input,
+          select,
+          main {
+            display: none !important;
+            visibility: hidden !important;
+          }
+          .id-modal-backdrop {
+            position: static !important;
+            background: transparent !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+          }
+          .id-modal-content {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            width: auto !important;
+            max-width: none !important;
+          }
+          .qr-pass-preview-container {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            display: block !important;
+          }
+          #printable-qr-pass,
+          #cadet-digital-qr-pass,
+          .qr-pass-tile {
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            margin: 0 !important;
+            width: 164px !important;
+            max-width: 168px !important;
+            border: 1.5px solid #1a3a2a !important;
+            border-radius: 6px !important;
+            padding: 10px 8px !important;
+            box-shadow: none !important;
+            box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+        }
+      `}</style>
     </div>
   </>
 );

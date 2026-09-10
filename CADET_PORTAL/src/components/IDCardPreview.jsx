@@ -84,29 +84,32 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
   return (
     <div
       ref={ref}
-      id="cadet-digital-qr-pass"
+      id="printable-qr-pass"
       className="qr-pass-tile printable-card"
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: '6px',
-        padding: '16px 14px',
+        gap: '4px',
+        padding: '10px 8px',
         background: '#ffffff',
         border: '1.5px solid #1a3a2a',
-        borderRadius: '10px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-        width: '100%',
-        maxWidth: '220px',
-        boxSizing: 'border-box'
+        borderRadius: '6px',
+        boxShadow: 'none',
+        width: '164px',
+        maxWidth: '168px',
+        boxSizing: 'border-box',
+        pageBreakInside: 'avoid',
+        breakInside: 'avoid',
+        overflow: 'hidden'
       }}
     >
       {/* QR Code */}
       <div style={{
         background: '#fff',
         padding: '4px',
-        borderRadius: '6px',
+        borderRadius: '4px',
         border: '1px solid #cbd5e1',
         display: 'flex',
         alignItems: 'center',
@@ -114,7 +117,7 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
       }}>
         <QRCodeSVG
           value={generateQrPayload(card)}
-          size={110}
+          size={105}
           bgColor="#ffffff"
           fgColor="#064e2e"
           level="M"
@@ -122,11 +125,11 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
         />
       </div>
 
-      {/* Line 1: LAST NAME ONLY (e.g., CALIGUID) */}
+      {/* Line 1: LAST NAME ONLY (e.g. TRAZARES) */}
       <div style={{
         fontFamily: 'Oswald, sans-serif',
         fontWeight: 800,
-        fontSize: '0.96rem',
+        fontSize: '0.8rem',
         color: '#0f172a',
         textAlign: 'center',
         lineHeight: 1.15,
@@ -139,25 +142,25 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
         {lastNameOnly}
       </div>
 
-      {/* Line 2: Cadet ID Badge (e.g., 221-00001) */}
+      {/* Line 2: Cadet ID Badge (e.g. 221-00003) */}
       <div style={{
         fontFamily: 'monospace',
         fontWeight: 800,
-        fontSize: '0.76rem',
+        fontSize: '0.66rem',
         color: '#064e2e',
         letterSpacing: '0.06em',
         background: 'rgba(6,78,46,0.06)',
         border: '1px solid rgba(6,78,46,0.2)',
-        padding: '2px 8px',
+        padding: '1px 7px',
         borderRadius: '4px',
         lineHeight: 1.3
       }}>
         {cleanId}
       </div>
 
-      {/* Line 3: Battalion & Company (e.g., 1ST BAT • ALPHA COY) */}
+      {/* Line 3: Battalion & Company (e.g. 1ST BAT • ALPHA COY) */}
       <div style={{
-        fontSize: '0.70rem',
+        fontSize: '0.6rem',
         color: '#1e293b',
         fontWeight: 700,
         textAlign: 'center',
@@ -168,9 +171,9 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
         {bnCoLine}
       </div>
 
-      {/* Line 4: Platoon (e.g., 1ST PLATOON) */}
+      {/* Line 4: Platoon (e.g. 1ST PLATOON) */}
       <div style={{
-        fontSize: '0.66rem',
+        fontSize: '0.56rem',
         color: '#475569',
         fontWeight: 700,
         textAlign: 'center',

@@ -23,7 +23,11 @@ import { recalculateAttendanceLogs, getActiveFormationCutoff, reconcileCadetDail
 import { ShieldCheck } from 'lucide-react';
 
 export default function App() {
-  const VALID_TABS = ['dashboard', 'analytics', 'cadets', 'qrgenerator', 'history', 'registration', 'idcards', 'scanner', 'settings'];
+  const VALID_TABS = [
+    'dashboard', 'analytics', 'cadets', 'cadets-roster',
+    'qrgenerator', 'qr-generator', 'history', 'attendance-history',
+    'registration', 'idcards', 'scanner', 'settings'
+  ];
 
   // Startup loading splash — shows military loader for minimum 1.8 s on first mount
   const [isAppLoading, setIsAppLoading] = useState(true);
@@ -566,11 +570,11 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'cadets' && (
+          {(activeTab === 'cadets' || activeTab === 'cadets-roster') && (
             <CadetRosterHierarchy />
           )}
 
-          {activeTab === 'history' && (
+          {(activeTab === 'history' || activeTab === 'attendance-history') && (
             <AttendanceHistory
               cadets={cadets}
               attendanceLogs={attendanceLogs}
@@ -593,7 +597,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'qrgenerator' && (
+          {(activeTab === 'qrgenerator' || activeTab === 'qr-generator') && (
             <QRCodeGenerator />
           )}
 

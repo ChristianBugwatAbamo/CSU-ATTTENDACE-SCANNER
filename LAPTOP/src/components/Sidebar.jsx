@@ -6,13 +6,17 @@ import MilitaryLoader from './MilitaryLoader';
 
 const TAB_PHRASES = {
   dashboard: 'Loading Command Dashboard...',
-  analytics: 'Loading Analytics & Reports...',
-  cadets: 'Loading Roster Data...',
-  qrgenerator: 'Loading QR Code Generator...',
+  'attendance-history': 'Loading Attendance History...',
   history: 'Loading Attendance History...',
+  'cadets-roster': 'Loading Roster Data...',
+  cadets: 'Loading Roster Data...',
+  analytics: 'Loading Analytics & Reports...',
   registration: 'Loading Cadet Registration...',
+  'qr-generator': 'Loading QR Code Generator...',
+  qrgenerator: 'Loading QR Code Generator...',
   scanner: 'Activating Webcam Scanner...',
   settings: 'Loading System Settings...',
+  logout: 'Logging Out...',
 };
 
 export default function Sidebar({ activeTab, setActiveTab, serverOnline, currentUser, onLogout }) {
@@ -43,26 +47,46 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
   }, []);
 
   const navItems = [
-    { id: 'dashboard', label: 'Command Dashboard', icon: LayoutDashboard },
-    { id: 'analytics', label: 'Analytics & Reports', icon: BarChart3 },
-    { id: 'cadets', label: 'Cadets Roster', icon: Users },
-    { id: 'qrgenerator', label: 'QR Code Generator', icon: QrCode },
-    { id: 'history', label: 'Attendance History', icon: History },
-    { id: 'registration', label: 'Cadet Registration', icon: ClipboardList },
-    { id: 'scanner', label: 'Webcam Batch Scanner', icon: Camera },
-    { id: 'settings', label: 'Settings', icon: Settings }
+    { id: 'dashboard', path: '/dashboard', label: 'Command Dashboard', icon: LayoutDashboard },
+    { id: 'attendance-history', path: '/attendance-history', label: 'Attendance History', icon: History },
+    { id: 'cadets-roster', path: '/cadets-roster', label: 'Cadets Roster', icon: Users },
+    { id: 'analytics', path: '/analytics', label: 'Analytics & Reports', icon: BarChart3 },
+    { id: 'registration', path: '/registration', label: 'Cadet Registration', icon: ClipboardList },
+    { id: 'qr-generator', path: '/qr-generator', label: 'QR Code Generator', icon: QrCode },
+    { id: 'scanner', path: '/scanner', label: 'Webcam Batch Scanner', icon: Camera },
+    { id: 'settings', path: '/settings', label: 'Settings', icon: Settings },
+    { id: 'logout', path: '/logout', label: 'Log Out', icon: LogOut, isLogout: true }
   ];
 
   const logoSrc = settings?.rotcSealUrl || '/rotc-seal-transparent.png';
 
-  const handleNavClick = (id) => {
-    if (id === activeTab) return; // already on this tab, skip loader
-    const phrase = TAB_PHRASES[id] || 'Loading...';
-    navigateWithLoader(phrase, () => setActiveTab(id), 600);
+  const isItemActive = (item) => {
+    if (item.isLogout || item.id === 'logout') return false;
+    if (activeTab === item.id) return true;
+    if (item.path && (activeTab === item.path || activeTab === item.path.replace('/', ''))) return true;
+    if (item.id === 'attendance-history' && activeTab === 'history') return true;
+    if (item.id === 'cadets-roster' && activeTab === 'cadets') return true;
+    if (item.id === 'qr-generator' && activeTab === 'qrgenerator') return true;
+    return false;
   };
 
   const handleLogoutClick = () => {
     navigateWithLoader('Logging Out...', () => { if (onLogout) onLogout(); }, 500);
+  };
+
+  const handleNavClick = (target) => {
+    const item = typeof target === 'string'
+      ? navItems.find((n) => n.id === target || n.path === target || n.path === `/${target}`) || { id: target }
+      : target;
+
+    if (item.id === 'logout' || item.isLogout) {
+      handleLogoutClick();
+      return;
+    }
+
+    if (isItemActive(item)) return; // already on this tab, skip loader
+    const phrase = TAB_PHRASES[item.id] || (item.label ? `Loading ${item.label}...` : 'Loading...');
+    navigateWithLoader(phrase, () => setActiveTab(item.id), 600);
   };
 
   return (
@@ -96,43 +120,48 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
         <ul className="sidebar-menu">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive = activeTab === item.id;
+            const isLogout = item.id === 'logout' || item.isLogout;
+            if (isLogout && !onLogout) return null;
+
+            if (isLogout) {
+              return (
+                <li
+                  key={item.id}
+                  className="sidebar-item sidebar-logout-item"
+                  onClick={handleLogoutClick}
+                  style={{
+                    marginTop: '0.25rem',
+                    color: '#f87171',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                    e.currentTarget.style.color = '#fca5a5';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                    e.currentTarget.style.color = '#f87171';
+                  }}
+                >
+                  <Icon size={20} color="#f87171" />
+                  <span style={{ fontWeight: 600 }}>{item.label}</span>
+                </li>
+              );
+            }
+
+            const isActive = isItemActive(item);
             return (
               <li
                 key={item.id}
                 className={`sidebar-item ${isActive ? 'active' : ''}`}
-                onClick={() => handleNavClick(item.id)}
+                onClick={() => handleNavClick(item)}
               >
                 <Icon size={20} />
                 <span>{item.label}</span>
               </li>
             );
           })}
-
-          {/* Styled Log Out Item directly below Settings in Main Navigation */}
-          {onLogout && (
-            <li
-              className="sidebar-item sidebar-logout-item"
-              onClick={handleLogoutClick}
-              style={{
-                marginTop: '0.25rem',
-                color: '#f87171',
-                cursor: 'pointer',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
-                e.currentTarget.style.color = '#fca5a5';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = '#f87171';
-              }}
-            >
-              <LogOut size={20} color="#f87171" />
-              <span style={{ fontWeight: 600 }}>Log Out</span>
-            </li>
-          )}
         </ul>
 
         <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '1rem 1.15rem' }}>

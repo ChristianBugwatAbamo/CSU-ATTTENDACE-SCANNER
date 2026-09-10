@@ -90,15 +90,27 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
         </div>
       </div>
 
-      {/* Grid List of Cadets Needing Update */}
+      {/* Vertical Scroll Container for Action Required Cadets */}
       <div
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5"
+        className="max-h-[500px] overflow-y-auto border border-slate-200 rounded-xl shadow-xs p-2.5 bg-white/50"
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: '0.625rem'
+          maxHeight: '500px',
+          overflowY: 'auto',
+          borderRadius: '0.75rem',
+          border: '1px solid #e2e8f0',
+          backgroundColor: 'rgba(255, 255, 255, 0.5)',
+          padding: '0.625rem'
         }}
       >
+        {/* Grid List of Cadets Needing Update */}
+        <div
+          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+            gap: '0.625rem'
+          }}
+        >
         {incompleteCadets.map((cadet) => {
           // Identify missing attributes
           const missing = [];
@@ -212,6 +224,7 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
             </button>
           );
         })}
+        </div>
       </div>
     </div>
   );

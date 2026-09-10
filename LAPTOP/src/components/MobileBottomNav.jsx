@@ -5,6 +5,7 @@ import MilitaryLoader from './MilitaryLoader';
 const TAB_PHRASES = {
   dashboard: 'Loading Command Dashboard...',
   history: 'Loading Attendance History...',
+  'attendance-history': 'Loading Attendance History...',
   scanner: 'Activating Webcam Scanner...',
   registration: 'Loading Cadet Registration...',
 };
@@ -55,13 +56,13 @@ export default function MobileBottomNav({ activeTab, setActiveTab, onOpenScanner
           <div className="mobile-nav-group left-group">
             {leftNavItems.map((item) => {
               const Icon = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = activeTab === item.id || (item.id === 'history' && activeTab === 'attendance-history');
               return (
                 <button
                   key={item.id}
                   type="button"
                   className={`mobile-nav-item ${isActive ? 'active' : ''}`}
-                  onClick={() => handleNavClick(item.id)}
+                  onClick={() => handleNavClick(activeTab === 'attendance-history' ? 'attendance-history' : item.id)}
                   aria-label={item.label}
                 >
                   <div className="mobile-nav-icon-wrapper">
