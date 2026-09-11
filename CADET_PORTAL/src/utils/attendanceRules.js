@@ -54,17 +54,70 @@ export function toDateKey(dateInput) {
 /**
  * Evaluates an individual cadet's attendance logs across the active formation schedule.
  */
-export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION_DATES) {
+export function evaluateCadetAttendance(cadet = {}, formationDates) {
+  const safeCadet = cadet || {};
+  const datesToUse = formationDates !== undefined ? formationDates : ACTIVE_FORMATION_DATES;
   const cadetLogsByDate = {};
-  (cadet.attendance_logs || []).forEach((log) => {
+  
+  // Also collect any excuse records if present in cadet.excuse_requests or cadet.excuseRequests
+  const rawExcuses = safeCadet.excuse_requests || safeCadet.excuseRequests || safeCadet.excuses || [];
+  if (Array.isArray(rawExcuses)) {
+    rawExcuses.forEach(ex => {
+      const dk = toDateKey(ex.drill_date || ex.date || ex.formation_date || ex.session_date);
+      if (dk) {
+        const exSt = String(ex.status || '').toUpperCase();
+        const normalizedExStatus = (exSt === 'APPROVED' || exSt === 'EXCUSED')
+          ? 'EXCUSED'
+          : (exSt === 'REJECTED' || exSt === 'ABSENT')
+            ? 'ABSENT'
+            : 'EXCUSE_PENDING';
+        cadetLogsByDate[dk] = {
+          date: dk,
+          status: normalizedExStatus,
+          final_daily_status: normalizedExStatus,
+          excuse_reason: ex.reason || ex.excuse_reason || 'Absence excuse submitted',
+          excuse_submitted_at: ex.submitted_at || ex.created_at,
+          is_excuse: normalizedExStatus !== 'ABSENT'
+        };
+      }
+    });
+  }
+
+  (safeCadet.attendance_logs || []).forEach((log) => {
     const dk = toDateKey(log.date || log.session_date || log.timestamp);
     if (dk) {
-      cadetLogsByDate[dk] = log;
+      const existing = cadetLogsByDate[dk];
+      const logStatus = String(log.final_daily_status || log.status || '').toUpperCase();
+      const isExcuse = logStatus === 'EXCUSE_PENDING' || logStatus === 'PENDING' || logStatus === 'EXCUSED' || logStatus === 'APPROVED' || logStatus.includes('EXCUSED');
+      
+      if (!existing) {
+        cadetLogsByDate[dk] = log;
+      } else {
+        const existingStatus = String(existing.final_daily_status || existing.status || '').toUpperCase();
+        const existingIsExcuse = existingStatus === 'EXCUSE_PENDING' || existingStatus === 'PENDING' || existingStatus === 'EXCUSED' || existingStatus === 'APPROVED' || existingStatus.includes('EXCUSED');
+        
+        if (isExcuse && !existingIsExcuse) {
+          // Excuse record takes precedence over default/unexcused log
+          cadetLogsByDate[dk] = { ...existing, ...log, status: logStatus, final_daily_status: logStatus, is_excuse: true };
+        } else if (!isExcuse && existingIsExcuse) {
+          if (logStatus === 'ABSENT') {
+            cadetLogsByDate[dk] = { ...existing, ...log, status: 'ABSENT', final_daily_status: 'ABSENT', is_excuse: false };
+          } else {
+            cadetLogsByDate[dk] = { ...log, ...existing, status: existingStatus, final_daily_status: existingStatus, is_excuse: true };
+          }
+        } else {
+          // If either logStatus or existingStatus is EXCUSED/APPROVED, resolve to EXCUSED
+          const isEitherApproved = logStatus === 'EXCUSED' || logStatus === 'APPROVED' || existingStatus === 'EXCUSED' || existingStatus === 'APPROVED';
+          const isEitherAbsent = logStatus === 'ABSENT' || existingStatus === 'ABSENT';
+          const resolvedStatus = isEitherApproved ? 'EXCUSED' : isEitherAbsent ? 'ABSENT' : (logStatus || existingStatus);
+          cadetLogsByDate[dk] = { ...existing, ...log, status: resolvedStatus, final_daily_status: resolvedStatus, is_excuse: Boolean(isExcuse || existingIsExcuse) && resolvedStatus !== 'ABSENT' };
+        }
+      }
     }
   });
 
   const logDates = Object.keys(cadetLogsByDate);
-  const allDates = [...(formationDates || []), ...logDates];
+  const allDates = [...(datesToUse || []), ...logDates];
   const sortedDates = Array.from(new Set(allDates)).filter(Boolean).sort();
 
   let unexcusedAbsences = 0;
@@ -83,18 +136,34 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
     if (log) {
       const st = (log.final_daily_status || log.finalDailyStatus || log.status || log.finalStatus || '').toUpperCase();
       
+      // CHECK EXCUSE STATUS FIRST
+      const isExcusePending = st === 'EXCUSE_PENDING' || st === 'PENDING';
+      const isExcused = st === 'EXCUSED' || st === 'APPROVED' || st.includes('EXCUSED');
+      const isExcuse = isExcusePending || isExcused;
+
       const rawTimeIn = log.time_in || log.timeIn;
       const rawTimeOut = log.time_out || log.timeOut;
       
       const isNullTimeOut = !rawTimeOut || String(rawTimeOut).trim() === '' || String(rawTimeOut).toUpperCase() === 'NO TIME-OUT' || String(rawTimeOut).toUpperCase() === 'NULL';
       const isNullTimeIn = !rawTimeIn || String(rawTimeIn).trim() === '' || String(rawTimeIn).toUpperCase() === 'NO TIME-IN' || String(rawTimeIn).toUpperCase() === 'NULL';
 
-      const cleanTimeIn = isNullTimeIn
-        ? ((!st.includes('NO TIME-IN') && !rawTimeOut && (log.scanMode === 'Time-In' || log.scan_mode === 'Time-In')) ? log.timestamp : null)
-        : rawTimeIn;
-      const cleanTimeOut = isNullTimeOut
-        ? ((!st.includes('NO TIME-OUT') && !rawTimeIn && (log.scanMode === 'Time-Out' || log.scan_mode === 'Time-Out')) ? log.timestamp : null)
-        : rawTimeOut;
+      // An actual QR scan only occurred if an explicit scan flag is set, not an excuse submission
+      const hasActualScan = Boolean(
+        log.is_qr_scan ||
+        log.isQrScan ||
+        log.scanned_by ||
+        log.scannedBy ||
+        (log.scan_mode && log.scan_mode !== 'Excuse' && log.scan_mode !== 'Manual' && log.scan_mode !== 'Time-In' && log.scan_mode !== 'Time-Out')
+      );
+
+      // If status is EXCUSE_PENDING or EXCUSED, TIME-IN and TIME-OUT must render null/dash unless an actual QR scan occurred:
+      const cleanTimeIn = (!isExcuse || hasActualScan)
+        ? (isNullTimeIn ? null : rawTimeIn)
+        : null;
+
+      const cleanTimeOut = (!isExcuse || hasActualScan)
+        ? (isNullTimeOut ? null : rawTimeOut)
+        : null;
 
       const hasTimeIn = Boolean(cleanTimeIn);
       const hasTimeOut = Boolean(cleanTimeOut);
@@ -103,12 +172,35 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
       let dayType = 'PRESENT';
       let entryStatus = 'PRESENT';
 
-      if (hasTimeIn && !hasTimeOut) {
+      // 1. CHECK EXCUSE STATUS FIRST before assigning Late, Missing Scans, or Absent
+      if (isExcusePending) {
+        consecutiveAbsences = 0;
+        consecutiveLates = 0;
+        dayType = 'EXCUSE_PENDING';
+        entryStatus = 'EXCUSE_PENDING';
+        penaltyLabel = 'Online excuse submitted — Awaiting HQ Verification';
+      } else if (isExcused) {
+        consecutiveAbsences = 0;
+        consecutiveLates = 0;
+        dayType = 'EXCUSED';
+        entryStatus = 'EXCUSED';
+        penaltyLabel = 'Official Excuse Approved by Duty Officer';
+      } else if (st === 'ABSENT' || (!hasTimeIn && !hasTimeOut)) {
+        unexcusedAbsences += 1;
+        consecutiveAbsences += 1;
+        maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
+        consecutiveLates = 0;
+        penaltyLabel = (log.excuse_reason || log.reason || rawExcuses.some(e => (e.drill_date === formationDate || e.date === formationDate) && (String(e.status).toUpperCase() === 'REJECTED' || String(e.status).toUpperCase() === 'ABSENT')))
+          ? 'Excuse Rejected / Declared Absent by HQ'
+          : `Official Absent (+1 Absent, Streak: ${consecutiveAbsences})`;
+        dayType = 'ABSENT';
+        entryStatus = 'ABSENT';
+      } else if (hasTimeIn && !hasTimeOut) {
         totalIntervalMissingScans += 1;
         consecutiveAbsences = 0;
         consecutiveLates = 0;
         dayType = 'NO TIME-OUT';
-        const isLate = st.includes('LATE') || Boolean(log.isLate || log.is_late);
+        const isLate = log.isLate !== undefined ? Boolean(log.isLate) : (st.includes('LATE') || Boolean(log.is_late));
         entryStatus = isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
         penaltyLabel = `Missing Time-Out Scan (+1/4 Interval Penalty)`;
       } else if (!hasTimeIn && hasTimeOut) {
@@ -118,15 +210,7 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
         dayType = 'NO TIME-IN';
         entryStatus = 'NO TIME-IN';
         penaltyLabel = `Missing Time-In Scan (+1/4 Interval Penalty)`;
-      } else if (st === 'ABSENT' || (!hasTimeIn && !hasTimeOut)) {
-        unexcusedAbsences += 1;
-        consecutiveAbsences += 1;
-        maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
-        consecutiveLates = 0;
-        penaltyLabel = `Official Absent (+1 Absent, Streak: ${consecutiveAbsences})`;
-        dayType = 'ABSENT';
-        entryStatus = 'ABSENT';
-      } else if (st.includes('LATE')) {
+      } else if (log.isLate !== undefined ? Boolean(log.isLate) : st.includes('LATE')) {
         consecutiveAbsences = 0;
         consecutiveLates += 1;
         maxConsecutiveLates = Math.max(maxConsecutiveLates, consecutiveLates);
@@ -142,12 +226,6 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
         } else {
           penaltyLabel = `Late Scan (Consecutive: ${consecutiveLates}/3, Total Lates: ${totalIntervalLates})`;
         }
-      } else if (st === 'EXCUSED') {
-        consecutiveAbsences = 0;
-        consecutiveLates = 0;
-        penaltyLabel = `Excused / Official Duty (No Penalty)`;
-        dayType = 'EXCUSED';
-        entryStatus = 'EXCUSED';
       } else {
         consecutiveAbsences = 0;
         consecutiveLates = 0;
@@ -160,14 +238,15 @@ export function evaluateCadetAttendance(cadet, formationDates = ACTIVE_FORMATION
         date: formationDate,
         dayType,
         status: entryStatus,
-        timeIn: cleanTimeIn,
-        timeOut: cleanTimeOut,
-        hasTimeIn,
-        hasTimeOut,
-        timestamp: log.timestamp,
+        timeIn: (isExcusePending || isExcused) ? (isNullTimeIn ? null : cleanTimeIn) : cleanTimeIn,
+        timeOut: (isExcusePending || isExcused) ? (isNullTimeOut ? null : cleanTimeOut) : cleanTimeOut,
+        hasTimeIn: (isExcusePending || isExcused) ? !isNullTimeIn : hasTimeIn,
+        hasTimeOut: (isExcusePending || isExcused) ? !isNullTimeOut : hasTimeOut,
+        timestamp: (isExcusePending || isExcused) ? null : log.timestamp,
         penaltyLabel,
         cutoffTime: log.cutoff_time || log.cutoffTime || log.formation_cutoff_time || null,
-        isRecorded: true
+        isRecorded: true,
+        excuseReason: log.excuse_reason || log.excuseReason || null
       });
     } else {
       // Unrecorded on an active formation date -> ABSENT
@@ -322,8 +401,9 @@ export function sortCadetAlertsAscending(cadets = []) {
  * - Converted Absences: Raw Absences + ⌊Missing Scans / 4⌋ + ⌊Interval Lates / 4⌋ + ⌊Consecutive Lates / 3⌋
  * - Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
  */
-export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_DATES) {
-  const evaluated = evaluateCadetAttendance(cadet, formationDates);
+export function calculateCadetAbsences(cadet, formationDates) {
+  const datesToUse = formationDates !== undefined ? formationDates : ACTIVE_FORMATION_DATES;
+  const evaluated = evaluateCadetAttendance(cadet, datesToUse);
   const rawAbsences = Number(evaluated.unexcusedAbsences || 0);
   const missingScans = Number(evaluated.totalIntervalMissingScans || 0);
   const intervalLates = Number(evaluated.totalIntervalLates || 0);
@@ -342,13 +422,15 @@ export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_
 
   const totalFormations = (evaluated.dailyBreakdown && evaluated.dailyBreakdown.length > 0)
     ? evaluated.dailyBreakdown.length
-    : (formationDates && formationDates.length > 0 ? formationDates.length : 1);
+    : (datesToUse && datesToUse.length > 0 ? datesToUse.length : 0);
 
   // Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
   let adjustedAttendanceRate = 100;
   if (totalFormations > 0) {
     const rate = ((totalFormations - convertedAbsences) / totalFormations) * 100;
     adjustedAttendanceRate = Math.max(0, Math.min(100, Math.round(rate)));
+  } else {
+    adjustedAttendanceRate = 100;
   }
 
   return {

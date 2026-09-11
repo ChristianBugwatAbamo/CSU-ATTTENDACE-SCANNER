@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Calendar,
   Clock,
@@ -26,7 +26,10 @@ import {
   Info,
   CalendarCheck,
   CalendarDays,
-  Settings
+  Settings,
+  FileText,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
 import DashboardUnitHierarchy from './DashboardUnitHierarchy';
@@ -134,13 +137,16 @@ export function getDutyOfficerForCadet(cadet, sessions = [], logs = [], selected
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import {
   fetchAttendanceSessionsFromSupabase,
-  subscribeToHistoryRealtime
+  subscribeToHistoryRealtime,
+  approveExcuseRequest,
+  rejectExcuseRequest
 } from '../utils/supabaseClient';
 
 export default function AttendanceHistory({
   cadets = [],
   attendanceLogs = [],
-  onRefresh
+  onRefresh,
+  initialStatusFilter = 'ALL'
 }) {
   const { records: hookLogs = [], cadets: hookCadets = [] } = useAttendanceData();
   const effectiveLogs = Array.isArray(attendanceLogs) && attendanceLogs.length > 0 ? attendanceLogs : hookLogs;
@@ -327,8 +333,14 @@ export default function AttendanceHistory({
     };
   }, [isCalendarOpen]);
 
-  // Table status filter ('ALL' | 'PRESENT' | 'LATE' | 'INCOMPLETE' | 'ABSENT')
-  const [statusFilter, setStatusFilter] = useState('ALL');
+  // Table status filter ('ALL' | 'PRESENT' | 'LATE' | 'INCOMPLETE' | 'ABSENT' | 'EXCUSE_PENDING')
+  const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
+
+  useEffect(() => {
+    if (initialStatusFilter && initialStatusFilter !== 'ALL') {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
 
   // Search query state
   const [searchQuery, setSearchQuery] = useState('');
@@ -398,7 +410,8 @@ export default function AttendanceHistory({
         presentCompleteCount: 0,
         lateCompleteCount: 0,
         incompleteCount: 0,
-        absentCount: 0
+        absentCount: 0,
+        excusePendingCount: 0
       };
     }
 
@@ -406,6 +419,8 @@ export default function AttendanceHistory({
     let lateCount = 0;
     let incompleteCount = 0;
     let absentCount = 0;
+    let excusePendingCount = 0;
+    let excusedCount = 0;
 
     const isValidTimeVal = (val) => {
       if (!val) return false;
@@ -414,6 +429,10 @@ export default function AttendanceHistory({
     };
 
     reconciledRoster.forEach(c => {
+      const rawStatus = String(c.finalDailyStatus || c.status || '').toUpperCase();
+      if (rawStatus === 'EXCUSE_PENDING') { excusePendingCount++; return; }
+      if (rawStatus === 'EXCUSED') { excusedCount++; return; }
+
       const scanIn = c.timeInScan;
       const scanOut = c.timeOutScan;
       const rawIn = (c.hasTimeIn || scanIn) ? (scanIn?.timestamp || scanIn?.time_in) : null;
@@ -445,7 +464,9 @@ export default function AttendanceHistory({
       presentCompleteCount: presentCount,
       lateCompleteCount: lateCount,
       incompleteCount: incompleteCount,
-      absentCount: absentCount
+      absentCount: absentCount,
+      excusePendingCount: excusePendingCount,
+      excusedCount: excusedCount
     };
   }, [reconciledRoster, selectedDate, isRecordedDate, activeCutoffMins]);
 
@@ -482,18 +503,26 @@ export default function AttendanceHistory({
       const isCadetLate = Boolean(cadet.isLate || (!isNaN(inMins) && inMins > activeCutoffMins));
 
       // 1. Status Filter
+      const rawCadetStatus = String(cadet.finalDailyStatus || cadet.status || '').toUpperCase();
       if (statusFilter === 'PRESENT') {
+        if (rawCadetStatus === 'EXCUSE_PENDING' || rawCadetStatus === 'EXCUSED') return false;
         if (!hasIn || !hasOut || isCadetLate || String(cadet.finalDailyStatus || '').includes('LATE')) return false;
       }
       if (statusFilter === 'LATE') {
+        if (rawCadetStatus === 'EXCUSE_PENDING' || rawCadetStatus === 'EXCUSED') return false;
         if (!hasIn || (!isCadetLate && !String(cadet.finalDailyStatus || '').includes('LATE'))) return false;
       }
       if ((statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT')) {
+        if (rawCadetStatus === 'EXCUSE_PENDING' || rawCadetStatus === 'EXCUSED') return false;
         const isIncomplete = (hasIn && !hasOut) || (!hasIn && hasOut) || cadet.finalDailyStatus?.includes('NO TIME');
         if (!isIncomplete) return false;
       }
       if (statusFilter === 'ABSENT') {
+        if (rawCadetStatus === 'EXCUSE_PENDING' || rawCadetStatus === 'EXCUSED') return false;
         if (hasIn || hasOut) return false;
+      }
+      if (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') {
+        if (rawCadetStatus !== 'EXCUSE_PENDING' && rawCadetStatus !== 'EXCUSED') return false;
       }
 
       // 2. Battalion Filter
@@ -609,11 +638,32 @@ export default function AttendanceHistory({
   };
 
 
+  // Excuse action handlers
+  const [excuseActionLoading, setExcuseActionLoading] = useState(null);
+  const handleApproveExcuse = useCallback(async (logId) => {
+    if (!logId) return;
+    setExcuseActionLoading(logId);
+    await approveExcuseRequest(logId);
+    if (onRefresh) onRefresh();
+    setSessionsRefreshKey(k => k + 1);
+    setExcuseActionLoading(null);
+  }, [onRefresh]);
+
+  const handleRejectExcuse = useCallback(async (logId) => {
+    if (!logId) return;
+    setExcuseActionLoading(logId);
+    await rejectExcuseRequest(logId);
+    if (onRefresh) onRefresh();
+    setSessionsRefreshKey(k => k + 1);
+    setExcuseActionLoading(null);
+  }, [onRefresh]);
+
   const turnoutRate = displaySummary.totalStrength > 0
     ? Math.round(((displaySummary.presentCompleteCount + displaySummary.lateCompleteCount + displaySummary.incompleteCount) / displaySummary.totalStrength) * 100)
     : 0;
 
   const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'ALL' || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
+
 
   // Calendar rendering calculations
   const calYear = calendarMonth.getFullYear();
@@ -1338,6 +1388,34 @@ export default function AttendanceHistory({
                 {statusFilter === 'ABSENT' ? '● Active Filter' : 'Click to filter absentees'}
               </div>
             </div>
+
+            {/* Stat Card 6: EXCUSE */}
+            <div
+              className="card"
+              onClick={() => setStatusFilter(prev => (prev === 'EXCUSE' || prev === 'EXCUSE_PENDING' || prev === 'EXCUSED') ? 'ALL' : 'EXCUSE')}
+              style={{
+                border: '1px solid #e2e8f0',
+                borderTop: '3px solid #d97706',
+                borderRadius: '10px',
+                padding: '1rem',
+                cursor: 'pointer',
+                background: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#fffbeb' : '#ffffff',
+                boxShadow: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '0 0 0 2px #d97706' : 'var(--shadow-sm)',
+                transition: 'all 0.15s ease'
+              }}
+              title="Click to filter cadets with excuse records (Excused or Pending)"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase' }}>Excuse</span>
+                <FileText size={16} color="#d97706" />
+              </div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
+                {(displaySummary.excusePendingCount ?? 0) + (displaySummary.excusedCount ?? 0)}
+              </div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '● Active Filter' : 'Excused & Pending review'}
+              </div>
+            </div>
           </div>
 
           {/* Unit Hierarchy Drill-Down Selector */}
@@ -1545,33 +1623,81 @@ export default function AttendanceHistory({
 
                           {/* Daily Status */}
                           <td style={{ padding: '12px 16px' }}>
-                            {hasTimeIn && !hasTimeOut ? (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: isCadetLate ? '#fff7ed' : '#fff7ed', color: isCadetLate ? '#c2410c' : '#9a3412', border: `1px solid ${isCadetLate ? '#fdba74' : '#fed7aa'}`, display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <Activity size={11} /> {isCadetLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT'}
+                            {String(status || '').toUpperCase() === 'EXCUSE_PENDING' ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-900 border border-purple-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#faf5ff', color: '#581c87', borderColor: '#d8b4fe', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <FileText size={12} /> EXCUSE PENDING
+                              </span>
+                            ) : String(status || '').toUpperCase() === 'EXCUSED' ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-800 border border-sky-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#f0f9ff', color: '#075985', borderColor: '#7dd3fc', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <CheckCircle2 size={12} /> EXCUSED
+                              </span>
+                            ) : hasTimeIn && !hasTimeOut ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-orange-50 text-orange-900 border border-orange-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: isCadetLate ? '#fff7ed' : '#fff7ed', color: isCadetLate ? '#c2410c' : '#9a3412', borderColor: isCadetLate ? '#fdba74' : '#fed7aa', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <Activity size={12} /> {isCadetLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT'}
                               </span>
                             ) : hasTimeIn && hasTimeOut ? (
                               isCadetLate ? (
-                                <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fffbeb', color: '#92400e', border: '1px solid #fde68a', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                  <Clock size={11} /> LATE
+                                <span
+                                  className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                  style={{ background: '#fffbeb', color: '#92400e', borderColor: '#fde68a', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                                >
+                                  <Clock size={12} /> LATE
                                 </span>
                               ) : (
-                                <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#ecfdf5', color: '#065f46', border: '1px solid #a7f3d0', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                  <CheckCircle2 size={11} /> PRESENT
+                                <span
+                                  className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                  style={{ background: '#ecfdf5', color: '#065f46', borderColor: '#a7f3d0', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                                >
+                                  <CheckCircle2 size={12} /> PRESENT
                                 </span>
                               )
                             ) : !hasTimeIn && hasTimeOut ? (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#f0f9ff', color: '#0369a1', border: '1px solid #bae6fd', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <Activity size={11} /> NO TIME-IN
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-800 border border-sky-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#f0f9ff', color: '#0369a1', borderColor: '#bae6fd', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <Activity size={12} /> NO TIME-IN
                               </span>
                             ) : (
-                              <span style={{ fontSize: '0.72rem', fontWeight: 800, padding: '3px 8px', borderRadius: '6px', background: '#fef2f2', color: '#991b1b', border: '1px solid #fca5a5', display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                                <UserX size={11} /> ABSENT
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-red-50 text-red-800 border border-red-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#fef2f2', color: '#991b1b', borderColor: '#fca5a5', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <UserX size={12} /> ABSENT
                               </span>
                             )}
                           </td>
 
+                          {/* Duty Officer Column */}
                           <td style={{ padding: '12px 16px', fontSize: '0.8rem', color: 'var(--text-dark)', fontWeight: 600 }}>
-                            {getDutyOfficerForCadet(cadet, dbSessions, effectiveLogs, selectedDate)}
+                            {String(status || '').toUpperCase() === 'EXCUSE_PENDING' ? (
+                              '—'
+                            ) : (() => {
+                              const cId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim().toUpperCase();
+                              const matchingLog = (effectiveLogs || []).find(l => {
+                                const lId = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
+                                return lId && lId === cId;
+                              });
+                              const directOfficer = matchingLog?.duty_officer || matchingLog?.dutyOfficer || cadet.dutyOfficer || cadet.duty_officer;
+
+                              if (String(status || '').toUpperCase() === 'EXCUSED') {
+                                if (directOfficer && directOfficer !== 'Duty Officer' && directOfficer !== 'HQ Duty Officer' && directOfficer !== '—') {
+                                  return directOfficer;
+                                }
+                                return '—';
+                              }
+
+                              return getDutyOfficerForCadet(cadet, dbSessions, effectiveLogs, selectedDate);
+                            })()}
                           </td>
                         </tr>
                       );

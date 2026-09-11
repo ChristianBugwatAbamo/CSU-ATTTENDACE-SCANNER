@@ -143,6 +143,9 @@ const DEFAULT_SETTINGS = {
   cadetQuotaPerPlatoon: 37,
   totalUnitTarget: 1184,
   requireTimeInAndOut: true,
+  // Excuse Letter Workflow
+  excuseGracePeriodDays: 3,
+  excuseHardCutoffDatetime: '',
 
   // Tab 2: Dynamic Unit Structure & Echelons
   unitStructure: DEFAULT_UNIT_STRUCTURE,
@@ -274,6 +277,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
             cadetQuotaPerPlatoon: sbSettings.cadet_quota_per_platoon ?? DEFAULT_SETTINGS.cadetQuotaPerPlatoon,
             totalUnitTarget: sbSettings.total_unit_target ?? DEFAULT_SETTINGS.totalUnitTarget,
+            excuseGracePeriodDays: sbSettings.excuse_grace_period_days ?? DEFAULT_SETTINGS.excuseGracePeriodDays,
             unitStructure: loadedUnitStructure,
             unit_structure: loadedUnitStructure,
             unitName: sbSettings.unit_name || DEFAULT_SETTINGS.unitName,
@@ -1223,17 +1227,40 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           ========================================================================= */}
       {activeTab === 'structure' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Formation Cutoff Schedule Card */}
-          <div className="card" style={{ width: '100%' }}>
-            <div className="card-header">
-              <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)' }}>
-                <Clock size={20} />
-                <span>Formation Cutoff Schedule</span>
+          {/* 2-Column Split: Formation Cutoff Schedule & Excuse Letter Grace Period */}
+          <div
+            className="grid grid-cols-1 md:grid-cols-2 gap-5"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: '1.25rem',
+              width: '100%'
+            }}
+          >
+            {/* Left Card: Formation Cutoff Schedule */}
+            <div className="card" style={{ width: '100%' }}>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="card-title" style={{ fontSize: '1.05rem', color: 'var(--rotc-green-dark)', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <Clock size={20} />
+                  <span>Formation Cutoff Schedule</span>
+                </div>
+                <span
+                  className="badge badge-present"
+                  style={{
+                    background: '#ecfdf5',
+                    color: '#065f46',
+                    border: '1px solid #a7f3d0',
+                    padding: '0.2rem 0.65rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  TIME RULES
+                </span>
               </div>
-              <span className="badge badge-present">TIME RULES</span>
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
                   Time-In Cutoff
@@ -1245,14 +1272,56 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   onChange={(e) => handleChange('morningCutoffTime', e.target.value)}
                   style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
                 />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
                   Default morning muster deadline (e.g., 07:30 AM). Scans on or before this are marked Present; scans after this are marked Late.
                 </span>
+              </div>
+            </div>
 
+            {/* Right Card: Excuse Letter Grace Period */}
+            <div className="card" style={{ width: '100%' }}>
+              <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div className="card-title" style={{ fontSize: '1.05rem', color: '#b45309', display: 'flex', alignItems: 'center', gap: '8px', margin: 0 }}>
+                  <FileText size={20} />
+                  <span>Excuse Letter Grace Period</span>
+                </div>
+                <span
+                  className="badge badge-warning"
+                  style={{
+                    background: '#fef3c7',
+                    color: '#92400e',
+                    border: '1px solid #fde68a',
+                    padding: '0.2rem 0.65rem',
+                    borderRadius: '9999px',
+                    fontSize: '0.72rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.5px'
+                  }}
+                >
+                  POLICY DEADLINE
+                </span>
+              </div>
 
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-dark)', marginBottom: '0.35rem' }}>
+                  Excuse Letter Submission Grace Period (Days)
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  max="30"
+                  className="form-control"
+                  value={settings.excuseGracePeriodDays ?? 3}
+                  onChange={(e) => handleChange('excuseGracePeriodDays', parseInt(e.target.value, 10) || 0)}
+                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
+                  Number of days after the formation date that a cadet may still file an online excuse. After this window, any <strong>EXCUSE_PENDING</strong> records automatically convert to <strong>ABSENT</strong>.
+                </span>
               </div>
             </div>
           </div>
+
 
           {/* Unit Structure Summary Banner */}
           <div className="card" style={{ border: '2px solid #cbd5e1', background: '#f8fafc' }}>

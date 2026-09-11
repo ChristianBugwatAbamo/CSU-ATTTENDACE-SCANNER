@@ -426,8 +426,9 @@ export default function AnalyticsView({
         });
       }
 
-      // Build consolidated set of distinct formation dates: Combine default 6 active formation dates + any session/log dates
-      const formationDatesSet = new Set(ACTIVE_FORMATION_DATES);
+      // Build consolidated set of distinct formation dates:
+      // In a live/connected database, strictly evaluate against actual recorded sessions and logs.
+      const formationDatesSet = new Set();
       sessionsData.forEach(s => {
         const dk = normalizeDateKey(s.session_date || s.date);
         if (dk) formationDatesSet.add(dk);
@@ -442,6 +443,11 @@ export default function AnalyticsView({
           if (dk) formationDatesSet.add(dk);
         });
       });
+
+      // Only fallback to historical test dates if purely offline without a database and mock cadets exist
+      if (!client && formationDatesSet.size === 0 && (!propsCadets || propsCadets.length === 0)) {
+        ACTIVE_FORMATION_DATES.forEach(d => formationDatesSet.add(d));
+      }
 
       // Sort formation dates chronologically
       const sortedFormationDates = Array.from(formationDatesSet).sort();

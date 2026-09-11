@@ -380,7 +380,7 @@ export async function fetchAttendanceFromSupabase() {
 
 let _cachedSessions = null;
 let _cachedSessionsTime = 0;
-const SESSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const SESSIONS_CACHE_TTL = 5 * 1000; // 5 seconds (instant cloud responsiveness)
 
 /**
  * Fetches all attendance sessions from Supabase with caching.
@@ -389,11 +389,14 @@ const SESSIONS_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
  */
 export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) {
   const now = Date.now();
-  if (!forceRefresh && _cachedSessions && (now - _cachedSessionsTime < SESSIONS_CACHE_TTL)) {
+  if (forceRefresh) {
+    _cachedSessions = null;
+    _cachedSessionsTime = 0;
+  } else if (_cachedSessions && (now - _cachedSessionsTime < SESSIONS_CACHE_TTL)) {
     return _cachedSessions;
   }
 
-  // Check localStorage first for instant load
+  // Check localStorage first for instant load only if NOT forcing refresh
   if (!forceRefresh) {
     try {
       const saved = localStorage.getItem('csu_rotc_db_sessions');
@@ -403,7 +406,7 @@ export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) 
           _cachedSessions = parsed;
           _cachedSessionsTime = now;
           // Trigger background update silently
-          setTimeout(() => fetchAttendanceSessionsFromSupabase(true), 200);
+          setTimeout(() => fetchAttendanceSessionsFromSupabase(true), 100);
           return parsed;
         }
       }
@@ -1163,14 +1166,47 @@ export async function syncSessionCutoffTime(newCutoffTime) {
         });
     }
 
-    // 2. Update active today session in attendance_sessions table
-    await client
+    // 2. Update or insert active today session in attendance_sessions table
+    const { data: existingSession } = await client
       .from('attendance_sessions')
+      .select('id')
+      .eq('session_date', today)
+      .limit(1);
+
+    if (existingSession && existingSession.length > 0) {
+      await client
+        .from('attendance_sessions')
+        .update({
+          cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        })
+        .eq('session_date', today);
+    } else {
+      await client
+        .from('attendance_sessions')
+        .insert({
+          session_date: today,
+          session_name: 'Formation Session',
+          duty_officer: 'HQ Duty Officer',
+          cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        });
+    }
+
+    // 3. Propagate cutoff update to any today attendance_logs
+    await client
+      .from('attendance_logs')
       .update({
         cutoff_time: cleanCutoff,
         updated_at: new Date().toISOString()
       })
-      .eq('session_date', today);
+      .eq('date', today);
+
+    // Invalidate local caches
+    _cachedSettings = null;
+    _cachedSettingsTime = 0;
+    _cachedSessions = null;
+    _cachedSessionsTime = 0;
 
     return true;
   } catch (err) {
@@ -1214,7 +1250,7 @@ export async function clearAttendanceFromSupabase() {
 }
 
 /**
- * Subscribes to Supabase Realtime changes on attendance_logs AND attendance_sessions.
+ * Subscribes to Supabase Realtime changes on attendance_logs, attendance_sessions, AND system_settings.
  * Fires onPayload for any INSERT, UPDATE, or DELETE event on either table.
  * Returns the channel so the caller can unsubscribe on cleanup.
  */
@@ -1236,6 +1272,17 @@ export function subscribeToAttendanceRealtime(onPayload) {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'attendance_sessions' },
         (payload) => {
+          _cachedSessions = null;
+          _cachedSessionsTime = 0;
+          if (onPayload) onPayload(payload);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'system_settings' },
+        (payload) => {
+          _cachedSettings = null;
+          _cachedSettingsTime = 0;
           if (onPayload) onPayload(payload);
         }
       )
@@ -1251,24 +1298,91 @@ export function subscribeToAttendanceRealtime(onPayload) {
 /** Alias for components that only need history-specific realtime syncing */
 export const subscribeToHistoryRealtime = subscribeToAttendanceRealtime;
 
+/**
+ * High-precision Realtime subscriber for the Cadet Portal.
+ * Automatically invalidates in-memory caches, syncs localStorage, and triggers callbacks
+ * immediately when Admin saves settings (e.g. cut-off time, branding) or sessions.
+ */
+export function subscribeToPortalRealtime({ onSettingsChange, onSessionsChange, onAttendanceChange, onAnyChange } = {}) {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const channelId = `cadet_portal_realtime_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const channel = client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'system_settings' },
+        (payload) => {
+          _cachedSettings = null;
+          _cachedSettingsTime = 0;
+          if (payload?.new) {
+            try {
+              localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(payload.new));
+              window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: payload.new }));
+            } catch (_) {}
+          }
+          if (onSettingsChange) onSettingsChange(payload);
+          if (onAnyChange) onAnyChange({ type: 'system_settings', payload });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_sessions' },
+        (payload) => {
+          _cachedSessions = null;
+          _cachedSessionsTime = 0;
+          if (onSessionsChange) onSessionsChange(payload);
+          if (onAnyChange) onAnyChange({ type: 'attendance_sessions', payload });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_logs' },
+        (payload) => {
+          if (onAttendanceChange) onAttendanceChange(payload);
+          if (onAnyChange) onAnyChange({ type: 'attendance_logs', payload });
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'excuse_requests' },
+        (payload) => {
+          if (onAttendanceChange) onAttendanceChange(payload);
+          if (onAnyChange) onAnyChange({ type: 'excuse_requests', payload });
+        }
+      )
+      .subscribe();
+
+    return channel;
+  } catch (err) {
+    console.warn('subscribeToPortalRealtime error:', err);
+    return null;
+  }
+}
+
 // ==============================================================================
 // 3. SYSTEM SETTINGS CRUD (Supabase Cloud)
 // ==============================================================================
 
 let _cachedSettings = null;
 let _cachedSettingsTime = 0;
-const SETTINGS_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const SETTINGS_CACHE_TTL = 5 * 1000; // 5 seconds (instant responsiveness to Admin settings)
 
 /**
  * Fetches system settings from Supabase with caching.
  */
 export async function fetchSettingsFromSupabase(forceRefresh = false) {
   const now = Date.now();
-  if (!forceRefresh && _cachedSettings && (now - _cachedSettingsTime < SETTINGS_CACHE_TTL)) {
+  if (forceRefresh) {
+    _cachedSettings = null;
+    _cachedSettingsTime = 0;
+  } else if (_cachedSettings && (now - _cachedSettingsTime < SETTINGS_CACHE_TTL)) {
     return _cachedSettings;
   }
 
-  // Check localStorage first
+  // Check localStorage first for instant load only if NOT forcing refresh
   if (!forceRefresh) {
     try {
       const saved = localStorage.getItem('csu_rotc_admin_settings');
@@ -1277,7 +1391,7 @@ export async function fetchSettingsFromSupabase(forceRefresh = false) {
         if (parsed) {
           _cachedSettings = parsed;
           _cachedSettingsTime = now;
-          setTimeout(() => fetchSettingsFromSupabase(true), 200);
+          setTimeout(() => fetchSettingsFromSupabase(true), 100);
           return parsed;
         }
       }
@@ -1558,19 +1672,7 @@ export async function fetchCadetByCadetId(rawCadetId) {
   const digitsOnly = cleanId.replace(/[^0-9]/g, '');
   const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
-  // 0. Instant Cache Check for instant login/return
-  try {
-    const cachedCadet = localStorage.getItem(`csu_rotc_cadet_profile_${cleanId}`) ||
-                        (dashedId !== cleanId ? localStorage.getItem(`csu_rotc_cadet_profile_${dashedId}`) : null);
-    if (cachedCadet) {
-      const parsed = JSON.parse(cachedCadet);
-      if (parsed && parsed.id) {
-        return parsed;
-      }
-    }
-  } catch (_) {}
-
-  // 1. Query Supabase directly using a single combined query
+  // 1. Query Supabase directly as the primary source of truth
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -1733,7 +1835,69 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
           sessionName: l.session_name,
           scanMode: l.scan_mode
         }));
+      }
 
+      // 1b. Also query excuse_requests table if present to ensure excuse status is always prioritized
+      try {
+        const { data: excuseData } = await supabase
+          .from('excuse_requests')
+          .select('*')
+          .or(orCond);
+
+        if (Array.isArray(excuseData) && excuseData.length > 0) {
+          excuseData.forEach(ex => {
+            const rawD = ex.drill_date || ex.date || ex.formation_date || ex.session_date;
+            const exDate = toDateKey(rawD) || rawD;
+            const rawExSt = String(ex.status || '').toUpperCase();
+            const exStatus = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
+              ? 'EXCUSED'
+              : (rawExSt === 'REJECTED' || rawExSt === 'ABSENT')
+                ? 'ABSENT'
+                : 'EXCUSE_PENDING';
+
+            const matchIdx = logs.findIndex(l => {
+              const ld = toDateKey(l.date || l.session_date || l.timestamp) || l.date;
+              return ld === exDate;
+            });
+
+            if (matchIdx >= 0) {
+              const existing = logs[matchIdx];
+              const existingSt = String(existing.status || existing.final_daily_status || '').toUpperCase();
+              let resolvedStatus = exStatus;
+              if (exStatus === 'EXCUSED' || existingSt === 'EXCUSED' || existingSt === 'APPROVED') {
+                resolvedStatus = 'EXCUSED';
+              } else if (exStatus === 'ABSENT' || existingSt === 'ABSENT') {
+                resolvedStatus = 'ABSENT';
+              }
+
+              logs[matchIdx] = {
+                ...existing,
+                status: resolvedStatus,
+                final_daily_status: resolvedStatus,
+                finalDailyStatus: resolvedStatus,
+                excuse_reason: ex.reason || ex.excuse_reason || existing.excuse_reason,
+                excuse_submitted_at: ex.submitted_at || ex.created_at || existing.excuse_submitted_at,
+                is_excuse: resolvedStatus !== 'ABSENT'
+              };
+            } else {
+              logs.push({
+                cadet_id: cleanId,
+                cadetId: cleanId,
+                date: exDate,
+                session_date: exDate,
+                status: exStatus,
+                final_daily_status: exStatus,
+                finalDailyStatus: exStatus,
+                excuse_reason: ex.reason || ex.excuse_reason || (exStatus === 'ABSENT' ? 'Excuse Rejected / Declared Absent' : 'Absence excuse submitted'),
+                excuse_submitted_at: ex.submitted_at || ex.created_at,
+                is_excuse: exStatus !== 'ABSENT'
+              });
+            }
+          });
+        }
+      } catch (_) {}
+
+      if (logs.length > 0) {
         try {
           localStorage.setItem(`csu_rotc_cadet_logs_${cleanId}`, JSON.stringify(logs));
           if (dashedId !== cleanId) {
@@ -1807,7 +1971,7 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
     return _cachedDates;
   }
 
-  const datesSet = new Set(ACTIVE_FORMATION_DATES);
+  const datesSet = new Set();
 
   // Check local cache first
   if (!forceRefresh) {
@@ -1859,6 +2023,11 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
     }
   } catch (_) {}
 
+  // Fall back to sample schedule ONLY if offline with no Supabase client and no dates exist
+  if (datesSet.size === 0 && !getSupabaseClient()) {
+    ACTIVE_FORMATION_DATES.forEach(d => datesSet.add(d));
+  }
+
   const result = Array.from(datesSet).sort();
   _cachedDates = result;
   _cachedDatesTime = Date.now();
@@ -1868,3 +2037,166 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
 
   return result;
 }
+
+// ==============================================================================
+// EXCUSE LETTER APPROVAL WORKFLOW (Cadet Portal)
+// ==============================================================================
+
+/**
+ * Cadet submits an excuse request for a past absent formation date.
+ * Upserts an attendance_logs row with status = EXCUSE_PENDING.
+ */
+export async function submitExcuseRequest(cadetId, formationDate, reason, proofDataUrl = null) {
+  const client = getSupabaseClient();
+  if (!client || !cadetId || !formationDate) return { error: 'INVALID_INPUT', message: 'Cadet ID and Formation Date are required.' };
+
+  const cid = String(cadetId).trim().toUpperCase();
+
+  function _dateKey(d) {
+    if (!d) return '';
+    const str = String(d).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const dt = new Date(str);
+    if (isNaN(dt.getTime())) return '';
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  const dateKey = _dateKey(formationDate);
+  if (!cid || !dateKey) return { error: 'INVALID_DATE', message: 'Invalid formation date selected.' };
+
+  try {
+    // Check if record already exists for this cadet and date
+    const { data: existing } = await client
+      .from('attendance_logs')
+      .select('id, status, session_id, name, rank, battalion, company, platoon')
+      .eq('cadet_id', cid)
+      .eq('date', dateKey)
+      .maybeSingle();
+
+    if (existing && existing.status === 'EXCUSED') {
+      console.warn('Cannot file excuse: record is already EXCUSED.');
+      return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+    }
+
+    const now = new Date().toISOString();
+
+    if (existing?.id) {
+      // UPDATE existing row (whether ABSENT or updating EXCUSE_PENDING)
+      const updatePayload = {
+        status: 'EXCUSE_PENDING',
+        final_daily_status: 'EXCUSE_PENDING',
+        excuse_reason: reason || '',
+        excuse_proof_url: proofDataUrl || null,
+        excuse_submitted_at: now,
+        updated_at: now
+      };
+
+      let { data, error } = await client
+        .from('attendance_logs')
+        .update(updatePayload)
+        .eq('id', existing.id)
+        .select()
+        .single();
+
+      // If database column is named 'reason' rather than 'excuse_reason', retry with 'reason'
+      if (error && error.message && error.message.includes('excuse_reason')) {
+        const altPayload = { ...updatePayload };
+        delete altPayload.excuse_reason;
+        altPayload.reason = reason || '';
+        const altRes = await client
+          .from('attendance_logs')
+          .update(altPayload)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        data = altRes.data;
+        error = altRes.error;
+      }
+
+      if (error) throw error;
+      return {
+        data,
+        updated: true,
+        message: existing.status === 'EXCUSE_PENDING'
+          ? 'Your pending excuse reason has been updated successfully.'
+          : 'Excuse request submitted successfully! Awaiting Duty Officer verification.'
+      };
+    } else {
+      // INSERT new minimal row for unrecorded formation or unscanned date
+      // Fetch cadet profile from master roster to satisfy NOT NULL constraints (e.g. name)
+      const { data: cadetProfile } = await client
+        .from('cadets')
+        .select('name, rank, battalion, company, platoon')
+        .eq('id', cid)
+        .maybeSingle();
+
+      // Check if an official session exists for this date to avoid foreign key rejections
+      const { data: sessionData } = await client
+        .from('attendance_sessions')
+        .select('id')
+        .eq('session_date', dateKey)
+        .limit(1)
+        .maybeSingle();
+
+      const insertPayload = {
+        session_id: sessionData?.id || null,
+        cadet_id: cid,
+        name: cadetProfile?.name || ('Cadet ' + cid),
+        rank: cadetProfile?.rank || 'Cadet',
+        battalion: cadetProfile?.battalion || '1st Battalion',
+        company: cadetProfile?.company || 'Alpha Company',
+        platoon: cadetProfile?.platoon || '1st Platoon',
+        date: dateKey,
+        status: 'EXCUSE_PENDING',
+        final_daily_status: 'EXCUSE_PENDING',
+        excuse_reason: reason || '',
+        excuse_proof_url: proofDataUrl || null,
+        excuse_submitted_at: now,
+        updated_at: now
+      };
+
+      let { data, error } = await client
+        .from('attendance_logs')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      // If database column is named 'reason' rather than 'excuse_reason', retry with 'reason'
+      if (error && error.message && error.message.includes('excuse_reason')) {
+        const altInsert = { ...insertPayload };
+        delete altInsert.excuse_reason;
+        altInsert.reason = reason || '';
+        const altRes = await client
+          .from('attendance_logs')
+          .insert(altInsert)
+          .select()
+          .single();
+        data = altRes.data;
+        error = altRes.error;
+      }
+
+      if (error) throw error;
+
+      // Also sync to excuse_requests table if present in Supabase
+      try {
+        await client
+          .from('excuse_requests')
+          .upsert({
+            cadet_id: cid,
+            drill_date: dateKey,
+            date: dateKey,
+            reason: reason || '',
+            status: 'PENDING',
+            submitted_at: now,
+            updated_at: now
+          }, { onConflict: 'cadet_id,drill_date' });
+      } catch (_) {}
+
+      return { data, created: true, message: 'Excuse request submitted successfully! Awaiting Duty Officer verification.' };
+    }
+  } catch (err) {
+    console.error('submitExcuseRequest error:', err);
+    return { error: 'DB_ERROR', message: err?.message || 'Database error occurred while submitting excuse.' };
+  }
+}
+

@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { LayoutDashboard, TrendingUp, BarChart3, History, Users, QrCode, Camera, Settings, LogOut, ClipboardList } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { LayoutDashboard, TrendingUp, BarChart3, History, Users, QrCode, Camera, Settings, LogOut, ClipboardList, FileText } from 'lucide-react';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { getSupabaseConfig } from '../utils/supabaseClient';
 import MilitaryLoader from './MilitaryLoader';
@@ -11,6 +11,8 @@ const TAB_PHRASES = {
   'cadets-roster': 'Loading Roster Data...',
   cadets: 'Loading Roster Data...',
   analytics: 'Loading Analytics & Reports...',
+  'excuse-reports': 'Loading Excuse Reports...',
+  excuse: 'Loading Excuse Reports...',
   registration: 'Loading Cadet Registration...',
   'qr-generator': 'Loading QR Code Generator...',
   qrgenerator: 'Loading QR Code Generator...',
@@ -19,9 +21,20 @@ const TAB_PHRASES = {
   logout: 'Logging Out...',
 };
 
-export default function Sidebar({ activeTab, setActiveTab, serverOnline, currentUser, onLogout }) {
-  const { settings } = useAttendanceData();
+export default function Sidebar({ activeTab, setActiveTab, serverOnline, currentUser, onLogout, attendanceLogs }) {
+  const { settings, records: hookRecords = [] } = useAttendanceData();
   const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
+
+  // Determine effective logs to compute real-time pending excuse count
+  const effectiveLogs = Array.isArray(attendanceLogs) && attendanceLogs.length > 0 ? attendanceLogs : hookRecords;
+
+  const pendingExcuseCount = useMemo(() => {
+    if (!Array.isArray(effectiveLogs)) return 0;
+    return effectiveLogs.filter((l) => {
+      const st = String(l.status || l.final_daily_status || l.finalDailyStatus || '').toUpperCase();
+      return st === 'EXCUSE_PENDING';
+    }).length;
+  }, [effectiveLogs]);
 
   // Navigation overlay state
   const [isNavigating, setIsNavigating] = useState(false);
@@ -51,6 +64,13 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
     { id: 'attendance-history', path: '/attendance-history', label: 'Attendance History', icon: History },
     { id: 'cadets-roster', path: '/cadets-roster', label: 'Cadets Roster', icon: Users },
     { id: 'analytics', path: '/analytics', label: 'Analytics & Reports', icon: BarChart3 },
+    {
+      id: 'excuse-reports',
+      path: '/excuse-reports',
+      label: 'Excuse Reports',
+      icon: FileText,
+      badge: pendingExcuseCount
+    },
     { id: 'registration', path: '/registration', label: 'Cadet Registration', icon: ClipboardList },
     { id: 'qr-generator', path: '/qr-generator', label: 'QR Code Generator', icon: QrCode },
     { id: 'scanner', path: '/scanner', label: 'Webcam Batch Scanner', icon: Camera },
@@ -67,6 +87,7 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
     if (item.id === 'attendance-history' && activeTab === 'history') return true;
     if (item.id === 'cadets-roster' && activeTab === 'cadets') return true;
     if (item.id === 'qr-generator' && activeTab === 'qrgenerator') return true;
+    if (item.id === 'excuse-reports' && (activeTab === 'excuse-reports' || activeTab === 'excuse')) return true;
     return false;
   };
 
@@ -156,9 +177,39 @@ export default function Sidebar({ activeTab, setActiveTab, serverOnline, current
                 key={item.id}
                 className={`sidebar-item ${isActive ? 'active' : ''}`}
                 onClick={() => handleNavClick(item)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  position: 'relative'
+                }}
               >
-                <Icon size={20} />
-                <span>{item.label}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                  <Icon size={20} style={{ flexShrink: 0 }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {item.label}
+                  </span>
+                </div>
+                {item.badge !== undefined && item.badge > 0 && (
+                  <span
+                    style={{
+                      background: '#d97706',
+                      color: '#ffffff',
+                      fontSize: '0.68rem',
+                      fontWeight: 800,
+                      padding: '2px 7px',
+                      borderRadius: '9999px',
+                      lineHeight: 1.2,
+                      minWidth: '18px',
+                      textAlign: 'center',
+                      flexShrink: 0,
+                      boxShadow: '0 1px 4px rgba(217, 119, 6, 0.4)'
+                    }}
+                    title={`${item.badge} pending excuse request(s) awaiting review`}
+                  >
+                    {item.badge}
+                  </span>
+                )}
               </li>
             );
           })}

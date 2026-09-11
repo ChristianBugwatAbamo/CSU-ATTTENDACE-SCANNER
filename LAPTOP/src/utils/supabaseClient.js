@@ -345,7 +345,34 @@ export async function fetchAttendanceFromSupabase() {
       .limit(10000);
 
     if (error) throw error;
+
+    // Also query excuse_requests table if present to merge submitted reasons
+    try {
+      const { data: excuseRows } = await client
+        .from('excuse_requests')
+        .select('*');
+
+      if (Array.isArray(excuseRows) && excuseRows.length > 0) {
+        excuseRows.forEach(ex => {
+          const exDate = ex.drill_date || ex.date;
+          const exCid = String(ex.cadet_id || ex.cadetId || '').trim().toUpperCase();
+          const target = (data || []).find(l => {
+            const ld = l.date || l.session_date;
+            const lcid = String(l.cadet_id || l.cadetId || '').trim().toUpperCase();
+            return ld === exDate && lcid === exCid;
+          });
+          const exReason = ex.reason || ex.excuse_reason;
+          if (target && exReason) {
+            target.excuse_reason = exReason;
+            target.reason = exReason;
+          }
+        });
+      }
+    } catch (_) {}
+
     return (data || []).map(l => ({
+      id: l.id,
+      ...l,
       cadetId: l.cadet_id,
       cadet_id: l.cadet_id,
       name: l.name,
@@ -370,7 +397,13 @@ export async function fetchAttendanceFromSupabase() {
       dutyOfficer: l.duty_officer,
       sessionName: l.session_name,
       scannedBy: l.scanned_by,
-      receivedAt: l.received_at
+      receivedAt: l.received_at,
+      reason: l.reason || l.excuse_reason || null,
+      excuse_reason: l.excuse_reason || l.reason || null,
+      excuseReason: l.excuse_reason || l.reason || null,
+      excuse_proof_url: l.excuse_proof_url || l.proof_url || null,
+      excuse_submitted_at: l.excuse_submitted_at || l.submitted_at || null,
+      excuseSubmittedAt: l.excuse_submitted_at || l.submitted_at || null
     }));
   } catch (err) {
     console.error('Supabase fetch attendance error:', err);
@@ -1134,14 +1167,41 @@ export async function syncSessionCutoffTime(newCutoffTime) {
         });
     }
 
-    // 2. Update active today session in attendance_sessions table
-    await client
+    // 2. Update or insert active today session in attendance_sessions table
+    const { data: existingSession } = await client
       .from('attendance_sessions')
+      .select('id')
+      .eq('session_date', today)
+      .limit(1);
+
+    if (existingSession && existingSession.length > 0) {
+      await client
+        .from('attendance_sessions')
+        .update({
+          cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        })
+        .eq('session_date', today);
+    } else {
+      await client
+        .from('attendance_sessions')
+        .insert({
+          session_date: today,
+          session_name: 'Formation Session',
+          duty_officer: 'HQ Duty Officer',
+          cutoff_time: cleanCutoff,
+          updated_at: new Date().toISOString()
+        });
+    }
+
+    // 3. Propagate cutoff update to any today attendance_logs so cloud logs reflect new cutoff immediately
+    await client
+      .from('attendance_logs')
       .update({
         cutoff_time: cleanCutoff,
         updated_at: new Date().toISOString()
       })
-      .eq('session_date', today);
+      .eq('date', today);
 
     return true;
   } catch (err) {
@@ -1282,6 +1342,7 @@ export async function saveSettingsToSupabase(settings) {
       formation_tardy_grace: Number(settings.formationTardyGrace ?? 15),
       cadet_quota_per_platoon: Number(settings.cadetQuotaPerPlatoon ?? 37),
       total_unit_target: Number(settings.totalUnitTarget || settings.unitTargetCapacity || 1184),
+      excuse_grace_period_days: Number(settings.excuseGracePeriodDays ?? 3),
       unit_structure: activeUnitStructure,
 
       // Tab 2: Unit Branding
@@ -1367,10 +1428,34 @@ export async function saveSettingsToSupabase(settings) {
 
     // Propagate cutoff to today's session in attendance_sessions
     const today = toDateKey(new Date());
-    await client
+    const { data: todaySession } = await client
       .from('attendance_sessions')
+      .select('id')
+      .eq('session_date', today)
+      .limit(1);
+
+    if (todaySession && todaySession.length > 0) {
+      await client
+        .from('attendance_sessions')
+        .update({ cutoff_time: cutoff, updated_at: new Date().toISOString() })
+        .eq('session_date', today);
+    } else {
+      await client
+        .from('attendance_sessions')
+        .insert({
+          session_date: today,
+          session_name: 'Formation Session',
+          duty_officer: 'HQ Duty Officer',
+          cutoff_time: cutoff,
+          updated_at: new Date().toISOString()
+        });
+    }
+
+    // Also update any attendance_logs recorded for today
+    await client
+      .from('attendance_logs')
       .update({ cutoff_time: cutoff, updated_at: new Date().toISOString() })
-      .eq('session_date', today);
+      .eq('date', today);
 
     return {
       ...(savedData || {}),
@@ -1645,6 +1730,58 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
           scanMode: l.scan_mode
         }));
       }
+
+      // 1b. Also query excuse_requests table if present to ensure excuse status is always prioritized
+      try {
+        const orCond = dashedId !== cleanId
+          ? `cadet_id.eq.${cleanId},cadet_id.eq.${dashedId}`
+          : `cadet_id.eq.${cleanId}`;
+        const { data: excuseData } = await supabase
+          .from('excuse_requests')
+          .select('*')
+          .or(orCond);
+
+        if (Array.isArray(excuseData) && excuseData.length > 0) {
+          excuseData.forEach(ex => {
+            const rawD = ex.drill_date || ex.date || ex.formation_date || ex.session_date;
+            const exDate = toDateKey(rawD) || rawD;
+            const exStatus = (String(ex.status || '').toUpperCase() === 'APPROVED' || String(ex.status || '').toUpperCase() === 'EXCUSED')
+              ? 'EXCUSED'
+              : 'EXCUSE_PENDING';
+
+            const matchIdx = logs.findIndex(l => {
+              const ld = toDateKey(l.date || l.session_date || l.timestamp) || l.date;
+              return ld === exDate;
+            });
+
+            if (matchIdx >= 0) {
+              const existing = logs[matchIdx];
+              logs[matchIdx] = {
+                ...existing,
+                status: exStatus,
+                final_daily_status: exStatus,
+                finalDailyStatus: exStatus,
+                excuse_reason: ex.reason || ex.excuse_reason || existing.excuse_reason,
+                excuse_submitted_at: ex.submitted_at || ex.created_at || existing.excuse_submitted_at,
+                is_excuse: true
+              };
+            } else {
+              logs.push({
+                cadet_id: cleanId,
+                cadetId: cleanId,
+                date: exDate,
+                session_date: exDate,
+                status: exStatus,
+                final_daily_status: exStatus,
+                finalDailyStatus: exStatus,
+                excuse_reason: ex.reason || ex.excuse_reason || 'Absence excuse submitted',
+                excuse_submitted_at: ex.submitted_at || ex.created_at,
+                is_excuse: true
+              });
+            }
+          });
+        }
+      } catch (_) {}
     }
   } catch (err) {
     console.warn('fetchCadetAttendanceHistory Supabase query error, checking local logs:', err);
@@ -1691,7 +1828,8 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
  * Fetches all scheduled/recorded mandatory formation dates across sessions, logs, and default schedule.
  */
 export async function fetchMandatoryFormationDates() {
-  const datesSet = new Set(ACTIVE_FORMATION_DATES);
+  const datesSet = new Set();
+  let hasSupabaseData = false;
 
   // 1. Try Supabase attendance_sessions and attendance_logs
   try {
@@ -1705,14 +1843,20 @@ export async function fetchMandatoryFormationDates() {
       if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value.data)) {
         sessionsRes.value.data.forEach(s => {
           const dk = toDateKey(s.session_date);
-          if (dk) datesSet.add(dk);
+          if (dk) {
+            datesSet.add(dk);
+            hasSupabaseData = true;
+          }
         });
       }
 
       if (logsRes.status === 'fulfilled' && Array.isArray(logsRes.value.data)) {
         logsRes.value.data.forEach(l => {
           const dk = toDateKey(l.date);
-          if (dk) datesSet.add(dk);
+          if (dk) {
+            datesSet.add(dk);
+            hasSupabaseData = true;
+          }
         });
       }
     }
@@ -1734,5 +1878,407 @@ export async function fetchMandatoryFormationDates() {
     }
   } catch (_) {}
 
+  // 3. Fall back to sample schedule ONLY if offline with no database configured and no dates exist
+  if (datesSet.size === 0 && !getSupabaseClient()) {
+    ACTIVE_FORMATION_DATES.forEach(d => datesSet.add(d));
+  }
+
   return Array.from(datesSet).sort();
+}
+
+// ==============================================================================
+// EXCUSE LETTER APPROVAL WORKFLOW
+// ==============================================================================
+
+/**
+ * Cadet submits an excuse request for a past absent formation date.
+ * Upserts an attendance_logs row with status = EXCUSE_PENDING.
+ *
+ * @param {string} cadetId - Cadet ID (e.g. "221-11101")
+ * @param {string} formationDate - ISO date string YYYY-MM-DD
+ * @param {string} reason - Cadet's stated reason for absence
+ * @param {string|null} proofDataUrl - Optional base64 data-URL of proof image/PDF
+ * @returns {Promise<Object|null>} The upserted row or null on failure
+ */
+export async function submitExcuseRequest(cadetId, formationDate, reason, proofDataUrl = null) {
+  const client = getSupabaseClient();
+  if (!client || !cadetId || !formationDate) return { error: 'INVALID_INPUT', message: 'Cadet ID and Formation Date are required.' };
+
+  const cid = String(cadetId).trim().toUpperCase();
+
+  function _dateKey(d) {
+    if (!d) return '';
+    const str = String(d).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const dt = new Date(str);
+    if (isNaN(dt.getTime())) return '';
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  const dateKey = _dateKey(formationDate);
+  if (!cid || !dateKey) return { error: 'INVALID_DATE', message: 'Invalid formation date selected.' };
+
+  try {
+    const { data: existing } = await client
+      .from('attendance_logs')
+      .select('id, status, session_id, name, rank, battalion, company, platoon')
+      .eq('cadet_id', cid)
+      .eq('date', dateKey)
+      .maybeSingle();
+
+    if (existing && existing.status === 'EXCUSED') {
+      console.warn('Cannot file excuse: record is already EXCUSED.');
+      return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+    }
+
+    const now = new Date().toISOString();
+
+    if (existing?.id) {
+      const updatePayload = {
+        status: 'EXCUSE_PENDING',
+        final_daily_status: 'EXCUSE_PENDING',
+        excuse_reason: reason || '',
+        excuse_proof_url: proofDataUrl || null,
+        excuse_submitted_at: now,
+        updated_at: now
+      };
+
+      let { data, error } = await client
+        .from('attendance_logs')
+        .update(updatePayload)
+        .eq('id', existing.id)
+        .select()
+        .single();
+
+      // If database column is named 'reason' rather than 'excuse_reason', retry with 'reason'
+      if (error && error.message && error.message.includes('excuse_reason')) {
+        const altPayload = { ...updatePayload };
+        delete altPayload.excuse_reason;
+        altPayload.reason = reason || '';
+        const altRes = await client
+          .from('attendance_logs')
+          .update(altPayload)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        data = altRes.data;
+        error = altRes.error;
+      }
+
+      if (error) throw error;
+      return {
+        data,
+        updated: true,
+        message: existing.status === 'EXCUSE_PENDING'
+          ? 'Your pending excuse reason has been updated successfully.'
+          : 'Excuse request submitted successfully! Awaiting Duty Officer verification.'
+      };
+    } else {
+      const { data: cadetProfile } = await client
+        .from('cadets')
+        .select('name, rank, battalion, company, platoon')
+        .eq('id', cid)
+        .maybeSingle();
+
+      const { data: sessionData } = await client
+        .from('attendance_sessions')
+        .select('id')
+        .eq('session_date', dateKey)
+        .limit(1)
+        .maybeSingle();
+
+      const insertPayload = {
+        session_id: sessionData?.id || null,
+        cadet_id: cid,
+        name: cadetProfile?.name || ('Cadet ' + cid),
+        rank: cadetProfile?.rank || 'Cadet',
+        battalion: cadetProfile?.battalion || '1st Battalion',
+        company: cadetProfile?.company || 'Alpha Company',
+        platoon: cadetProfile?.platoon || '1st Platoon',
+        date: dateKey,
+        status: 'EXCUSE_PENDING',
+        final_daily_status: 'EXCUSE_PENDING',
+        excuse_reason: reason || '',
+        excuse_proof_url: proofDataUrl || null,
+        excuse_submitted_at: now,
+        updated_at: now
+      };
+
+      let { data, error } = await client
+        .from('attendance_logs')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      // If database column is named 'reason' rather than 'excuse_reason', retry with 'reason'
+      if (error && error.message && error.message.includes('excuse_reason')) {
+        const altInsert = { ...insertPayload };
+        delete altInsert.excuse_reason;
+        altInsert.reason = reason || '';
+        const altRes = await client
+          .from('attendance_logs')
+          .insert(altInsert)
+          .select()
+          .single();
+        data = altRes.data;
+        error = altRes.error;
+      }
+
+      if (error) throw error;
+
+      // Also sync to excuse_requests table if present in Supabase
+      try {
+        await client
+          .from('excuse_requests')
+          .upsert({
+            cadet_id: cid,
+            drill_date: dateKey,
+            date: dateKey,
+            reason: reason || '',
+            status: 'PENDING',
+            submitted_at: now,
+            updated_at: now
+          }, { onConflict: 'cadet_id,drill_date' });
+      } catch (_) {}
+
+      return { data, created: true, message: 'Excuse request submitted successfully! Awaiting Duty Officer verification.' };
+    }
+  } catch (err) {
+    console.error('submitExcuseRequest error:', err);
+    return { error: 'DB_ERROR', message: err?.message || 'Database error occurred while submitting excuse.' };
+  }
+}
+
+/**
+ * Admin approves a cadet's excuse — upgrades status to EXCUSED.
+ *
+ * @param {string|number} logId - The attendance_logs row ID
+ * @returns {Promise<boolean>} true on success
+ */
+export async function approveExcuseRequest(logId, cadetId = null, dateKey = null) {
+  const client = getSupabaseClient();
+  if (!client || (!logId && (!cadetId || !dateKey))) return false;
+
+  const cleanCid = cadetId ? String(cadetId).trim().toUpperCase() : null;
+  const dashed = cleanCid ? (cleanCid.includes('-') ? cleanCid : `${cleanCid.slice(0, 3)}-${cleanCid.slice(3)}`) : null;
+  const undashed = cleanCid ? cleanCid.replace(/-/g, '') : null;
+  const now = new Date().toISOString();
+
+  try {
+    // 1. Update attendance_logs table
+    let query = client
+      .from('attendance_logs')
+      .update({
+        status: 'EXCUSED',
+        final_daily_status: 'EXCUSED',
+        updated_at: now
+      });
+
+    if (logId && (typeof logId === 'number' || (typeof logId === 'string' && !logId.includes('__')))) {
+      query = query.eq('id', logId);
+    } else if (cleanCid && dateKey) {
+      query = query.or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`).eq('date', dateKey);
+    } else if (logId) {
+      query = query.eq('id', logId);
+    }
+
+    const { error } = await query;
+    if (error) console.warn('attendance_logs approve update notice:', error.message);
+
+    // 2. Also sync to excuse_requests table if present
+    try {
+      let exQuery = client
+        .from('excuse_requests')
+        .update({
+          status: 'APPROVED',
+          reviewed_at: now,
+          updated_at: now
+        });
+
+      if (cleanCid && dateKey) {
+        exQuery = exQuery
+          .or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`)
+          .or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
+      } else if (logId) {
+        exQuery = exQuery.eq('id', logId);
+      }
+      await exQuery;
+    } catch (_) {}
+
+    return true;
+  } catch (err) {
+    console.error('approveExcuseRequest error:', err);
+    return false;
+  }
+}
+
+/**
+ * Admin rejects/voids a cadet's excuse — reverts status to ABSENT.
+ *
+ * @param {string|number} logId - The attendance_logs row ID
+ * @param {string} [cadetId] - Fallback Cadet ID
+ * @param {string} [dateKey] - Fallback Date (YYYY-MM-DD)
+ * @returns {Promise<boolean>} true on success
+ */
+export async function rejectExcuseRequest(logId, cadetId = null, dateKey = null) {
+  const client = getSupabaseClient();
+  if (!client || (!logId && (!cadetId || !dateKey))) return false;
+
+  const cleanCid = cadetId ? String(cadetId).trim().toUpperCase() : null;
+  const dashed = cleanCid ? (cleanCid.includes('-') ? cleanCid : `${cleanCid.slice(0, 3)}-${cleanCid.slice(3)}`) : null;
+  const undashed = cleanCid ? cleanCid.replace(/-/g, '') : null;
+  const now = new Date().toISOString();
+
+  try {
+    // 1. Update attendance_logs table
+    let query = client
+      .from('attendance_logs')
+      .update({
+        status: 'ABSENT',
+        final_daily_status: 'ABSENT',
+        time_in: null,
+        time_out: null,
+        scan_mode: null,
+        duty_officer: null,
+        excuse_reason: null,
+        excuse_proof_url: null,
+        updated_at: now
+      });
+
+    if (logId && (typeof logId === 'number' || (typeof logId === 'string' && !logId.includes('__')))) {
+      query = query.eq('id', logId);
+    } else if (cleanCid && dateKey) {
+      query = query.or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`).eq('date', dateKey);
+    } else if (logId) {
+      query = query.eq('id', logId);
+    }
+
+    const { error } = await query;
+    if (error) console.warn('attendance_logs reject update notice:', error.message);
+
+    // 2. Also sync to excuse_requests table if present
+    try {
+      let exQuery = client
+        .from('excuse_requests')
+        .update({
+          status: 'REJECTED',
+          reviewed_at: now,
+          updated_at: now
+        });
+
+      if (cleanCid && dateKey) {
+        exQuery = exQuery
+          .or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`)
+          .or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
+      } else if (logId) {
+        exQuery = exQuery.eq('id', logId);
+      }
+      await exQuery;
+    } catch (_) {}
+
+    return true;
+  } catch (err) {
+    console.error('rejectExcuseRequest error:', err);
+    return false;
+  }
+}
+
+/**
+ * Fetches all EXCUSE_PENDING and EXCUSED attendance logs (admin use).
+ *
+ * @returns {Promise<Array>} Array of excuse request rows
+ */
+export async function fetchExcuseRequests() {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    const { data, error } = await client
+      .from('attendance_logs')
+      .select('*, cadets(name, battalion, company, platoon)')
+      .in('status', ['EXCUSE_PENDING', 'EXCUSED'])
+      .order('excuse_submitted_at', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('fetchExcuseRequests error:', err);
+    return [];
+  }
+}
+
+/**
+ * SQL / Supabase query to pull cadets declared absent or without excuses for formation drill sessions.
+ * Queries attendance_logs for status = 'ABSENT' and joins with cadets profile.
+ *
+ * @param {string} [dateKey] - Specific formation date (YYYY-MM-DD) or 'ALL'
+ * @returns {Promise<Array>}
+ */
+export async function fetchDeclaredAbsentCadets(dateKey = null) {
+  const client = getSupabaseClient();
+  if (!client) return [];
+
+  try {
+    let query = client
+      .from('attendance_logs')
+      .select('id, cadet_id, name, rank, battalion, company, platoon, date, status, final_daily_status, excuse_reason, created_at, updated_at')
+      .eq('status', 'ABSENT');
+
+    if (dateKey && dateKey !== 'ALL') {
+      query = query.eq('date', dateKey);
+    }
+
+    const { data, error } = await query.order('date', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  } catch (err) {
+    console.error('fetchDeclaredAbsentCadets error:', err);
+    return [];
+  }
+}
+
+/**
+ * Auto-expires EXCUSE_PENDING records whose formation date + grace period has passed.
+ * Should be called once on admin app load.
+ *
+ * @param {number} gracePeriodDays - Days after formation date before excuse expires
+ * @returns {Promise<number>} Count of records expired
+ */
+export async function autoExpireExcusePending(gracePeriodDays = 3) {
+  const client = getSupabaseClient();
+  if (!client) return 0;
+
+  try {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - gracePeriodDays);
+    const cutoffKey = toDateKey(cutoffDate);
+
+    const { data: pendingRows } = await client
+      .from('attendance_logs')
+      .select('id, date')
+      .eq('status', 'EXCUSE_PENDING');
+
+    if (!Array.isArray(pendingRows) || pendingRows.length === 0) return 0;
+
+    const expiredIds = pendingRows
+      .filter(r => r.date && r.date <= cutoffKey)
+      .map(r => r.id);
+
+    if (expiredIds.length === 0) return 0;
+
+    const { error } = await client
+      .from('attendance_logs')
+      .update({
+        status: 'ABSENT',
+        final_daily_status: 'ABSENT',
+        updated_at: new Date().toISOString()
+      })
+      .in('id', expiredIds);
+
+    if (error) throw error;
+    console.log(`[ExcuseWorkflow] Auto-expired ${expiredIds.length} EXCUSE_PENDING record(s) past grace period.`);
+    return expiredIds.length;
+  } catch (err) {
+    console.error('autoExpireExcusePending error:', err);
+    return 0;
+  }
 }

@@ -4,6 +4,7 @@ import MobileBottomNav from './components/MobileBottomNav';
 import DashboardView from './components/DashboardView';
 import AnalyticsView from './components/AnalyticsView';
 import AttendanceHistory from './components/AttendanceHistory';
+import ExcuseReports from './components/ExcuseReports';
 import IDGenerator from './components/IDGenerator';
 import BasicCadetRegistration from './components/BasicCadetRegistration';
 import QRCodeGenerator from './components/QRCodeGenerator';
@@ -26,6 +27,7 @@ export default function App() {
   const VALID_TABS = [
     'dashboard', 'analytics', 'cadets', 'cadets-roster',
     'qrgenerator', 'qr-generator', 'history', 'attendance-history',
+    'excuse-reports', 'excuse',
     'registration', 'idcards', 'scanner', 'settings'
   ];
 
@@ -515,6 +517,7 @@ export default function App() {
         serverOnline={serverOnline}
         currentUser={currentUser}
         onLogout={handleLogout}
+        attendanceLogs={attendanceLogs}
       />
 
       <main className="main-wrapper">
@@ -567,6 +570,14 @@ export default function App() {
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
               onNavigateToHistory={() => setActiveTab('history')}
+            />
+          )}
+
+          {(activeTab === 'excuse-reports' || activeTab === 'excuse') && (
+            <ExcuseReports
+              cadets={cadets}
+              attendanceLogs={attendanceLogs}
+              onRefresh={fetchData}
             />
           )}
 

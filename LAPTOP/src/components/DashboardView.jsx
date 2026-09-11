@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Users,
   CheckCircle2,
@@ -10,7 +10,10 @@ import {
   Search,
   X,
   Archive,
-  UserX
+  UserX,
+  FileText,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import DashboardUnitHierarchy from './DashboardUnitHierarchy';
 import {
@@ -24,7 +27,15 @@ import {
 import { getDutyOfficerForCadet } from './AttendanceHistory';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { useUnitStructure } from '../context/UnitContext';
-import { subscribeToAttendanceRealtime, fetchCadetCountFromSupabase, fetchSettingsFromSupabase, fetchAttendanceSessionsFromSupabase } from '../utils/supabaseClient';
+import {
+  subscribeToAttendanceRealtime,
+  fetchCadetCountFromSupabase,
+  fetchSettingsFromSupabase,
+  fetchAttendanceSessionsFromSupabase,
+  approveExcuseRequest,
+  rejectExcuseRequest,
+  autoExpireExcusePending
+} from '../utils/supabaseClient';
 
 function formatDisplayTimeFallback(timestamp) {
   if (!timestamp) return null;
@@ -379,6 +390,7 @@ export default function DashboardView({
         lateCompleteCount: 0,
         incompleteCount: 0,
         absentCount: 0,
+        excusePendingCount: 0,
         totalScanned: 0,
         presentOrLateCount: 0
       };
@@ -388,9 +400,13 @@ export default function DashboardView({
     let lateCount = 0;
     let incompleteCount = 0;
     let absentCount = 0;
+    let excusePendingCount = 0;
+    let excusedCount = 0;
 
     reconciledRoster.forEach(cadet => {
       const status = (cadet.finalDailyStatus || cadet.status || 'ABSENT').toUpperCase();
+      if (status === 'EXCUSE_PENDING') { excusePendingCount++; return; }
+      if (status === 'EXCUSED') { excusedCount++; return; }
       const isLate = Boolean(cadet.isLate || status.includes('LATE'));
       const isIncomplete = (
         status.includes('NO TIME-OUT') ||
@@ -419,10 +435,47 @@ export default function DashboardView({
       lateCompleteCount: lateCount,
       incompleteCount,
       absentCount,
+      excusePendingCount,
+      excusedCount,
       totalScanned: presentCount + lateCount + incompleteCount,
       presentOrLateCount: presentCount + lateCount
     };
   }, [hasTodayScans, reconciledRoster, dynamicHierarchy.totalUnitStrength]);
+
+  // Auto-expire EXCUSE_PENDING rows past grace period on admin load
+  useEffect(() => {
+    let isMounted = true;
+    const runExpiry = async () => {
+      try {
+        const saved = localStorage.getItem('csu_rotc_admin_settings');
+        const graceDays = saved ? (JSON.parse(saved).excuseGracePeriodDays ?? 3) : 3;
+        await autoExpireExcusePending(graceDays);
+        if (isMounted && refreshFromStorage) refreshFromStorage();
+      } catch (_) {}
+    };
+    runExpiry();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Excuse action handlers
+  const [excuseActionLoading, setExcuseActionLoading] = useState(null);
+  const handleApproveExcuse = useCallback(async (logId) => {
+    if (!logId) return;
+    setExcuseActionLoading(logId);
+    await approveExcuseRequest(logId);
+    if (refreshFromStorage) refreshFromStorage();
+    if (onRefresh) onRefresh();
+    setExcuseActionLoading(null);
+  }, [refreshFromStorage, onRefresh]);
+
+  const handleRejectExcuse = useCallback(async (logId) => {
+    if (!logId) return;
+    setExcuseActionLoading(logId);
+    await rejectExcuseRequest(logId);
+    if (refreshFromStorage) refreshFromStorage();
+    if (onRefresh) onRefresh();
+    setExcuseActionLoading(null);
+  }, [refreshFromStorage, onRefresh]);
 
   const handleClearAllFilters = () => {
     setSelectedBattalion(null);
@@ -487,7 +540,10 @@ export default function DashboardView({
       } else if (filterNorm === 'PRESENT') {
         if (!cadetStatus.includes('PRESENT') && !cadet.timeIn && !cadet.hasTimeIn) return false;
       } else if (filterNorm === 'ABSENT') {
+        if (cadetStatus === 'EXCUSE_PENDING' || cadetStatus === 'EXCUSED') return false;
         if (!cadetStatus.includes('ABSENT')) return false;
+      } else if (filterNorm === 'EXCUSE' || filterNorm === 'EXCUSE_PENDING' || filterNorm === 'EXCUSED' || filterNorm === 'EXCUSE REQUEST' || filterNorm === 'EXCUSE REQUESTS') {
+        if (cadetStatus !== 'EXCUSE_PENDING' && cadetStatus !== 'EXCUSED') return false;
       } else {
         if (!cadetStatus.includes(filterNorm)) return false;
       }
@@ -646,6 +702,34 @@ export default function DashboardView({
           </div>
           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
             {hasTodayScans ? (statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent') : 'No active formation today'}
+          </div>
+        </div>
+
+        {/* Card 6: EXCUSE (EXCUSE_PENDING or EXCUSED) */}
+        <div
+          className="card"
+          style={{
+            borderLeft: `5px solid ${(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#d97706' : '#fde68a'}`,
+            cursor: 'pointer',
+            outline: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '2px solid #d97706' : 'none',
+            background: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#fffbeb' : undefined
+          }}
+          onClick={() => handleStatusCardClick('EXCUSE')}
+          title="Click to filter: cadets with excuse records (Excused or Pending)"
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
+              <FileText size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Excuse</div>
+              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
+                {(attendanceSummary.excusePendingCount ?? 0) + (attendanceSummary.excusedCount ?? 0)}
+              </div>
+            </div>
+          </div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+            {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '✓ Filtering table by Excuse' : 'Click to filter → Excuse'}
           </div>
         </div>
       </div>
@@ -897,38 +981,75 @@ export default function DashboardView({
                       {/* Final Daily Status Badge */}
                       <td>
                         {(!hasTodayScans || finalStatus === 'NO SCAN TODAY') ? (
-                          <span className="badge" style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #cbd5e1', fontWeight: 700, gap: '3px' }}>
-                            <Activity size={11} /> NO SCAN TODAY
+                          <span
+                            className="inline-flex items-center gap-1.5 bg-slate-100 text-slate-600 border border-slate-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                            style={{ background: '#f1f5f9', color: '#64748b', borderColor: '#cbd5e1', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                          >
+                            <Activity size={12} /> NO SCAN TODAY
                           </span>
                         ) : (
                           <>
                             {(finalStatus === 'PRESENT' || finalStatus === 'PRESENT (Complete)') && (
-                              <span className="badge badge-present" style={{ fontWeight: 800, gap: '3px' }}>
-                                <CheckCircle2 size={11} /> PRESENT
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#ecfdf5', color: '#065f46', borderColor: '#a7f3d0', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <CheckCircle2 size={12} /> PRESENT
                               </span>
                             )}
                             {(finalStatus === 'LATE' || finalStatus === 'LATE (Complete)') && (
-                              <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', fontWeight: 800, gap: '3px' }}>
-                                <Clock size={11} /> LATE
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#fef3c7', color: '#92400e', borderColor: '#fde68a', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <Clock size={12} /> LATE
                               </span>
                             )}
                             {(finalStatus === 'NO TIME-OUT' || finalStatus === 'INCOMPLETE (No Time-Out)') && (
-                              <span className="badge" style={{ background: '#ffedd5', color: '#9a3412', border: '1px solid #fed7aa', fontWeight: 800, gap: '3px' }}>
-                                <Activity size={11} /> NO TIME-OUT
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-orange-50 text-orange-800 border border-orange-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#ffedd5', color: '#9a3412', borderColor: '#fed7aa', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <Activity size={12} /> NO TIME-OUT
                               </span>
                             )}
                             {(finalStatus === 'LATE / NO TIME-OUT' || finalStatus === 'INCOMPLETE (Late / No Time-Out)') && (
-                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
-                                <Activity size={11} /> LATE / NO TIME-OUT
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-red-50 text-red-800 border border-red-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fecaca', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <Activity size={12} /> LATE / NO TIME-OUT
                               </span>
                             )}
                             {finalStatus === 'ABSENT' && (
-                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fca5a5', fontWeight: 800, gap: '3px' }}>
-                                <UserX size={11} /> ABSENT
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-red-50 text-red-800 border border-red-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fca5a5', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <UserX size={12} /> ABSENT
                               </span>
                             )}
-                            {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT', 'NO SCAN TODAY'].includes(finalStatus) && (
-                              <span className="badge" style={{ background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', fontWeight: 800, gap: '3px' }}>
+                            {finalStatus === 'EXCUSE_PENDING' && (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-900 border border-purple-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#faf5ff', color: '#581c87', borderColor: '#d8b4fe', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <FileText size={12} /> EXCUSE PENDING
+                              </span>
+                            )}
+                            {finalStatus === 'EXCUSED' && (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-sky-50 text-sky-800 border border-sky-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#f0f9ff', color: '#075985', borderColor: '#7dd3fc', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
+                                <CheckCircle2 size={12} /> EXCUSED
+                              </span>
+                            )}
+                            {!['PRESENT', 'PRESENT (Complete)', 'LATE', 'LATE (Complete)', 'NO TIME-OUT', 'INCOMPLETE (No Time-Out)', 'LATE / NO TIME-OUT', 'INCOMPLETE (Late / No Time-Out)', 'ABSENT', 'NO SCAN TODAY', 'EXCUSE_PENDING', 'EXCUSED'].includes(finalStatus) && (
+                              <span
+                                className="inline-flex items-center gap-1.5 bg-red-50 text-red-800 border border-red-300 rounded-full font-black text-[11px] tracking-wide px-3 py-1"
+                                style={{ background: '#fee2e2', color: '#991b1b', borderColor: '#fecaca', borderRadius: '9999px', fontWeight: 900, fontSize: '11px', letterSpacing: '0.025em', padding: '4px 12px' }}
+                              >
                                 {finalStatus}
                               </span>
                             )}
@@ -936,22 +1057,21 @@ export default function DashboardView({
                         )}
                       </td>
 
+                      {/* Duty Officer Column */}
                       <td>
-                        {(() => {
-                          const isAbsentOrNoScan = (
-                            !hasTodayScans ||
-                            finalStatus === 'NO SCAN TODAY' ||
-                            finalStatus === 'ABSENT' ||
-                            (!cadet.hasTimeIn && !cadet.hasTimeOut && !cadet.timeInScan && !cadet.timeOutScan)
-                          );
+                        {finalStatus === 'EXCUSE_PENDING' ? (
+                          '—'
+                        ) : (() => {
+                          const cId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim().toUpperCase();
+                          const matchingLog = attendanceLogs.find(l => {
+                            const lId = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
+                            return lId && lId === cId;
+                          });
 
-                          // If the cadet is ABSENT / No Scan, Duty Officer column renders —
-                          if (isAbsentOrNoScan) {
-                            return '—';
-                          }
-
-                          // If the cadet has scanned in (PRESENT / LATE), render the specific duty_officer recorded in that scan log payload
+                          // 1. Direct officer on matching log or scan
                           const directOfficer = (
+                            matchingLog?.duty_officer ||
+                            matchingLog?.dutyOfficer ||
                             cadet.timeInScan?.duty_officer ||
                             cadet.timeInScan?.dutyOfficer ||
                             cadet.timeOutScan?.duty_officer ||
@@ -963,18 +1083,27 @@ export default function DashboardView({
                             return directOfficer;
                           }
 
-                          // Lookup this specific cadet's scan log in today's attendance logs
-                          const cId = String(cadet.cadetId || cadet.id || cadet.cadet_id || '').trim().toUpperCase();
-                          const matchingLog = attendanceLogs.find(l => {
-                            const lId = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
-                            return lId && lId === cId;
-                          });
-                          const logOfficer = matchingLog?.duty_officer || matchingLog?.dutyOfficer;
-                          if (logOfficer && logOfficer !== 'Duty Officer' && logOfficer !== 'HQ Duty Officer' && !logOfficer.includes(',')) {
-                            return logOfficer;
+                          // 2. If finalStatus is EXCUSED and log has duty officer
+                          if (finalStatus === 'EXCUSED') {
+                            if (directOfficer && directOfficer !== '—') return directOfficer;
+                            return '—';
                           }
 
-                          // Unit session duty officer fallback for scanned cadet
+                          // 3. For absent or unrecorded scans
+                          const isAbsentOrNoScan = (
+                            !hasTodayScans ||
+                            finalStatus === 'NO SCAN TODAY' ||
+                            finalStatus === 'ABSENT' ||
+                            (!cadet.hasTimeIn && !cadet.hasTimeOut && !cadet.timeInScan && !cadet.timeOutScan)
+                          );
+
+                          if (isAbsentOrNoScan) {
+                            if (directOfficer && directOfficer !== 'Duty Officer' && directOfficer !== 'HQ Duty Officer') {
+                              return directOfficer;
+                            }
+                            return '—';
+                          }
+
                           const resolvedOfficer = getDutyOfficerForCadet(cadet, dbSessions, attendanceLogs, todayKey);
                           if (resolvedOfficer && resolvedOfficer !== '—' && resolvedOfficer !== 'Duty Officer' && resolvedOfficer !== 'HQ Duty Officer') {
                             return resolvedOfficer;
