@@ -1699,5 +1699,33 @@ body {
   }
 }
 
+/* 6-Column Single Horizontal Lane Grid for Metric & Attendance Cards */
+.grid-cols-6 {
+  display: grid !important;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+}
 
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.65rem;
+  width: 100%;
+}
 
+@media (max-width: 1100px) {
+  .dashboard-metrics-grid.grid-cols-6 {
+    gap: 0.5rem;
+  }
+}
+
+@media (max-width: 900px) {
+  .dashboard-metrics-grid.grid-cols-6 {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-metrics-grid.grid-cols-6 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}

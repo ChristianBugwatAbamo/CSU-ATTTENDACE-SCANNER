@@ -46,6 +46,7 @@ import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey } from '../u
 import { formatDisplayTime, parseTimeToMinutes, parseCutoffMinutes } from '../utils/attendanceStatus';
 import IDCardPreview from './IDCardPreview';
 import MilitaryLoader from './MilitaryLoader';
+import FormationCalendarSelector from './FormationCalendarSelector';
 
 // Format YYYY-MM-DD into a friendly, student-readable date (e.g., "Thu, Sep 3, 2026")
 const formatFriendlyDate = (dateStr) => {
@@ -512,7 +513,7 @@ export default function CadetPortal({ cadet, onLogout }) {
         if (!isNaN(timeInMins) && !isNaN(cutoffMins)) {
           return timeInMins > cutoffMins;
         }
-      } catch (_) {}
+      } catch (_) { }
     }
     return false;
   }, [isExcuseRecord, isValidTime, sessionCutoffsByDate, settings?.formation_cutoff_time, settings?.formationCutoffTime, settings?.morningCutoffTime]);
@@ -559,7 +560,7 @@ export default function CadetPortal({ cadet, onLogout }) {
     return { all: all.length, present, late, noTimeOut, absent, excused };
   }, [evaluated, isExcuseRecord, isValidTime, checkIsLate]);
 
-  // Grace Period Days from system settings (default 2)
+  // Grace Period Days from system settings (Policy: 4-Day Filing Window)
   const gracePeriodDays = useMemo(() => {
     if (settings?.excuse_grace_period_days !== undefined && !isNaN(Number(settings.excuse_grace_period_days))) {
       return Number(settings.excuse_grace_period_days);
@@ -575,7 +576,7 @@ export default function CadetPortal({ cadet, onLogout }) {
         if (val !== undefined && !isNaN(Number(val))) return Number(val);
       }
     } catch (_) { }
-    return 2;
+    return 4; // Policy: 4-Day Filing Window
   }, [settings]);
 
   // Cutoff Date string: Today's date minus GRACE_PERIOD_DAYS
@@ -588,51 +589,133 @@ export default function CadetPortal({ cadet, onLogout }) {
     return `${y}-${m}-${d}`;
   }, [gracePeriodDays]);
 
-  // Absent drill dates filtered by Grace Period cutoff window (Drill Date >= Cutoff Date)
+  // Filter Eligible Dates: Only dates where cadet is ABSENT and within 4-Day Filing Window considering cut-off time
   const { absentDrillDates, expiredAbsentDrillDates } = useMemo(() => {
     if (!evaluated?.dailyBreakdown) return { absentDrillDates: [], expiredAbsentDrillDates: [] };
-    const isValidTime = (val) => {
-      if (!val) return false;
-      const s = String(val).trim().toUpperCase();
-      return s !== '' && s !== '—' && s !== '-' && s !== 'NO TIME-OUT' && s !== 'NO TIME-IN' && s !== 'NULL' && s !== 'UNDEFINED';
-    };
 
     const eligible = [];
     const expired = [];
+    const now = new Date();
 
     const allAbsent = evaluated.dailyBreakdown.filter(entry => {
-      const rawStatus = String(entry.status || entry.dayType || '').toUpperCase();
-      if (rawStatus === 'EXCUSED') return false; // Already officially excused
+      const rawStatus = String(entry.status || entry.dayType || entry.final_daily_status || '').toUpperCase();
+      // Already officially excused -> exclude
+      if (rawStatus === 'EXCUSED' || rawStatus === 'APPROVED') return false;
 
+      // Cadets who are LATE (including compound statuses like LATE / NO TIME-OUT) are NOT absent
+      if (checkIsLate(entry) || rawStatus.includes('LATE') || entry.dayType === 'LATE') return false;
+
+      // Cadets who are PRESENT are NOT absent
       const hasIn = entry.hasTimeIn !== undefined ? (entry.hasTimeIn && isValidTime(entry.timeIn)) : isValidTime(entry.timeIn);
       const hasOut = entry.hasTimeOut !== undefined ? (entry.hasTimeOut && isValidTime(entry.timeOut)) : isValidTime(entry.timeOut);
-      const isAbsent = (!hasIn && !hasOut) || rawStatus.includes('ABSENT') || entry.dayType === 'UNRECORDED' || entry.dayType === 'ABSENT' || rawStatus === 'EXCUSE_PENDING';
+      if (hasIn && (rawStatus === 'PRESENT' || rawStatus.includes('PRESENT'))) return false;
+
+      // Both time-in and time-out recorded -> attended -> NOT absent
+      if (hasIn && hasOut) return false;
+
+      // True absence conditions:
+      // 1. Neither time-in nor time-out
+      // 2. Explicit ABSENT status
+      // 3. UNRECORDED formation session
+      // 4. EXCUSE_PENDING (already pending review)
+      const isAbsent = (!hasIn && !hasOut) ||
+        rawStatus.includes('ABSENT') ||
+        entry.dayType === 'UNRECORDED' ||
+        entry.dayType === 'ABSENT' ||
+        rawStatus === 'EXCUSE_PENDING';
+
       return isAbsent;
-    }).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    });
 
     allAbsent.forEach(entry => {
       const drillDateKey = entry.date || '';
-      // Eligible if drill date is within the grace period window (drillDate >= graceCutoffDateStr)
-      if (drillDateKey && drillDateKey >= graceCutoffDateStr) {
-        eligible.push(entry);
+      if (!drillDateKey) return;
+
+      const parts = String(drillDateKey).trim().split('-');
+      if (parts.length !== 3) return;
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+
+      // Resolve formation session cut-off time
+      const sessionCutoff = sessionCutoffsByDate?.get(drillDateKey) ||
+        settings?.formation_cutoff_time ||
+        settings?.morningCutoffTime ||
+        settings?.formationCutoffTime ||
+        '07:30';
+
+      let cutoffHour = 7;
+      let cutoffMin = 30;
+      if (sessionCutoff) {
+        const match = String(sessionCutoff).match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$/i);
+        if (match) {
+          let h = parseInt(match[1], 10);
+          const m = parseInt(match[2], 10);
+          const meridiem = match[3]?.toUpperCase();
+          if (meridiem === 'PM' && h < 12) h += 12;
+          if (meridiem === 'AM' && h === 12) h = 0;
+          cutoffHour = h;
+          cutoffMin = m;
+        }
+      }
+
+      // Deadline: 4 days after formation date at the cut-off time
+      const deadline = new Date(year, month, day + Number(gracePeriodDays), cutoffHour, cutoffMin, 0, 0);
+
+      // Formation cutoff check for today
+      const formationCutoffToday = new Date(year, month, day, cutoffHour, cutoffMin, 0, 0);
+      const todayDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const targetDateOnly = new Date(year, month, day);
+
+      // Future dates cannot be excused yet
+      if (targetDateOnly.getTime() > todayDateOnly.getTime()) return;
+
+      // If formation is today, muster cut-off must have elapsed for it to be an unexcused absence
+      if (targetDateOnly.getTime() === todayDateOnly.getTime() && now.getTime() < formationCutoffToday.getTime()) return;
+
+      // Within 4-day policy window considering cut-off time
+      if (now.getTime() <= deadline.getTime()) {
+        eligible.push({ ...entry, deadline, sessionCutoff });
       } else {
-        expired.push(entry);
+        expired.push({ ...entry, deadline, sessionCutoff });
       }
     });
 
+    eligible.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    expired.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
     return { absentDrillDates: eligible, expiredAbsentDrillDates: expired };
-  }, [evaluated?.dailyBreakdown, graceCutoffDateStr]);
+  }, [evaluated?.dailyBreakdown, checkIsLate, isValidTime, sessionCutoffsByDate, settings, gracePeriodDays]);
+
+  // Keep excuseForm.targetDate synchronized with eligible absent dates when modal is active
+  useEffect(() => {
+    if (showExcuseModal) {
+      if (absentDrillDates.length > 0) {
+        if (!excuseForm.targetDate || !absentDrillDates.some(d => d.date === excuseForm.targetDate)) {
+          setExcuseForm(prev => ({ ...prev, targetDate: absentDrillDates[0].date }));
+        }
+      } else {
+        setExcuseForm(prev => ({ ...prev, targetDate: '' }));
+      }
+    }
+  }, [showExcuseModal, absentDrillDates]);
 
   const handleSubmitExcuse = useCallback(async () => {
-    if (!excuseForm.targetDate || !excuseForm.reason.trim()) {
-      setExcuseResult({ success: false, message: 'Please select a Drill Date and provide the Reason for absence.' });
+    if (absentDrillDates.length === 0) {
+      setExcuseResult({ success: false, message: 'No eligible absent records found within the filing window.' });
       return;
     }
 
-    if (graceCutoffDateStr && excuseForm.targetDate < graceCutoffDateStr) {
+    if (!excuseForm.targetDate || !excuseForm.reason.trim()) {
+      setExcuseResult({ success: false, message: 'Please select an eligible Drill Date and provide the Reason for absence.' });
+      return;
+    }
+
+    const isEligible = absentDrillDates.some(d => d.date === excuseForm.targetDate);
+    if (!isEligible) {
       setExcuseResult({
         success: false,
-        message: `Filing window expired. Online excuse letters must be submitted within ${gracePeriodDays} days of formation (Cutoff: ${formatFriendlyDate(graceCutoffDateStr)}).`
+        message: `The selected formation date is not an eligible absent record under the ${gracePeriodDays}-day filing policy window (considering cut-off time).`
       });
       return;
     }
@@ -656,7 +739,29 @@ export default function CadetPortal({ cadet, onLogout }) {
     } finally {
       setExcuseSubmitting(false);
     }
-  }, [cid, excuseForm, graceCutoffDateStr, gracePeriodDays, handleRefresh]);
+  }, [cid, excuseForm, absentDrillDates, gracePeriodDays, handleRefresh]);
+
+  // Combined recorded formation dates for the Formation Calendar Selector
+  const allRecordedFormationDates = useMemo(() => {
+    const datesSet = new Set();
+    (formationDates || []).forEach(d => {
+      const k = toDateKey(d);
+      if (k) datesSet.add(k);
+    });
+    (dbSessions || []).forEach(s => {
+      const k = toDateKey(s.date || s.session_date || s.dateKey);
+      if (k) datesSet.add(k);
+    });
+    (evaluated?.dailyBreakdown || []).forEach(b => {
+      const k = toDateKey(b.date);
+      if (k) datesSet.add(k);
+    });
+    (logs || []).forEach(l => {
+      const k = toDateKey(l.date || l.dateKey || l.created_at);
+      if (k) datesSet.add(k);
+    });
+    return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
+  }, [formationDates, dbSessions, evaluated?.dailyBreakdown, logs]);
 
   // 3. Filtered Formation Schedule
   const displaySchedule = useMemo(() => {
@@ -1640,16 +1745,16 @@ export default function CadetPortal({ cadet, onLogout }) {
             }}
           >
             <div
-              className="cadet-stats-grid grid-cols-2"
+              className="cadet-stats-grid grid-cols-2 md:grid-cols-4"
               style={{
                 display: 'grid',
                 gap: '0.75rem',
                 width: '100%'
               }}
             >
-              {/* Card 1: Total Formations (Full Width / col-span-2 at top on mobile) */}
+              {/* Row 1, Card 1: Total Formations (Full Width on mobile / Spans 2 cols on desktop) */}
               <div
-                className="cadet-stat-card-total col-span-2"
+                className="cadet-stat-card-total col-span-2 md:col-span-2"
                 style={{
                   background: statusFilter === 'ALL'
                     ? (isLight ? '#f0fdf4' : 'rgba(6, 78, 46, 0.25)')
@@ -1697,8 +1802,9 @@ export default function CadetPortal({ cadet, onLogout }) {
                 </div>
               </div>
 
-              {/* Card 2: PRESENT */}
+              {/* Row 1, Card 2: PRESENT (Full Width on mobile / Spans 2 cols on desktop) */}
               <div
+                className="cadet-stat-card-present col-span-2 md:col-span-2"
                 style={{
                   background: statusFilter === 'PRESENT'
                     ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.2)')
@@ -1706,7 +1812,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                   border: `1px solid ${statusFilter === 'PRESENT' ? '#059669' : t.cardBorder}`,
                   borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : (isLight ? '#d1fae5' : '#065f46')}`,
                   borderRadius: '12px',
-                  padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                  padding: 'clamp(0.85rem, 2.5vw, 1.1rem) clamp(0.85rem, 2.5vw, 1.25rem)',
                   cursor: 'pointer',
                   outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
                   boxShadow: t.cardShadow,
@@ -1716,11 +1822,11 @@ export default function CadetPortal({ cadet, onLogout }) {
                 onClick={() => handleStatusCardClick('PRESENT')}
                 title="Click to filter table: Present (On-Time) sessions only"
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem', minWidth: 0 }}>
                   <div
                     style={{
-                      width: '36px',
-                      height: '36px',
+                      width: '38px',
+                      height: '38px',
                       borderRadius: '10px',
                       background: 'rgba(5, 150, 105, 0.12)',
                       display: 'flex',
@@ -1730,122 +1836,25 @@ export default function CadetPortal({ cadet, onLogout }) {
                       flexShrink: 0
                     }}
                   >
-                    <CheckCircle2 size={19} />
+                    <CheckCircle2 size={20} />
                   </div>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: '0.72rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       Present
                     </div>
-                    <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#065f46' : '#34d399', whiteSpace: 'nowrap' }}>
-                      {counts.present} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                    <div style={{ fontSize: 'clamp(1.25rem, 4vw, 1.45rem)', fontWeight: 800, color: isLight ? '#065f46' : '#34d399', whiteSpace: 'nowrap' }}>
+                      {counts.present} <span style={{ fontSize: '0.78rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
                     </div>
                   </div>
                 </div>
-                <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: '0.72rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {statusFilter === 'PRESENT' ? '✓ Filtering by Present' : 'Click to filter'}
                 </div>
               </div>
 
-              {/* Card 3: LATE */}
+              {/* Row 2/3, Card 3: ABSENT (Left on mobile Row 3 / 1 col on desktop Row 2) */}
               <div
-                style={{
-                  background: statusFilter === 'LATE'
-                    ? (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.2)')
-                    : t.cardBg,
-                  border: `1px solid ${statusFilter === 'LATE' ? '#d97706' : t.cardBorder}`,
-                  borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : (isLight ? '#fde68a' : '#78350f')}`,
-                  borderRadius: '12px',
-                  padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
-                  cursor: 'pointer',
-                  outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
-                  boxShadow: t.cardShadow,
-                  transition: 'all 0.15s ease',
-                  minWidth: 0
-                }}
-                onClick={() => handleStatusCardClick('LATE')}
-                title="Click to filter table: Late / Tardy sessions only"
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '10px',
-                      background: 'rgba(217, 119, 6, 0.12)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#d97706',
-                      flexShrink: 0
-                    }}
-                  >
-                    <Clock size={19} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      Late
-                    </div>
-                    <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24', whiteSpace: 'nowrap' }}>
-                      {counts.late} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {statusFilter === 'LATE' ? '✓ Filtering by Late' : 'Click to filter'}
-                </div>
-              </div>
-
-              {/* Card 4: NO TIME IN/OUT */}
-              <div
-                style={{
-                  background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN')
-                    ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
-                    : t.cardBg,
-                  border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : t.cardBorder}`,
-                  borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
-                  borderRadius: '12px',
-                  padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
-                  cursor: 'pointer',
-                  outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '2px solid #ea580c' : 'none',
-                  boxShadow: t.cardShadow,
-                  transition: 'all 0.15s ease',
-                  minWidth: 0
-                }}
-                onClick={() => handleStatusCardClick('NO TIME IN/OUT')}
-                title="Click to filter table: Incomplete time-in or time-out records"
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: '36px',
-                      height: '36px',
-                      borderRadius: '10px',
-                      background: 'rgba(234, 88, 12, 0.12)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#ea580c',
-                      flexShrink: 0
-                    }}
-                  >
-                    <Activity size={19} />
-                  </div>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      No Time In/Out
-                    </div>
-                    <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#9a3412' : '#fb923c', whiteSpace: 'nowrap' }}>
-                      {counts.noTimeOut} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
-                    </div>
-                  </div>
-                </div>
-                <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '✓ Incomplete only' : 'Click to filter'}
-                </div>
-              </div>
-
-              {/* Card 5: ABSENT CADETS */}
-              <div
+                className="cadet-stat-card-absent col-span-1 md:col-span-1"
                 style={{
                   background: statusFilter === 'ABSENT'
                     ? (isLight ? '#fef2f2' : 'rgba(220, 38, 38, 0.2)')
@@ -1893,8 +1902,9 @@ export default function CadetPortal({ cadet, onLogout }) {
                 </div>
               </div>
 
-              {/* Card 6: EXCUSED CADETS (Approved & Pending Excuses) */}
+              {/* Row 2/3, Card 4: EXCUSED (Right on mobile Row 3 / 1 col on desktop Row 2) */}
               <div
+                className="cadet-stat-card-excused col-span-1 md:col-span-1"
                 style={{
                   background: (statusFilter === 'EXCUSED' || statusFilter === 'EXCUSE')
                     ? (isLight ? '#faf5ff' : 'rgba(124, 58, 237, 0.2)')
@@ -1941,6 +1951,106 @@ export default function CadetPortal({ cadet, onLogout }) {
                   {(statusFilter === 'EXCUSED' || statusFilter === 'EXCUSE') ? '✓ Filtering by Excused' : 'Click to filter'}
                 </div>
               </div>
+
+              {/* Row 2/4, Card 5: LATE (Left on mobile Row 4 / 1 col on desktop Row 2) */}
+              <div
+                className="cadet-stat-card-late col-span-1 md:col-span-1"
+                style={{
+                  background: statusFilter === 'LATE'
+                    ? (isLight ? '#fffbeb' : 'rgba(217, 119, 6, 0.2)')
+                    : t.cardBg,
+                  border: `1px solid ${statusFilter === 'LATE' ? '#d97706' : t.cardBorder}`,
+                  borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : (isLight ? '#fde68a' : '#78350f')}`,
+                  borderRadius: '12px',
+                  padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                  cursor: 'pointer',
+                  outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
+                  boxShadow: t.cardShadow,
+                  transition: 'all 0.15s ease',
+                  minWidth: 0
+                }}
+                onClick={() => handleStatusCardClick('LATE')}
+                title="Click to filter table: Late / Tardy sessions only"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'rgba(217, 119, 6, 0.12)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#d97706',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Clock size={19} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      Late
+                    </div>
+                    <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24', whiteSpace: 'nowrap' }}>
+                      {counts.late} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {statusFilter === 'LATE' ? '✓ Filtering by Late' : 'Click to filter'}
+                </div>
+              </div>
+
+              {/* Row 2/4, Card 6: NO TIME IN/OUT (Right on mobile Row 4 / 1 col on desktop Row 2) */}
+              <div
+                className="cadet-stat-card-notime col-span-1 md:col-span-1"
+                style={{
+                  background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN')
+                    ? (isLight ? '#fff7ed' : 'rgba(234, 88, 12, 0.2)')
+                    : t.cardBg,
+                  border: `1px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : t.cardBorder}`,
+                  borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '#ea580c' : (isLight ? '#fed7aa' : '#7c2d12')}`,
+                  borderRadius: '12px',
+                  padding: 'clamp(0.75rem, 2vw, 1.1rem) clamp(0.75rem, 2vw, 1.25rem)',
+                  cursor: 'pointer',
+                  outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '2px solid #ea580c' : 'none',
+                  boxShadow: t.cardShadow,
+                  transition: 'all 0.15s ease',
+                  minWidth: 0
+                }}
+                onClick={() => handleStatusCardClick('NO TIME IN/OUT')}
+                title="Click to filter table: Incomplete time-in or time-out records"
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.35rem', minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '10px',
+                      background: 'rgba(234, 88, 12, 0.12)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ea580c',
+                      flexShrink: 0
+                    }}
+                  >
+                    <Activity size={19} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: '0.7rem', color: t.textMuted, textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      No Time In/Out
+                    </div>
+                    <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#9a3412' : '#fb923c', whiteSpace: 'nowrap' }}>
+                      {counts.noTimeOut} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT' || statusFilter === 'NO TIME-IN') ? '✓ Incomplete only' : 'Click to filter'}
+                </div>
+              </div>
             </div>
           </section>
 
@@ -1948,11 +2058,13 @@ export default function CadetPortal({ cadet, onLogout }) {
           {/* 6. FORMATION DRILL SCHEDULE (STUDENT-FRIENDLY TABLE)          */}
           {/* ============================================================ */}
           <div
+            className="overflow-visible relative"
             style={{
               background: t.cardBg,
               border: `1px solid ${t.cardBorder}`,
               borderRadius: '16px',
-              overflow: 'hidden',
+              overflow: 'visible',
+              position: 'relative',
               boxShadow: t.cardShadow,
               transition: 'background-color 0.2s ease, border-color 0.2s ease'
             }}
@@ -1979,42 +2091,8 @@ export default function CadetPortal({ cadet, onLogout }) {
               </div>
 
               <div className="cadet-drill-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                {/* Active Filter Pill with Clear button */}
-                {statusFilter !== 'ALL' && (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                      background: isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.3)',
-                      border: '1px solid #059669',
-                      borderRadius: '8px',
-                      padding: '4px 10px',
-                      fontSize: '0.76rem',
-                      fontWeight: 700,
-                      color: isLight ? '#065f46' : '#34d399',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    <span>Active Filter: <strong>{statusFilter}</strong> ({displaySchedule.length + (statusFilter === 'ABSENT' ? conversionRows.length : 0)})</span>
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilter('ALL')}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: 'inherit',
-                        display: 'flex',
-                        alignItems: 'center',
-                        padding: '0 2px'
-                      }}
-                      title="Clear filter and show all"
-                    >
-                      <X size={13} />
-                    </button>
-                  </div>
-                )}
+
+
 
                 {/* Action row stretching 100% on mobile */}
                 <div
@@ -2027,61 +2105,15 @@ export default function CadetPortal({ cadet, onLogout }) {
                     minWidth: '220px'
                   }}
                 >
-                  {/* Date Filter Input */}
-                  <div
-                    className="cadet-drill-date-filter"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      background: isLight ? '#f8fafc' : 'rgba(255, 255, 255, 0.05)',
-                      border: `1px solid ${t.cardBorder}`,
-                      borderRadius: '8px',
-                      padding: '0.35rem 0.65rem',
-                      gap: '6px',
-                      flex: 1,
-                      minWidth: 0
-                    }}
-                  >
-                    <Search size={13} color={t.textMuted} style={{ flexShrink: 0 }} />
-                    <input
-                      type="date"
-                      value={searchDate}
-                      onChange={(e) => setSearchDate(e.target.value)}
-                      title="Filter by date"
-                      aria-label="Filter by date"
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        outline: 'none',
-                        fontSize: '0.76rem',
-                        color: t.textMain,
-                        width: '100%',
-                        flex: 1,
-                        minWidth: 0,
-                        colorScheme: isLight ? 'light' : 'dark',
-                        cursor: 'pointer'
-                      }}
-                    />
-                    {searchDate && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchDate('')}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: t.textMuted,
-                          padding: 0,
-                          display: 'flex',
-                          alignItems: 'center',
-                          flexShrink: 0
-                        }}
-                        title="Clear date filter"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
+                  {/* Custom Formation Calendar Selector matching Admin Attendance History */}
+                  <FormationCalendarSelector
+                    selectedDate={searchDate}
+                    onSelectDate={setSearchDate}
+                    recordedDates={allRecordedFormationDates}
+                    isLight={isLight}
+                    isSessionsLoading={loadingLogs}
+                    t={t}
+                  />
 
                   {/* Background Cloud Syncing Status */}
                   {isBackgroundSyncing && (
@@ -2622,8 +2654,9 @@ export default function CadetPortal({ cadet, onLogout }) {
           {/* ============================================================ */}
           {showExcuseModal && (
             <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
               style={{
-                position: 'fixed', inset: 0, zIndex: 1000,
+                position: 'fixed', inset: 0, zIndex: 50,
                 background: 'rgba(0,0,0,0.65)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 padding: '1rem'
@@ -2631,12 +2664,15 @@ export default function CadetPortal({ cadet, onLogout }) {
               onClick={(e) => { if (e.target === e.currentTarget) { setShowExcuseModal(false); setExcuseResult(null); } }}
             >
               <div
+                className="overflow-visible relative"
                 style={{
                   background: isLight ? '#ffffff' : '#1e2836',
                   borderRadius: '16px',
                   padding: '1.75rem',
                   width: '100%',
                   maxWidth: '500px',
+                  overflow: 'visible',
+                  position: 'relative',
                   boxShadow: '0 25px 60px rgba(0,0,0,0.45)',
                   border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.08)',
                   display: 'flex',
@@ -2664,9 +2700,9 @@ export default function CadetPortal({ cadet, onLogout }) {
                   </button>
                 </div>
 
-                {/* Drill Date Selection (Dropdown listing absent drill dates within Grace Period window) */}
+                {/* Drill Date Selection (Restricted Calendar Picker matching Policy Window) */}
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
                     <label style={{ fontSize: '0.8rem', fontWeight: 700, color: isLight ? '#374151' : '#cbd5e1' }}>
                       Drill Date Selection <span style={{ color: '#dc2626' }}>*</span>
                     </label>
@@ -2685,90 +2721,61 @@ export default function CadetPortal({ cadet, onLogout }) {
                     </span>
                   </div>
 
-                  {absentDrillDates.length > 0 ? (
-                    <div>
-                      <select
-                        value={excuseForm.targetDate}
-                        onChange={e => setExcuseForm(prev => ({ ...prev, targetDate: e.target.value }))}
-                        style={{
-                          width: '100%',
-                          padding: '0.65rem 0.85rem',
-                          borderRadius: '8px',
-                          border: isLight ? '1px solid #d1d5db' : '1px solid rgba(255,255,255,0.12)',
-                          background: isLight ? '#f9fafb' : '#111827',
-                          color: isLight ? '#1e293b' : '#f1f5f9',
-                          fontSize: '0.88rem',
-                          outline: 'none',
-                          boxSizing: 'border-box',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <option value="" disabled>-- Select an Absent Drill Date --</option>
-                        {absentDrillDates.map((item) => {
-                          const fDate = formatFriendlyDate(item.date);
-                          const isPending = item.status === 'EXCUSE_PENDING';
-                          return (
-                            <option key={item.date} value={item.date}>
-                              {fDate} ({item.date}) {isPending ? '— ⏳ Excuse Pending' : '— ✗ Absent'}
-                            </option>
-                          );
-                        })}
-                      </select>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '5px' }}>
-                        <span>Only showing absent formations on or after <strong>{formatFriendlyDate(graceCutoffDateStr)}</strong></span>
-                        {expiredAbsentDrillDates.length > 0 && (
-                          <span style={{ color: isLight ? '#b91c1c' : '#fca5a5' }}>
-                            ⚠️ {expiredAbsentDrillDates.length} older {expiredAbsentDrillDates.length === 1 ? 'date has' : 'dates have'} expired
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ) : expiredAbsentDrillDates.length > 0 ? (
+                  {/* Empty State Alert Handling: If cadet has 0 absent records within filing window */}
+                  {absentDrillDates.length === 0 ? (
                     <div
                       style={{
-                        background: isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.1)',
-                        border: isLight ? '1px solid #fecaca' : '1px solid rgba(239, 68, 68, 0.3)',
+                        background: isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
+                        border: isLight ? '1px solid #fecaca' : '1px solid rgba(239, 68, 68, 0.35)',
                         borderRadius: '8px',
-                        padding: '0.85rem',
+                        padding: '0.85rem 1rem',
+                        marginBottom: '0.75rem',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '4px'
+                        alignItems: 'flex-start',
+                        gap: '10px'
                       }}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', fontWeight: 800, color: isLight ? '#991b1b' : '#f87171' }}>
-                        <AlertOctagon size={16} />
-                        <span>Grace Period Expired</span>
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: isLight ? '#7f1d1d' : '#fca5a5', lineHeight: 1.4 }}>
-                        All {expiredAbsentDrillDates.length} unexcused absence{expiredAbsentDrillDates.length > 1 ? 's' : ''} have exceeded the official <strong>{gracePeriodDays}-day</strong> filing window (Cutoff: {formatFriendlyDate(graceCutoffDateStr)}). Online excuse requests can no longer be filed for these formations. Please coordinate with HQ directly.
+                      <AlertOctagon size={18} color={isLight ? '#dc2626' : '#f87171'} style={{ flexShrink: 0, marginTop: '2px' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: '0.84rem', fontWeight: 800, color: isLight ? '#991b1b' : '#f87171' }}>
+                          No eligible absent records found within the filing window.
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: isLight ? '#7f1d1d' : '#fca5a5', marginTop: '3px', lineHeight: 1.4 }}>
+                          {expiredAbsentDrillDates.length > 0
+                            ? `You have ${expiredAbsentDrillDates.length} recorded absence(s), but they exceeded the official ${gracePeriodDays}-day filing policy window (considering cut-off time). Online excuse letters can no longer be submitted.`
+                            : `Excuse letters can only be filed for absent formations. You have 0 absent records within the ${gracePeriodDays}-day filing window (cadets marked Present or Late are not eligible).`}
+                        </div>
                       </div>
                     </div>
                   ) : (
-                    <div>
-                      <input
-                        type="date"
-                        min={graceCutoffDateStr}
-                        max={new Date().toISOString().split('T')[0]}
-                        value={excuseForm.targetDate}
-                        onChange={e => setExcuseForm(prev => ({ ...prev, targetDate: e.target.value }))}
-                        style={{
-                          width: '100%',
-                          padding: '0.6rem 0.85rem',
-                          borderRadius: '8px',
-                          border: isLight ? '1px solid #d1d5db' : '1px solid rgba(255,255,255,0.12)',
-                          background: isLight ? '#f9fafb' : 'rgba(255,255,255,0.05)',
-                          color: isLight ? '#1e293b' : '#f1f5f9',
-                          fontSize: '0.88rem',
-                          outline: 'none',
-                          boxSizing: 'border-box'
-                        }}
-                      />
-                      <div style={{ fontSize: '0.72rem', color: isLight ? '#64748b' : '#94a3b8', marginTop: '4px' }}>
-                        No recent absent records detected within the {gracePeriodDays}-day window (Since {formatFriendlyDate(graceCutoffDateStr)}).
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: isLight ? '#64748b' : '#94a3b8', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
+                      <span>
+                        🟢 <strong>{absentDrillDates.length}</strong> eligible absent date{absentDrillDates.length > 1 ? 's' : ''} available (Policy: {gracePeriodDays}-Day Filing Window)
+                      </span>
+                      {expiredAbsentDrillDates.length > 0 && (
+                        <span style={{ color: isLight ? '#b91c1c' : '#fca5a5', fontWeight: 600 }}>
+                          ⚠️ {expiredAbsentDrillDates.length} older absent date{expiredAbsentDrillDates.length > 1 ? 's' : ''} expired
+                        </span>
+                      )}
                     </div>
                   )}
+
+                  {/* Formation Calendar Selector: ONLY enables eligible absent dates */}
+                  <FormationCalendarSelector
+                    selectedDate={excuseForm.targetDate}
+                    onSelectDate={dateKey => {
+                      setExcuseForm(prev => ({ ...prev, targetDate: dateKey }));
+                      if (excuseResult) setExcuseResult(null);
+                    }}
+                    recordedDates={absentDrillDates.map(d => d.date)}
+                    disabled={absentDrillDates.length === 0}
+                    placeholder={absentDrillDates.length === 0 ? 'No eligible absent records found' : 'Select an Eligible Absent Date'}
+                    legendLabel="Eligible Absent Date"
+                    allowClear={false}
+                    isLight={isLight}
+                    t={t}
+                    fullWidth={true}
+                  />
                 </div>
 
                 {/* Reason */}
@@ -2807,23 +2814,27 @@ export default function CadetPortal({ cadet, onLogout }) {
                 {/* Submit Button */}
                 <button
                   type="button"
-                  disabled={excuseSubmitting || (absentDrillDates.length === 0 && expiredAbsentDrillDates.length > 0)}
+                  disabled={excuseSubmitting || absentDrillDates.length === 0 || !excuseForm.targetDate}
                   onClick={handleSubmitExcuse}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
                     padding: '0.75rem 1.25rem', borderRadius: '10px',
                     fontSize: '0.88rem', fontWeight: 800,
-                    cursor: (excuseSubmitting || (absentDrillDates.length === 0 && expiredAbsentDrillDates.length > 0)) ? 'not-allowed' : 'pointer',
-                    background: (excuseSubmitting || (absentDrillDates.length === 0 && expiredAbsentDrillDates.length > 0))
+                    cursor: (excuseSubmitting || absentDrillDates.length === 0 || !excuseForm.targetDate) ? 'not-allowed' : 'pointer',
+                    background: (excuseSubmitting || absentDrillDates.length === 0 || !excuseForm.targetDate)
                       ? '#9ca3af'
                       : 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
                     color: '#ffffff', border: 'none',
-                    boxShadow: (excuseSubmitting || (absentDrillDates.length === 0 && expiredAbsentDrillDates.length > 0)) ? 'none' : '0 4px 14px rgba(217, 119, 6, 0.35)',
+                    boxShadow: (excuseSubmitting || absentDrillDates.length === 0 || !excuseForm.targetDate) ? 'none' : '0 4px 14px rgba(217, 119, 6, 0.35)',
                     transition: 'all 0.2s ease'
                   }}
                 >
                   <Send size={15} />
-                  {excuseSubmitting ? 'Submitting...' : (absentDrillDates.length === 0 && expiredAbsentDrillDates.length > 0) ? 'Filing Window Expired' : 'Submit Excuse Request'}
+                  {excuseSubmitting
+                    ? 'Submitting...'
+                    : absentDrillDates.length === 0
+                      ? 'No Eligible Absent Records'
+                      : 'Submit Excuse Request'}
                 </button>
 
                 <p style={{ margin: 0, fontSize: '0.72rem', color: isLight ? '#94a3b8' : '#64748b', textAlign: 'center' }}>

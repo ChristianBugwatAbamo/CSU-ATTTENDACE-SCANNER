@@ -419,8 +419,8 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
       // Compute company summary stats
       let compCadets = [];
       platoonMap.forEach(list => compCadets.push(...list));
-      const compPresent = compCadets.filter(c => c.finalStatus === 'PRESENT').length;
-      const compLate = compCadets.filter(c => c.finalStatus === 'LATE').length;
+      const compPresent = compCadets.filter(c => String(c.finalStatus || '').toUpperCase().includes('PRESENT')).length;
+      const compLate = compCadets.filter(c => String(c.finalStatus || '').toUpperCase().includes('LATE')).length;
 
       // 1. Company Header Banner: Darker Green background (#003E1D), 12pt bold centered text
       const compRow = worksheet.addRow([`${companyName.toUpperCase()} (Strength: ${compCadets.length} | Present: ${compPresent} | Late: ${compLate})`]);
@@ -440,8 +440,8 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
 
       sortedPlatoons.forEach(platoonName => {
         const platoonCadets = platoonMap.get(platoonName);
-        const pltPresent = platoonCadets.filter(c => c.finalStatus === 'PRESENT').length;
-        const pltLate = platoonCadets.filter(c => c.finalStatus === 'LATE').length;
+        const pltPresent = platoonCadets.filter(c => String(c.finalStatus || '').toUpperCase().includes('PRESENT')).length;
+        const pltLate = platoonCadets.filter(c => String(c.finalStatus || '').toUpperCase().includes('LATE')).length;
 
         // 2. Platoon Header Banner: Mid-Green background (#008037), 10pt bold centered text
         const pltRow = worksheet.addRow([`${platoonName} (Strength: ${platoonCadets.length} | Present: ${pltPresent} | Late: ${pltLate})`]);
@@ -552,8 +552,8 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
 
   // 1. Master Summary Sheet (Hierarchically grouped by Company -> Platoon)
   const masterSheet = workbook.addWorksheet('Master Summary');
-  const presentTotal = enrichedRecords.filter(r => r.finalStatus === 'PRESENT').length;
-  const lateTotal = enrichedRecords.filter(r => r.finalStatus === 'LATE').length;
+  const presentTotal = enrichedRecords.filter(r => String(r.finalStatus || '').toUpperCase().includes('PRESENT')).length;
+  const lateTotal = enrichedRecords.filter(r => String(r.finalStatus || '').toUpperCase().includes('LATE')).length;
   buildHierarchicalSheet(
     masterSheet,
     'Master Attendance Summary (All Formations)',
@@ -590,8 +590,8 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
   sortedSheetKeys.forEach((sheetName) => {
     const echelonRecords = echelonMap.get(sheetName) || [];
     const echelonSheet = workbook.addWorksheet(sheetName);
-    const echPresent = echelonRecords.filter(r => r.finalStatus === 'PRESENT').length;
-    const echLate = echelonRecords.filter(r => r.finalStatus === 'LATE').length;
+    const echPresent = echelonRecords.filter(r => String(r.finalStatus || '').toUpperCase().includes('PRESENT')).length;
+    const echLate = echelonRecords.filter(r => String(r.finalStatus || '').toUpperCase().includes('LATE')).length;
 
     buildHierarchicalSheet(
       echelonSheet,

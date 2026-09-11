@@ -574,20 +574,43 @@ export default function DashboardView({
         </div>
       </div>
 
-      {/* Top Metric Cards: Unit Strength, Present, Late, No Time In/Out, No Scan Today */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+      {/* Top Metric Cards: Unit Strength, Present, Late, No Time In/Out, No Scan Today, Excuse (6 Cards in 1 Row) */}
+      <div
+        className="dashboard-metrics-grid grid-cols-6"
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+          gap: '0.65rem',
+          width: '100%'
+        }}
+      >
         {/* Card 1: Total Unit Strength */}
-        <div className="card" style={{ borderLeft: '5px solid var(--rotc-green-dark)', cursor: 'default' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(6, 78, 46, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-green-dark)' }}>
-              <Users size={20} />
+        <div
+          className="card"
+          style={{
+            borderLeft: '4px solid var(--rotc-green-dark)',
+            cursor: 'default',
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(6, 78, 46, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--rotc-green-dark)', flexShrink: 0 }}>
+              <Users size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Total Unit Strength</div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
-                {totalStrength} <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalStrength} Target</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Total Unit Strength</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-dark)', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {totalStrength} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 500 }}>/ {totalStrength}</span>
               </div>
             </div>
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            Target Quota
           </div>
         </div>
 
@@ -595,27 +618,33 @@ export default function DashboardView({
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${statusFilter === 'PRESENT' ? '#059669' : '#d1fae5'}`,
+            borderLeft: `4px solid ${statusFilter === 'PRESENT' ? '#059669' : '#d1fae5'}`,
             cursor: 'pointer',
             outline: statusFilter === 'PRESENT' ? '2px solid #059669' : 'none',
-            background: statusFilter === 'PRESENT' ? '#f0fdf4' : undefined
+            background: statusFilter === 'PRESENT' ? '#f0fdf4' : undefined,
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
           }}
           onClick={() => handleStatusCardClick('PRESENT')}
           title="Click to filter table: PRESENT cadets only"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(5, 150, 105, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669' }}>
-              <CheckCircle2 size={20} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(5, 150, 105, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#059669', flexShrink: 0 }}>
+              <CheckCircle2 size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Present</div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#065f46' }}>
-                {attendanceSummary.presentCompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Present</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#065f46', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {attendanceSummary.presentCompleteCount} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {statusFilter === 'PRESENT' ? '✓ Filtering table by Present' : 'Click to filter → Present'}
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {statusFilter === 'PRESENT' ? '✓ Filtering Present' : 'Click to filter'}
           </div>
         </div>
 
@@ -623,27 +652,33 @@ export default function DashboardView({
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${statusFilter === 'LATE' ? '#d97706' : '#fde68a'}`,
+            borderLeft: `4px solid ${statusFilter === 'LATE' ? '#d97706' : '#fde68a'}`,
             cursor: 'pointer',
             outline: statusFilter === 'LATE' ? '2px solid #d97706' : 'none',
-            background: statusFilter === 'LATE' ? '#fffbeb' : undefined
+            background: statusFilter === 'LATE' ? '#fffbeb' : undefined,
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
           }}
           onClick={() => handleStatusCardClick('LATE')}
           title="Click to filter table: LATE cadets only"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
-              <Clock size={20} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706', flexShrink: 0 }}>
+              <Clock size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Late</div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
-                {attendanceSummary.lateCompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Late</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#92400e', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {attendanceSummary.lateCompleteCount} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {statusFilter === 'LATE' ? '✓ Filtering table by Late' : 'Click to filter → Late'}
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {statusFilter === 'LATE' ? '✓ Filtering Late' : 'Click to filter'}
           </div>
         </div>
 
@@ -651,27 +686,33 @@ export default function DashboardView({
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : '#fed7aa'}`,
+            borderLeft: `4px solid ${(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#ea580c' : '#fed7aa'}`,
             cursor: 'pointer',
             outline: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '2px solid #ea580c' : 'none',
-            background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#fff7ed' : undefined
+            background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '#fff7ed' : undefined,
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
           }}
           onClick={() => handleStatusCardClick('NO TIME IN/OUT')}
           title="Click to filter table: No Time In/Out cadets only"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(234, 88, 12, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c' }}>
-              <Activity size={20} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(234, 88, 12, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ea580c', flexShrink: 0 }}>
+              <Activity size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>No Time In/Out</div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
-                {attendanceSummary.incompleteCount} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>No Time In/Out</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#9a3412', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {attendanceSummary.incompleteCount} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering table by No Time In/Out' : 'Click to filter → No Time In/Out'}
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {(statusFilter === 'NO TIME IN/OUT' || statusFilter === 'NO TIME-OUT') ? '✓ Filtering Incomplete' : 'Click to filter'}
           </div>
         </div>
 
@@ -679,29 +720,35 @@ export default function DashboardView({
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${statusFilter === 'ABSENT' ? '#64748b' : '#e2e8f0'}`,
+            borderLeft: `4px solid ${statusFilter === 'ABSENT' ? '#64748b' : '#e2e8f0'}`,
             cursor: hasTodayScans ? 'pointer' : 'default',
             outline: statusFilter === 'ABSENT' ? '2px solid #64748b' : 'none',
-            background: statusFilter === 'ABSENT' ? '#f1f5f9' : undefined
+            background: statusFilter === 'ABSENT' ? '#f1f5f9' : undefined,
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
           }}
           onClick={() => hasTodayScans && handleStatusCardClick('ABSENT')}
           title={hasTodayScans ? "Click to filter table: Absent cadets only" : "No formation recorded for today"}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(100, 116, 139, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
-              <Shield size={20} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(100, 116, 139, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', flexShrink: 0 }}>
+              <Shield size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {hasTodayScans ? 'Absent' : 'No Scan Today'}
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#334155' }}>
-                {hasTodayScans ? attendanceSummary.absentCount : 0} <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#334155', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {hasTodayScans ? attendanceSummary.absentCount : 0} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {hasTodayScans ? (statusFilter === 'ABSENT' ? '✓ Filtering table by Absent' : 'Click to filter → Absent') : 'No active formation today'}
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {hasTodayScans ? (statusFilter === 'ABSENT' ? '✓ Filtering Absent' : 'Click to filter') : 'No active drill'}
           </div>
         </div>
 
@@ -709,30 +756,37 @@ export default function DashboardView({
         <div
           className="card"
           style={{
-            borderLeft: `5px solid ${(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#d97706' : '#fde68a'}`,
+            borderLeft: `4px solid ${(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#d97706' : '#fde68a'}`,
             cursor: 'pointer',
             outline: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '2px solid #d97706' : 'none',
-            background: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#fffbeb' : undefined
+            background: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#fffbeb' : undefined,
+            padding: '0.85rem 0.75rem',
+            marginBottom: 0,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'space-between'
           }}
           onClick={() => handleStatusCardClick('EXCUSE')}
           title="Click to filter: cadets with excuse records (Excused or Pending)"
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '10px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706' }}>
-              <FileText size={20} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.35rem', minWidth: 0 }}>
+            <div style={{ width: '34px', height: '34px', borderRadius: '8px', background: 'rgba(217, 119, 6, 0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#d97706', flexShrink: 0 }}>
+              <FileText size={18} />
             </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>Excuse</div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
-                {(attendanceSummary.excusePendingCount ?? 0) + (attendanceSummary.excusedCount ?? 0)}
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Excuse</div>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#92400e', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {(attendanceSummary.excusePendingCount ?? 0) + (attendanceSummary.excusedCount ?? 0)} <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 600 }}>Cadets</span>
               </div>
             </div>
           </div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-            {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '✓ Filtering table by Excuse' : 'Click to filter → Excuse'}
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '✓ Filtering Excuse' : 'Click to filter'}
           </div>
         </div>
       </div>
+
 
       {/* Unit Hierarchy Drill-Down: Battalion, Company, and Platoon Selectors */}
       <DashboardUnitHierarchy

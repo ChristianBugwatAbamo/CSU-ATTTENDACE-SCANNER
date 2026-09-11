@@ -972,8 +972,8 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
 
       if (dateLogs && dateLogs.length > 0) {
         const totalScanned = dateLogs.length;
-        const presentCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'PRESENT' || (l.final_daily_status || l.status) === 'PRESENT (Complete)').length;
-        const lateCount = dateLogs.filter(l => (l.final_daily_status || l.status) === 'LATE' || (l.final_daily_status || l.status) === 'LATE (Complete)').length;
+        const presentCount = dateLogs.filter(l => String(l.final_daily_status || l.status || '').toUpperCase().includes('PRESENT')).length;
+        const lateCount = dateLogs.filter(l => String(l.final_daily_status || l.status || '').toUpperCase().includes('LATE')).length;
 
         await client
           .from('attendance_sessions')

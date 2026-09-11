@@ -470,11 +470,11 @@ export default function AnalyticsView({
   }, [propsCadets, propsLogs]);
 
   const [growthData, setGrowthData] = useState({
-    labels: ['Aug 22', 'Aug 23', 'Aug 24', 'Aug 25'],
+    labels: [],
     datasets: [{
       fill: true,
       label: 'Total Cadets Enrolled',
-      data: [4, 7, 9, 11],
+      data: [],
       borderColor: '#0284c7',
       backgroundColor: 'rgba(2, 132, 199, 0.15)',
       tension: 0.35,
@@ -484,11 +484,11 @@ export default function AnalyticsView({
   });
 
   const [trendData, setTrendData] = useState({
-    labels: ['Aug 22', 'Aug 24'],
+    labels: [],
     datasets: [{
       fill: true,
       label: 'Muster Attendance Rate %',
-      data: [100, 100],
+      data: [],
       borderColor: '#0284c7',
       backgroundColor: 'rgba(2, 132, 199, 0.15)',
       tension: 0.4,
@@ -503,7 +503,7 @@ export default function AnalyticsView({
     async function loadData() {
       try {
         const client = getSupabaseClient();
-        let totalCount = liveCadets?.length || propsCadets?.length || 11;
+        let totalCount = liveCadets?.length || propsCadets?.length || 0;
         const dailyEnrollmentMap = new Map();
         let fetchedCadetsList = [];
 
@@ -526,10 +526,9 @@ export default function AnalyticsView({
 
         if (cadetRecords && cadetRecords.length > 0) {
           cadetRecords.forEach(c => {
-            const rawCreated = c.created_at || c.createdAt || c.timestamp || '2026-08-25';
-            const d = new Date(rawCreated);
-            const validDate = !isNaN(d.getTime()) ? d : new Date('2026-08-25');
-            const dateKey = toDateKey(validDate);
+            const rawCreated = c.created_at || c.createdAt || c.timestamp;
+            if (!rawCreated) return;
+            const dateKey = toDateKey(rawCreated);
             if (dateKey) {
               dailyEnrollmentMap.set(dateKey, (dailyEnrollmentMap.get(dateKey) || 0) + 1);
             }
@@ -546,7 +545,9 @@ export default function AnalyticsView({
             growthLabels = sortedDates.map(k => {
               const [y, m, d] = k.split('-').map(Number);
               const dateObj = new Date(y, (m || 1) - 1, d || 1);
-              return dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+              return !isNaN(dateObj.getTime())
+                ? dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                : k;
             });
             growthCounts = sortedDates.map(k => {
               cumulative += (dailyEnrollmentMap.get(k) || 0);
@@ -555,42 +556,46 @@ export default function AnalyticsView({
           } else if (sortedDates.length === 1) {
             const singleKey = sortedDates[0];
             const [y, m, d] = singleKey.split('-').map(Number);
-            const dayNum = d || 25;
-            const days = [
-              Math.max(1, dayNum - 3),
-              Math.max(2, dayNum - 2),
-              Math.max(3, dayNum - 1),
-              dayNum
+            const dateObj = new Date(y, (m || 1) - 1, d || 1);
+            const prevDate = new Date(dateObj);
+            prevDate.setDate(prevDate.getDate() - 1);
+            const prevLabel = !isNaN(prevDate.getTime())
+              ? prevDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : 'Start';
+            const currLabel = !isNaN(dateObj.getTime())
+              ? dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : singleKey;
+            growthLabels = [prevLabel, currLabel];
+            growthCounts = [0, totalCount || dailyEnrollmentMap.get(singleKey) || 1];
+          } else if (totalCount > 0) {
+            const today = new Date();
+            const prev = new Date(today);
+            prev.setDate(prev.getDate() - 1);
+            growthLabels = [
+              prev.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+              today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
             ];
-            const targetTotal = totalCount > 0 ? totalCount : 11;
-            growthLabels = days.map(dn => `Aug ${dn}`);
-            growthCounts = [
-              Math.max(1, Math.round(targetTotal * 0.35)),
-              Math.max(2, Math.round(targetTotal * 0.65)),
-              Math.max(3, Math.round(targetTotal * 0.85)),
-              targetTotal
-            ];
-          } else {
-            growthLabels = ['Aug 22', 'Aug 23', 'Aug 24', 'Aug 25'];
-            growthCounts = [4, 7, 9, totalCount || 11];
+            growthCounts = [0, totalCount];
           }
 
-          setGrowthData({
-            labels: growthLabels,
-            datasets: [{
-              fill: true,
-              label: 'Total Cadets Enrolled',
-              data: growthCounts,
-              borderColor: '#0284c7',
-              backgroundColor: 'rgba(2, 132, 199, 0.15)',
-              tension: 0.35,
-              pointRadius: 4,
-              pointBackgroundColor: '#0284c7',
-            }]
-          });
+          if (growthLabels.length > 0) {
+            setGrowthData({
+              labels: growthLabels,
+              datasets: [{
+                fill: true,
+                label: 'Total Cadets Enrolled',
+                data: growthCounts,
+                borderColor: '#0284c7',
+                backgroundColor: 'rgba(2, 132, 199, 0.15)',
+                tension: 0.35,
+                pointRadius: 4,
+                pointBackgroundColor: '#0284c7',
+              }]
+            });
+          }
         }
 
-        // Track distinct formation dates and unique cadets with actual PRESENT turnout per date
+        // Track distinct formation dates and unique cadets with actual turnout per date
         const formationDatesSet = new Set();
         const dailyPresentMap = new Map(); // dateKey -> Set of unique cadet_ids
 
@@ -609,10 +614,14 @@ export default function AnalyticsView({
 
               const cid = String(curr.cadet_id || '').trim().toUpperCase();
               const st = String(curr.status || curr.final_daily_status || '').toUpperCase();
-              // Actual present turnout: verified PRESENT on-time complete (excluding ABSENT, LATE, or incomplete scans)
-              const isPresent = st === 'PRESENT' || st === 'PRESENT (COMPLETE)' || (st.includes('PRESENT') && !st.includes('ABSENT') && !st.includes('NO TIME-IN'));
+              // Actual turnout: cadet attended formation (PRESENT, LATE, or LATE / NO TIME-OUT), excluding unexcused ABSENT or NO SCAN
+              const isTurnout = (
+                st.includes('PRESENT') ||
+                st.includes('LATE') ||
+                st.includes('NO TIME-OUT')
+              ) && !st.includes('ABSENT') && !st.includes('NO SCAN');
 
-              if (cid && isPresent) {
+              if (cid && isTurnout) {
                 if (!dailyPresentMap.has(dateKey)) {
                   dailyPresentMap.set(dateKey, new Set());
                 }
@@ -622,7 +631,7 @@ export default function AnalyticsView({
           } else {
             const { data: sessions, error: sessErr } = await client
               .from('attendance_sessions')
-              .select('session_date, present_count, total_scanned')
+              .select('session_date, present_count, late_count, total_scanned')
               .order('session_date', { ascending: true });
 
             if (!sessErr && Array.isArray(sessions) && sessions.length > 0) {
@@ -630,14 +639,14 @@ export default function AnalyticsView({
                 const dateKey = toDateKey(curr.session_date);
                 if (dateKey) {
                   formationDatesSet.add(dateKey);
-                  const presentCount = (curr.present_count !== undefined && curr.present_count !== null)
-                    ? curr.present_count
-                    : (curr.total_scanned || 0);
+                  const turnoutCount = (curr.total_scanned !== undefined && curr.total_scanned !== null && curr.total_scanned > 0)
+                    ? curr.total_scanned
+                    : ((curr.present_count || 0) + (curr.late_count || 0));
 
                   if (!dailyPresentMap.has(dateKey)) {
                     dailyPresentMap.set(dateKey, new Set());
                   }
-                  for (let i = 0; i < presentCount; i++) {
+                  for (let i = 0; i < turnoutCount; i++) {
                     dailyPresentMap.get(dateKey).add(`session_present_${i}`);
                   }
                 }
@@ -654,10 +663,14 @@ export default function AnalyticsView({
             formationDatesSet.add(dateKey);
 
             const rawStatus = String(l.status || l.finalDailyStatus || l.timeInStatus || '').toUpperCase();
-            const isPresent = rawStatus === 'PRESENT' || rawStatus === 'PRESENT (COMPLETE)' || (rawStatus.includes('PRESENT') && !rawStatus.includes('ABSENT') && !rawStatus.includes('NO TIME-IN'));
+            const isTurnout = (
+              rawStatus.includes('PRESENT') ||
+              rawStatus.includes('LATE') ||
+              rawStatus.includes('NO TIME-OUT')
+            ) && !rawStatus.includes('ABSENT') && !rawStatus.includes('NO SCAN');
             const cid = String(l.cadetId || l.cadet_id || l.id || '').trim().toUpperCase();
 
-            if (cid && isPresent) {
+            if (cid && isTurnout) {
               if (!dailyPresentMap.has(dateKey)) dailyPresentMap.set(dateKey, new Set());
               dailyPresentMap.get(dateKey).add(cid);
             }
@@ -675,7 +688,7 @@ export default function AnalyticsView({
             : key;
         });
 
-        // Actual Turnout Rate formula: (Actual Present Cadets on Date / Total Cadets Roster) * 100
+        // Actual Turnout Rate formula: (Actual Present + Late Turnout Cadets on Date / Total Cadets Roster) * 100
         const percentageRates = sortedDateKeys.map(key => {
           const presentCadetsCount = dailyPresentMap.has(key) ? dailyPresentMap.get(key).size : 0;
           const rate = Math.round((presentCadetsCount / unitCapacity) * 100);
@@ -850,18 +863,18 @@ export default function AnalyticsView({
 
     const totalProvincesCount = list.reduce((a, b) => a + b.count, 0);
 
-    // Curated dynamic color palette: Slate Gray (#64748b) for Pending & Other, ROTC Green/Emerald for provinces
-    const palette = ['#047857', '#059669', '#10b981', '#0ea5e9', '#6366f1', '#8b5cf6', '#14b8a6', '#3b82f6'];
-    let palIndex = 0;
-
+    // Dynamically generate unique, vibrant HSL colors with high perceptual contrast per province
+    // Slate Gray (#64748b) is reserved for Unspecified/Pending and Other
+    let nonPendingIndex = 0;
     const barColors = list.map(item => {
-      const isPendingOrOther = item.province.toLowerCase().includes('unspecified') ||
-        item.province.toLowerCase().includes('pending') ||
-        item.province.toLowerCase().includes('other');
+      const p = item.province.toLowerCase();
+      const isPendingOrOther = p.includes('unspecified') || p.includes('pending') || p.includes('other');
       if (isPendingOrOther) return '#64748b';
-      const c = palette[palIndex % palette.length];
-      palIndex++;
-      return c;
+
+      // Golden angle hue stepping (~137.5°) ensures maximally distinct, non-repeating colors across all bars
+      const hue = Math.round((nonPendingIndex * 137.5 + 30) % 360);
+      nonPendingIndex++;
+      return `hsl(${hue}, 70%, 46%)`;
     });
 
     return {

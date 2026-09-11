@@ -435,8 +435,11 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
   const totalStrength = reconciledList.length;
   // Present Complete: Only cadets who have completed both Time-In AND Time-Out on time
   const presentCompleteCount = reconciledList.filter(r => (r.finalDailyStatus === 'PRESENT' || r.finalDailyStatus === 'PRESENT (Complete)') && r.hasTimeIn && r.hasTimeOut && !r.isLate).length;
-  // Late Complete: Only cadets who have completed both scans, but arrived late
-  const lateCompleteCount = reconciledList.filter(r => (r.finalDailyStatus === 'LATE' || r.finalDailyStatus === 'LATE (Complete)') && r.hasTimeIn && r.hasTimeOut && r.isLate).length;
+  // Late Count: Cadets who arrived late (including compound statuses like 'LATE / NO TIME-OUT' and 'LATE (Complete)')
+  const lateCompleteCount = reconciledList.filter(r => {
+    const st = String(r.finalDailyStatus || r.status || '').toUpperCase();
+    return st.includes('LATE') || Boolean(r.isLate);
+  }).length;
   // Incomplete: Cadets missing Time-Out (hasTimeIn && !hasTimeOut) or missing Time-In (!hasTimeIn && hasTimeOut)
   const incompleteCount = reconciledList.filter(r =>
     (r.hasTimeIn && !r.hasTimeOut) ||

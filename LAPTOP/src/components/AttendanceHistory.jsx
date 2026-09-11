@@ -442,19 +442,18 @@ export default function AttendanceHistory({
       const hasOut = Boolean(c.hasTimeOut && isValidTimeVal(rawOut));
 
       const inMins = rawIn ? parseTimestampMinutes(rawIn) : NaN;
-      const isLate = Boolean(c.isLate || (!isNaN(inMins) && inMins > activeCutoffMins));
+      const isLate = Boolean(c.isLate || rawStatus.includes('LATE') || (!isNaN(inMins) && inMins > activeCutoffMins));
+      const isIncomplete = (hasIn && !hasOut) || (!hasIn && hasOut) || rawStatus.includes('NO TIME') || rawStatus.includes('INCOMPLETE');
 
-      if (hasIn && !hasOut) {
-        incompleteCount++;
-      } else if (!hasIn && hasOut) {
-        incompleteCount++;
+      if (isLate) {
+        lateCount++;
       } else if (hasIn && hasOut) {
-        if (isLate || String(c.finalDailyStatus || '').includes('LATE')) {
-          lateCount++;
-        } else {
-          presentCount++;
-        }
-      } else {
+        presentCount++;
+      }
+
+      if (isIncomplete) {
+        incompleteCount++;
+      } else if (!hasIn && !hasOut && (rawStatus.includes('ABSENT') || rawStatus.includes('NO SCAN') || !rawStatus)) {
         absentCount++;
       }
     });
@@ -466,7 +465,8 @@ export default function AttendanceHistory({
       incompleteCount: incompleteCount,
       absentCount: absentCount,
       excusePendingCount: excusePendingCount,
-      excusedCount: excusedCount
+      excusedCount: excusedCount,
+      totalScanned: reconciledRoster.filter(c => c.hasTimeIn || c.hasTimeOut).length
     };
   }, [reconciledRoster, selectedDate, isRecordedDate, activeCutoffMins]);
 
@@ -659,7 +659,7 @@ export default function AttendanceHistory({
   }, [onRefresh]);
 
   const turnoutRate = displaySummary.totalStrength > 0
-    ? Math.round(((displaySummary.presentCompleteCount + displaySummary.lateCompleteCount + displaySummary.incompleteCount) / displaySummary.totalStrength) * 100)
+    ? Math.round(((displaySummary.totalScanned ?? (displaySummary.presentCompleteCount + displaySummary.lateCompleteCount + displaySummary.incompleteCount)) / displaySummary.totalStrength) * 100)
     : 0;
 
   const hasActiveFilters = searchQuery.trim().length > 0 || statusFilter !== 'ALL' || selectedBattalion !== null || selectedCompany !== null || selectedPlatoon !== null;
@@ -1247,7 +1247,15 @@ export default function AttendanceHistory({
           {/* ========================================================================= */}
           {/* 5 Simplified Modern Stat Summary Cards (Clickable to Filter Table)         */}
           {/* ========================================================================= */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+          <div
+            className="dashboard-metrics-grid grid-cols-6"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+              gap: '0.65rem',
+              width: '100%'
+            }}
+          >
 
             {/* Stat Card 1: TOTAL ROSTER CADETS */}
             <div
@@ -1257,23 +1265,28 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid var(--rotc-green-dark)',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: statusFilter === 'ALL' ? '#f0fdf4' : '#ffffff',
                 boxShadow: statusFilter === 'ALL' ? '0 0 0 2px var(--rotc-green-dark)' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to view all cadets on this date"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Cadets</span>
-                <Users size={16} color="var(--rotc-green-dark)" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Total Cadets</span>
+                <Users size={15} color="var(--rotc-green-dark)" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: 'var(--text-dark)' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-dark)', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {displaySummary.totalStrength}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', fontWeight: 600 }}>
-                {turnoutRate}% Turnout Rate
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px', fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {turnoutRate}% Turnout
               </div>
             </div>
 
@@ -1285,22 +1298,27 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #059669',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: statusFilter === 'PRESENT' ? '#ecfdf5' : '#ffffff',
                 boxShadow: statusFilter === 'PRESENT' ? '0 0 0 2px #059669' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to filter Present cadets"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#065f46', textTransform: 'uppercase' }}>Present</span>
-                <CheckCircle2 size={16} color="#059669" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#065f46', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Present</span>
+                <CheckCircle2 size={15} color="#059669" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#065f46' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#065f46', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {displaySummary.presentCompleteCount}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 On-time arrival
               </div>
             </div>
@@ -1313,23 +1331,28 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #d97706',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: statusFilter === 'LATE' ? '#fffbeb' : '#ffffff',
                 boxShadow: statusFilter === 'LATE' ? '0 0 0 2px #d97706' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to filter Late cadets"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase' }}>Late</span>
-                <Clock size={16} color="#d97706" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#92400e', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Late</span>
+                <Clock size={15} color="#d97706" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#92400e', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {displaySummary.lateCompleteCount}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                After {selectedSessionCutoff || formationCutoff || '07:30'}
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                After cutoff
               </div>
             </div>
 
@@ -1341,23 +1364,28 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #ea580c',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') ? '#fff7ed' : '#ffffff',
                 boxShadow: (statusFilter === 'NO TIME IN/OUT' || statusFilter === 'INCOMPLETE' || statusFilter === 'NO TIME-OUT') ? '0 0 0 2px #ea580c' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to filter cadets missing Time-In or Time-Out"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase' }}>No Time In/Out</span>
-                <Activity size={16} color="#ea580c" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 700, color: '#9a3412', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>No Time In/Out</span>
+                <Activity size={15} color="#ea580c" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#9a3412' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#9a3412', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {displaySummary.incompleteCount}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                Missing entry or exit scan
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Missing scan
               </div>
             </div>
 
@@ -1369,23 +1397,28 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #dc2626',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: statusFilter === 'ABSENT' ? '#fef2f2' : '#ffffff',
                 boxShadow: statusFilter === 'ABSENT' ? '0 0 0 2px #dc2626' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to view all Absent cadets"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase' }}>Absent Cadets</span>
-                <UserX size={16} color="#dc2626" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Absent Cadets</span>
+                <UserX size={15} color="#dc2626" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#991b1b' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#991b1b', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {displaySummary.absentCount}
               </div>
-              <div style={{ fontSize: '0.72rem', color: '#b91c1c', marginTop: '2px', fontWeight: 700 }}>
-                {statusFilter === 'ABSENT' ? '● Active Filter' : 'Click to filter absentees'}
+              <div style={{ fontSize: '0.68rem', color: '#b91c1c', marginTop: '2px', fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {statusFilter === 'ABSENT' ? '● Active Filter' : 'Click to filter'}
               </div>
             </div>
 
@@ -1397,23 +1430,28 @@ export default function AttendanceHistory({
                 border: '1px solid #e2e8f0',
                 borderTop: '3px solid #d97706',
                 borderRadius: '10px',
-                padding: '1rem',
+                padding: '0.85rem 0.75rem',
+                marginBottom: 0,
+                minWidth: 0,
                 cursor: 'pointer',
                 background: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '#fffbeb' : '#ffffff',
                 boxShadow: (statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '0 0 0 2px #d97706' : 'var(--shadow-sm)',
-                transition: 'all 0.15s ease'
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
               }}
               title="Click to filter cadets with excuse records (Excused or Pending)"
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase' }}>Excuse</span>
-                <FileText size={16} color="#d97706" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', minWidth: 0 }}>
+                <span style={{ fontSize: '0.68rem', fontWeight: 800, color: '#92400e', textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Excuse</span>
+                <FileText size={15} color="#d97706" style={{ flexShrink: 0 }} />
               </div>
-              <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#92400e' }}>
+              <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#92400e', lineHeight: 1.15, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {(displaySummary.excusePendingCount ?? 0) + (displaySummary.excusedCount ?? 0)}
               </div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '● Active Filter' : 'Excused & Pending review'}
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {(statusFilter === 'EXCUSE' || statusFilter === 'EXCUSE_PENDING' || statusFilter === 'EXCUSED') ? '● Active Filter' : 'Excused & Pending'}
               </div>
             </div>
           </div>
