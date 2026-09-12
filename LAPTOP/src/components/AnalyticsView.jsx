@@ -429,20 +429,23 @@ export default function AnalyticsView({
       // Build consolidated set of distinct formation dates:
       // In a live/connected database, strictly evaluate against actual recorded sessions and logs.
       const formationDatesSet = new Set();
-      sessionsData.forEach(s => {
-        const dk = normalizeDateKey(s.session_date || s.date);
-        if (dk) formationDatesSet.add(dk);
-      });
-      (propsLogs || []).forEach(l => {
-        const dk = normalizeDateKey(l.date || l.session_date || l.timestamp);
-        if (dk) formationDatesSet.add(dk);
-      });
-      cadetsData.forEach(c => {
-        (c.attendance_logs || []).forEach(l => {
+      if (sessionsData && sessionsData.length > 0) {
+        sessionsData.forEach(s => {
+          const dk = normalizeDateKey(s.session_date || s.date);
+          if (dk) formationDatesSet.add(dk);
+        });
+      } else {
+        (propsLogs || []).forEach(l => {
           const dk = normalizeDateKey(l.date || l.session_date || l.timestamp);
           if (dk) formationDatesSet.add(dk);
         });
-      });
+        cadetsData.forEach(c => {
+          (c.attendance_logs || []).forEach(l => {
+            const dk = normalizeDateKey(l.date || l.session_date || l.timestamp);
+            if (dk) formationDatesSet.add(dk);
+          });
+        });
+      }
 
       // Only fallback to historical test dates if purely offline without a database and mock cadets exist
       if (!client && formationDatesSet.size === 0 && (!propsCadets || propsCadets.length === 0)) {

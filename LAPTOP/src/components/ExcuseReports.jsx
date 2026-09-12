@@ -156,6 +156,8 @@ export default function ExcuseReports({
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [selectedRecordForAction, setSelectedRecordForAction] = useState(null);
+  // Local status overrides for immediate, optimistic UI state mutation
+  const [localStatusOverrides, setLocalStatusOverrides] = useState({});
 
   // Grace Period (Days) from settings (default 3)
   const [gracePeriodDays, setGracePeriodDays] = useState(() => {
@@ -221,22 +223,70 @@ export default function ExcuseReports({
   }, []);
 
   // Extract all report rows: EXCUSE_PENDING, EXCUSED, and DECLARED ABSENT
+  // STRICT: Only displays cadets who submitted an actual excuse request (dateFiled exists or isExcuseRequest === true)
   const excuseRecords = useMemo(() => {
     if (!Array.isArray(effectiveLogs)) return [];
 
-    // 1. Existing logs in attendance_logs (EXCUSE_PENDING, EXCUSED, ABSENT)
     const recordsFromLogs = effectiveLogs
       .filter(log => {
-        const st = String(log.status || log.final_daily_status || log.finalDailyStatus || '').toUpperCase();
-        return st === 'EXCUSE_PENDING' || st === 'EXCUSED' || st === 'ABSENT' || st.includes('ABSENT');
+        const cid = String(log.cadet_id || log.cadetId || '').trim().toUpperCase();
+        const rawDate = log.date || log.session_date || log.sessionDate || toDateKey(log.timestamp) || '';
+        const key = `${cid}_${rawDate}`;
+        const overriddenStatus = localStatusOverrides[log.id] || localStatusOverrides[key] || localStatusOverrides[`${cid}__${rawDate}`];
+        const st = (overriddenStatus || String(log.status || log.final_daily_status || log.finalDailyStatus || '')).toUpperCase();
+
+        // 1. Must be one of the excuse workflow statuses
+        const isWorkflowStatus = st === 'EXCUSE_PENDING' || st === 'PENDING' || st === 'EXCUSED' || st === 'APPROVED' || st === 'ABSENT';
+        if (!isWorkflowStatus) return false;
+
+        // 2. Identify if an actual excuse request was filed (dateFiled exists or isExcuseRequest === true)
+        const dateFiled = log.excuse_submitted_at || log.excuseSubmittedAt || log.submitted_at || log.date_filed || log.dateFiled;
+        const hasDateFiled = Boolean(dateFiled && String(dateFiled).trim() !== '' && String(dateFiled).trim() !== '—' && String(dateFiled).trim() !== '-');
+
+        const isExcuseRequest = Boolean(
+          log.isExcuseRequest === true ||
+          log.is_excuse === true ||
+          log.isExcuse === true ||
+          hasDateFiled ||
+          st === 'EXCUSE_PENDING' ||
+          st === 'PENDING' ||
+          st === 'EXCUSED' ||
+          st === 'APPROVED' ||
+          (log.excuse_status && String(log.excuse_status).trim() !== '') ||
+          Boolean(localStatusOverrides[log.id] || localStatusOverrides[key])
+        );
+
+        // Discard regular unexcused absence records (who never filed an excuse)
+        if (!hasDateFiled && !isExcuseRequest) {
+          return false;
+        }
+
+        // For ABSENT records, make sure it was a submitted excuse that was rejected/declared absent by HQ
+        if (st === 'ABSENT' || st.includes('ABSENT')) {
+          const excuseReason = String(log.excuse_reason || '').trim();
+          const rawReason = String(log.reason || '').trim();
+          const isGenericReason = rawReason.toLowerCase().includes('unexcused absence') || rawReason.toLowerCase().includes('did not attend formation');
+          const hasSpecificExcuse = Boolean(hasDateFiled || excuseReason || (rawReason && !isGenericReason) || localStatusOverrides[log.id] || localStatusOverrides[key]);
+          if (!hasSpecificExcuse) return false;
+        }
+
+        return true;
       })
       .map(log => {
         const cid = String(log.cadet_id || log.cadetId || '').trim().toUpperCase();
         const cadetMeta = cadetsMap.get(cid) || {};
         const rawDate = log.date || log.session_date || log.sessionDate || toDateKey(log.timestamp) || '';
-        let st = String(log.status || log.final_daily_status || log.finalDailyStatus || '').toUpperCase();
+        const key = `${cid}_${rawDate}`;
+        const overriddenStatus = localStatusOverrides[log.id] || localStatusOverrides[key] || localStatusOverrides[`${cid}__${rawDate}`];
+        let st = (overriddenStatus || String(log.status || log.final_daily_status || log.finalDailyStatus || '')).toUpperCase();
         if (st.includes('ABSENT')) st = 'ABSENT';
-        const cadetReason = log.reason || log.excuse_reason || log.excuseReason || '';
+
+        const rawReason = log.excuse_reason || log.reason || '';
+        const isGenericReason = String(rawReason).toLowerCase().includes('unexcused absence') || String(rawReason).toLowerCase().includes('did not attend formation');
+        const cadetReason = !isGenericReason && rawReason ? rawReason : '';
+
+        // Strict dateFiled: only actual excuse submission timestamps
+        const dateFiled = log.excuse_submitted_at || log.excuseSubmittedAt || log.submitted_at || log.date_filed || log.dateFiled || null;
 
         return {
           id: log.id || `${cid}__${rawDate}`,
@@ -251,64 +301,25 @@ export default function ExcuseReports({
           status: st,
           reason: cadetReason || (st === 'ABSENT' ? 'Declared Absent / Excuse Rejected by HQ' : 'No reason provided'),
           excuseReason: cadetReason || (st === 'ABSENT' ? 'Declared Absent / Excuse Rejected by HQ' : 'No reason provided'),
-          submittedAt: log.excuse_submitted_at || log.excuseSubmittedAt || log.submitted_at || log.updated_at || log.created_at || null,
+          submittedAt: dateFiled,
           dutyOfficer: log.duty_officer || log.dutyOfficer || 'HQ Duty Officer'
         };
       });
 
-    // 2. Identify registered cadets with unscanned absences on recorded formation sessions
-    const sessionDates = Array.from(new Set((dbSessions || []).map(s => s.dateKey || s.session_date || s.sessionDate).filter(Boolean)));
-    const existingLogKeys = new Set(effectiveLogs.map(l => {
-      const cid = String(l.cadet_id || l.cadetId || '').trim().toUpperCase();
-      const d = l.date || l.session_date || toDateKey(l.timestamp);
-      return `${cid}_${d}`;
-    }));
-
-    const unscannedAbsentees = [];
-    sessionDates.forEach(sessionDate => {
-      effectiveCadets.forEach(cadet => {
-        const cid = String(cadet.id || cadet.cadetId || '').trim().toUpperCase();
-        if (!cid) return;
-        const key = `${cid}_${sessionDate}`;
-        if (!existingLogKeys.has(key)) {
-          unscannedAbsentees.push({
-            id: `unscanned_${cid}_${sessionDate}`,
-            logId: null,
-            cadetId: cid,
-            name: cadet.name || `Cadet ${cid}`,
-            rank: cadet.rank || 'Cadet',
-            battalion: cadet.battalion || '1st Battalion',
-            company: cadet.company || 'Alpha Company',
-            platoon: cadet.platoon || '1st Platoon',
-            date: sessionDate,
-            status: 'ABSENT',
-            reason: 'Unexcused Absence (Did Not Attend Formation)',
-            excuseReason: 'Unexcused Absence (Did Not Attend Formation)',
-            submittedAt: null,
-            dutyOfficer: 'HQ Duty Officer'
-          });
-        }
-      });
-    });
-
-    return [...recordsFromLogs, ...unscannedAbsentees].sort((a, b) => {
+    return recordsFromLogs.sort((a, b) => {
       const order = { 'EXCUSE_PENDING': 1, 'ABSENT': 2, 'EXCUSED': 3 };
       const diff = (order[a.status] || 99) - (order[b.status] || 99);
       if (diff !== 0) return diff;
       return (b.date || '').localeCompare(a.date || '');
     });
-  }, [effectiveLogs, cadetsMap, dbSessions, effectiveCadets]);
+  }, [effectiveLogs, cadetsMap, localStatusOverrides]);
 
   // Unique formation dates in excuse records for filter dropdown
   const uniqueDates = useMemo(() => {
     const dates = new Set();
     excuseRecords.forEach(r => { if (r.date) dates.add(r.date); });
-    (dbSessions || []).forEach(s => {
-      const dk = s.dateKey || s.session_date || s.sessionDate;
-      if (dk) dates.add(dk);
-    });
     return Array.from(dates).sort((a, b) => b.localeCompare(a));
-  }, [excuseRecords, dbSessions]);
+  }, [excuseRecords]);
 
   // Unique battalions for filter dropdown
   const uniqueBattalions = useMemo(() => {
@@ -485,6 +496,16 @@ export default function ExcuseReports({
     const targetId = record.logId || record.id;
     if (!targetId) return;
 
+    // 1. Immediately & optimistically mutate local UI state
+    const cadetKey = `${record.cadetId}_${record.date}`;
+    setLocalStatusOverrides(prev => ({
+      ...prev,
+      [targetId]: 'EXCUSED',
+      [cadetKey]: 'EXCUSED',
+      ...(record.logId ? { [record.logId]: 'EXCUSED' } : {}),
+      ...(record.id ? { [record.id]: 'EXCUSED' } : {})
+    }));
+
     setActionLoadingId(targetId);
     try {
       await approveExcuseRequest(record.logId, record.cadetId, record.date);
@@ -498,7 +519,7 @@ export default function ExcuseReports({
             const cidMatch = String(l.cadet_id || l.cadetId || '').toUpperCase() === record.cadetId;
             const dateMatch = (l.date || l.session_date) === record.date;
             if (cidMatch && dateMatch) {
-              return { ...l, status: 'EXCUSED', final_daily_status: 'EXCUSED' };
+              return { ...l, status: 'EXCUSED', final_daily_status: 'EXCUSED', excuse_status: 'APPROVED' };
             }
             return l;
           });
@@ -520,6 +541,16 @@ export default function ExcuseReports({
     const targetId = record.logId || record.id;
     if (!targetId) return;
 
+    // 1. Immediately & optimistically mutate local UI state so it moves out of PENDING REVIEW immediately
+    const cadetKey = `${record.cadetId}_${record.date}`;
+    setLocalStatusOverrides(prev => ({
+      ...prev,
+      [targetId]: 'ABSENT',
+      [cadetKey]: 'ABSENT',
+      ...(record.logId ? { [record.logId]: 'ABSENT' } : {}),
+      ...(record.id ? { [record.id]: 'ABSENT' } : {})
+    }));
+
     setActionLoadingId(targetId);
     try {
       await rejectExcuseRequest(record.logId, record.cadetId, record.date);
@@ -533,7 +564,7 @@ export default function ExcuseReports({
             const cidMatch = String(l.cadet_id || l.cadetId || '').toUpperCase() === record.cadetId;
             const dateMatch = (l.date || l.session_date) === record.date;
             if (cidMatch && dateMatch) {
-              return { ...l, status: 'ABSENT', final_daily_status: 'ABSENT', excuse_reason: null };
+              return { ...l, status: 'ABSENT', final_daily_status: 'ABSENT', excuse_reason: null, excuse_status: 'REJECTED' };
             }
             return l;
           });

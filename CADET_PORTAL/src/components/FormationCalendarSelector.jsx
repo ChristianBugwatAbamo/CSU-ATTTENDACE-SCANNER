@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, X } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, ChevronDown, RefreshCw, X, Clock, XCircle, CheckCircle2 } from 'lucide-react';
 import { toDateKey } from '../utils/attendanceRules';
 
 const MONTH_NAMES = [
@@ -37,12 +37,18 @@ export const formatHumanDate = (dateKey) => {
  * FormationCalendarSelector
  * Custom interactive dropdown calendar matching Admin Attendance History.
  * Displays green dot indicators on dates with verified formation drill records,
+ * amber indicators on dates with already submitted excuse requests,
+ * red indicators on dates where excuses were rejected/declined by HQ,
+ * emerald check indicators on dates where excuses were approved by HQ,
  * grays out unrecorded dates, and includes a "Jump to Most Recent" quick action.
  */
 export default function FormationCalendarSelector({
   selectedDate = '',
   onSelectDate,
   recordedDates = [],
+  submittedDates = [],
+  approvedDates = [],
+  rejectedDates = [],
   isLight = true,
   isSessionsLoading = false,
   t,
@@ -71,10 +77,56 @@ export default function FormationCalendarSelector({
     return set;
   }, [recordedDates]);
 
-  // Sorted list of recorded formation dates (latest first)
+  // Normalize submitted dates into a Set of date keys (YYYY-MM-DD)
+  const submittedDatesSet = useMemo(() => {
+    const set = new Set();
+    (submittedDates || []).forEach(d => {
+      if (typeof d === 'string') {
+        const k = toDateKey(d);
+        if (k) set.add(k);
+      } else if (d && typeof d === 'object') {
+        const k = toDateKey(d.dateKey || d.date || d.session_date);
+        if (k) set.add(k);
+      }
+    });
+    return set;
+  }, [submittedDates]);
+
+  // Normalize approved dates into a Set of date keys (YYYY-MM-DD)
+  const approvedDatesSet = useMemo(() => {
+    const set = new Set();
+    (approvedDates || []).forEach(d => {
+      if (typeof d === 'string') {
+        const k = toDateKey(d);
+        if (k) set.add(k);
+      } else if (d && typeof d === 'object') {
+        const k = toDateKey(d.dateKey || d.date || d.session_date);
+        if (k) set.add(k);
+      }
+    });
+    return set;
+  }, [approvedDates]);
+
+  // Normalize rejected dates into a Set of date keys (YYYY-MM-DD)
+  const rejectedDatesSet = useMemo(() => {
+    const set = new Set();
+    (rejectedDates || []).forEach(d => {
+      if (typeof d === 'string') {
+        const k = toDateKey(d);
+        if (k) set.add(k);
+      } else if (d && typeof d === 'object') {
+        const k = toDateKey(d.dateKey || d.date || d.session_date);
+        if (k) set.add(k);
+      }
+    });
+    return set;
+  }, [rejectedDates]);
+
+  // Sorted list of selectable dates (latest first)
   const sortedRecordedDates = useMemo(() => {
-    return Array.from(recordedDatesSet).sort((a, b) => b.localeCompare(a));
-  }, [recordedDatesSet]);
+    const combined = new Set([...recordedDatesSet, ...submittedDatesSet, ...approvedDatesSet, ...rejectedDatesSet]);
+    return Array.from(combined).sort((a, b) => b.localeCompare(a));
+  }, [recordedDatesSet, submittedDatesSet, approvedDatesSet, rejectedDatesSet]);
 
   const latestRecordedDate = sortedRecordedDates[0] || '';
 
@@ -137,6 +189,10 @@ export default function FormationCalendarSelector({
   const themeTextMain = t?.textMain || (isLight ? '#0f172a' : '#f8fafc');
   const themeTextMuted = t?.textMuted || (isLight ? '#64748b' : '#94a3b8');
 
+  const isSelectedApproved = Boolean(selectedDate && approvedDatesSet.has(selectedDate));
+  const isSelectedSubmitted = Boolean(selectedDate && submittedDatesSet.has(selectedDate));
+  const isSelectedRejected = Boolean(selectedDate && rejectedDatesSet.has(selectedDate));
+
   return (
     <div style={{ position: 'relative', display: fullWidth ? 'block' : 'inline-block', width: fullWidth ? '100%' : 'auto' }}>
       {/* Interactive Calendar Popover Trigger Button */}
@@ -158,29 +214,65 @@ export default function FormationCalendarSelector({
           fontSize: fullWidth ? '0.86rem' : '0.78rem',
           fontWeight: 700,
           borderRadius: '8px',
-          border: isOpen ? '1.5px solid #064e2e' : `1px solid ${selectedDate ? '#059669' : themeBorder}`,
+          border: isOpen
+            ? (isSelectedRejected ? '1.5px solid #dc2626' : (isSelectedApproved ? '1.5px solid #059669' : (isSelectedSubmitted ? '1.5px solid #d97706' : '1.5px solid #064e2e')))
+            : (isSelectedRejected
+                ? `1px solid ${isLight ? '#f87171' : 'rgba(239, 68, 68, 0.6)'}`
+                : isSelectedApproved
+                  ? `1px solid ${isLight ? '#10b981' : 'rgba(16, 185, 129, 0.6)'}`
+                  : isSelectedSubmitted
+                    ? `1px solid ${isLight ? '#f59e0b' : 'rgba(245, 158, 11, 0.6)'}`
+                    : `1px solid ${selectedDate ? '#059669' : themeBorder}`),
           background: isOpen
-            ? (isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.25)')
-            : selectedDate
-              ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.15)')
-              : (isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.05)'),
-          color: selectedDate
-            ? (isLight ? '#065f46' : '#34d399')
-            : themeTextMain,
+            ? (isSelectedRejected
+                ? (isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.25)')
+                : isSelectedApproved
+                  ? (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.25)')
+                  : isSelectedSubmitted
+                    ? (isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.25)')
+                    : (isLight ? '#ecfdf5' : 'rgba(6, 78, 46, 0.25)'))
+            : (isSelectedRejected
+                ? (isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)')
+                : isSelectedApproved
+                  ? (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)')
+                  : isSelectedSubmitted
+                    ? (isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.15)')
+                    : (selectedDate
+                        ? (isLight ? '#f0fdf4' : 'rgba(5, 150, 105, 0.15)')
+                        : (isLight ? '#ffffff' : 'rgba(255, 255, 255, 0.05)'))),
+          color: isSelectedRejected
+            ? (isLight ? '#991b1b' : '#f87171')
+            : isSelectedApproved
+              ? (isLight ? '#065f46' : '#34d399')
+              : isSelectedSubmitted
+                ? (isLight ? '#b45309' : '#fbbf24')
+                : (selectedDate
+                    ? (isLight ? '#065f46' : '#34d399')
+                    : themeTextMain),
           cursor: disabled ? 'not-allowed' : 'pointer',
           opacity: disabled ? 0.6 : 1,
           boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
           transition: 'all 0.15s ease',
           whiteSpace: 'nowrap'
         }}
-        title={disabled ? 'Date selection disabled' : 'Open interactive formation calendar'}
+        title={disabled ? 'Date selection disabled' : isSelectedRejected ? 'Excuse Request Rejected by HQ — Re-filing Not Allowed' : isSelectedApproved ? 'Excuse Approved by HQ — Formation Excused' : isSelectedSubmitted ? 'Excuse Request Already Submitted — Pending Admin Review' : 'Open interactive formation calendar'}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0, flex: 1 }}>
-          <CalendarDays size={16} color={isLight ? '#064e2e' : '#34d399'} style={{ flexShrink: 0 }} />
+          {isSelectedRejected ? (
+            <XCircle size={16} color={isLight ? '#dc2626' : '#f87171'} style={{ flexShrink: 0 }} />
+          ) : isSelectedApproved ? (
+            <CheckCircle2 size={16} color={isLight ? '#059669' : '#34d399'} style={{ flexShrink: 0 }} />
+          ) : isSelectedSubmitted ? (
+            <Clock size={16} color={isLight ? '#b45309' : '#fbbf24'} style={{ flexShrink: 0 }} />
+          ) : (
+            <CalendarDays size={16} color={isLight ? '#064e2e' : '#34d399'} style={{ flexShrink: 0 }} />
+          )}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {isSessionsLoading
               ? 'Loading Sessions...'
-              : (selectedDate ? formatHumanDate(selectedDate) : (placeholder || (fullWidth ? 'Select Formation Date' : 'Calendar Selector')))}
+              : (selectedDate
+                  ? `${formatHumanDate(selectedDate)}${isSelectedRejected ? ' (Rejected)' : isSelectedSubmitted ? ' (Pending)' : ''}`
+                  : (placeholder || (fullWidth ? 'Select Formation Date' : 'Calendar Selector')))}
           </span>
         </div>
 
@@ -353,9 +445,72 @@ export default function FormationCalendarSelector({
               const dayNum = idx + 1;
               const dayKey = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
               const isRecorded = recordedDatesSet.has(dayKey);
+              const isApproved = approvedDatesSet.has(dayKey);
+              const isSubmitted = submittedDatesSet.has(dayKey);
+              const isRejected = rejectedDatesSet.has(dayKey);
               const isSelected = selectedDate === dayKey;
 
-              if (isRecorded) {
+              if (isRecorded || isApproved || isSubmitted || isRejected) {
+                const dayBorder = isSelected
+                  ? (isRejected
+                      ? '2px solid #b91c1c'
+                      : isApproved
+                        ? '2px solid #059669'
+                        : isSubmitted
+                          ? '2px solid #b45309'
+                          : '2px solid #064e2e')
+                  : (isRejected
+                      ? (isLight ? '1px solid #fca5a5' : '1px solid rgba(239, 68, 68, 0.4)')
+                      : isApproved
+                        ? (isLight ? '1px solid #a7f3d0' : '1px solid rgba(16, 185, 129, 0.5)')
+                        : isSubmitted
+                          ? (isLight ? '1px solid #fcd34d' : '1px solid rgba(245, 158, 11, 0.4)')
+                          : '1px solid #10b981');
+
+                const dayBg = isSelected
+                  ? (isRejected
+                      ? (isLight ? '#fee2e2' : 'rgba(239, 68, 68, 0.35)')
+                      : isApproved
+                        ? (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.35)')
+                        : isSubmitted
+                          ? (isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.35)')
+                          : '#064e2e')
+                  : (isRejected
+                      ? (isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)')
+                      : isApproved
+                        ? (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)')
+                        : isSubmitted
+                          ? (isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.12)')
+                          : (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'));
+
+                const dayColor = isSelected
+                  ? (isRejected
+                      ? (isLight ? '#7f1d1d' : '#fecaca')
+                      : isApproved
+                        ? (isLight ? '#065f46' : '#34d399')
+                        : isSubmitted
+                          ? (isLight ? '#92400e' : '#fef08a')
+                          : '#ffffff')
+                  : (isRejected
+                      ? (isLight ? '#991b1b' : '#f87171')
+                      : isApproved
+                        ? (isLight ? '#065f46' : '#34d399')
+                        : isSubmitted
+                          ? (isLight ? '#b45309' : '#fbbf24')
+                          : (isLight ? '#065f46' : '#34d399'));
+
+                const dotColor = isSelected
+                  ? (isRejected ? '#b91c1c' : isApproved ? '#059669' : isSubmitted ? '#d97706' : '#ffffff')
+                  : (isRejected ? '#dc2626' : isApproved ? '#059669' : isSubmitted ? '#f59e0b' : '#059669');
+
+                const dayTitle = isRejected
+                  ? `Excuse Rejected by HQ (Cannot Re-file): ${formatHumanDate(dayKey)}`
+                  : isApproved
+                    ? `Excuse Approved by HQ (EXCUSED): ${formatHumanDate(dayKey)}`
+                    : isSubmitted
+                      ? `Excuse Already Submitted (Pending Admin Review): ${formatHumanDate(dayKey)}`
+                      : `Eligible Formation: ${formatHumanDate(dayKey)}`;
+
                 return (
                   <button
                     key={dayKey}
@@ -367,9 +522,9 @@ export default function FormationCalendarSelector({
                     style={{
                       height: '34px',
                       borderRadius: '7px',
-                      border: isSelected ? '2px solid #064e2e' : '1px solid #10b981',
-                      background: isSelected ? '#064e2e' : (isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)'),
-                      color: isSelected ? '#ffffff' : (isLight ? '#065f46' : '#34d399'),
+                      border: dayBorder,
+                      background: dayBg,
+                      color: dayColor,
                       fontWeight: 800,
                       fontSize: '0.78rem',
                       cursor: 'pointer',
@@ -381,16 +536,15 @@ export default function FormationCalendarSelector({
                       transition: 'transform 0.1s ease',
                       padding: 0
                     }}
-                    title={`Recorded Formation: ${formatHumanDate(dayKey)}`}
+                    title={dayTitle}
                   >
                     <span>{dayNum}</span>
-                    {/* Green dot indicator matching Admin Attendance History */}
                     <span
                       style={{
                         width: '4px',
                         height: '4px',
                         borderRadius: '50%',
-                        background: isSelected ? '#ffffff' : '#059669',
+                        background: dotColor,
                         marginTop: '1px'
                       }}
                     />
@@ -426,11 +580,29 @@ export default function FormationCalendarSelector({
 
           {/* Calendar Legend & Quick Return to Latest */}
           <div style={{ marginTop: '0.85rem', paddingTop: '0.65rem', borderTop: `1px solid ${isLight ? '#f1f5f9' : '#334155'}`, fontSize: '0.72rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: themeTextMuted, marginBottom: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', color: themeTextMuted, marginBottom: '4px', flexWrap: 'wrap', gap: '6px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }} />
                 <span style={{ color: isLight ? '#065f46' : '#34d399', fontWeight: 600 }}>{legendLabel}</span>
               </div>
+              {approvedDatesSet.size > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#059669' }} />
+                  <span style={{ color: isLight ? '#065f46' : '#34d399', fontWeight: 600 }}>Excuse Approved</span>
+                </div>
+              )}
+              {submittedDatesSet.size > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#d97706' }} />
+                  <span style={{ color: isLight ? '#b45309' : '#fbbf24', fontWeight: 600 }}>Pending Review</span>
+                </div>
+              )}
+              {rejectedDatesSet.size > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#dc2626' }} />
+                  <span style={{ color: isLight ? '#991b1b' : '#f87171', fontWeight: 600 }}>Excuse Rejected</span>
+                </div>
+              )}
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: isLight ? '#cbd5e1' : '#475569' }} />
                 <span>Unavailable</span>

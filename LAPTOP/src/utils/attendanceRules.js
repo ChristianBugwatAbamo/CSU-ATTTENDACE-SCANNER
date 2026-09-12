@@ -57,7 +57,7 @@ export function toDateKey(dateInput) {
 export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORMATION_DATES) {
   const safeCadet = cadet || {};
   const cadetLogsByDate = {};
-  
+
   // Also collect any excuse records if present in cadet.excuse_requests or cadet.excuseRequests
   const rawExcuses = safeCadet.excuse_requests || safeCadet.excuseRequests || safeCadet.excuses || [];
   if (Array.isArray(rawExcuses)) {
@@ -88,13 +88,13 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
       const existing = cadetLogsByDate[dk];
       const logStatus = String(log.final_daily_status || log.status || '').toUpperCase();
       const isExcuse = logStatus === 'EXCUSE_PENDING' || logStatus === 'PENDING' || logStatus === 'EXCUSED' || logStatus === 'APPROVED' || logStatus.includes('EXCUSED');
-      
+
       if (!existing) {
         cadetLogsByDate[dk] = log;
       } else {
         const existingStatus = String(existing.final_daily_status || existing.status || '').toUpperCase();
         const existingIsExcuse = existingStatus === 'EXCUSE_PENDING' || existingStatus === 'PENDING' || existingStatus === 'EXCUSED' || existingStatus === 'APPROVED' || existingStatus.includes('EXCUSED');
-        
+
         if (isExcuse && !existingIsExcuse) {
           // Excuse record takes precedence over default/unexcused log
           cadetLogsByDate[dk] = { ...existing, ...log, status: logStatus, final_daily_status: logStatus, is_excuse: true };
@@ -134,7 +134,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
 
     if (log) {
       const st = (log.final_daily_status || log.finalDailyStatus || log.status || log.finalStatus || '').toUpperCase();
-      
+
       // CHECK EXCUSE STATUS FIRST
       const isExcusePending = st === 'EXCUSE_PENDING' || st === 'PENDING';
       const isExcused = st === 'EXCUSED' || st === 'APPROVED' || st.includes('EXCUSED');
@@ -142,7 +142,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
 
       const rawTimeIn = log.time_in || log.timeIn;
       const rawTimeOut = log.time_out || log.timeOut;
-      
+
       const isNullTimeOut = !rawTimeOut || String(rawTimeOut).trim() === '' || String(rawTimeOut).toUpperCase() === 'NO TIME-OUT' || String(rawTimeOut).toUpperCase() === 'NULL';
       const isNullTimeIn = !rawTimeIn || String(rawTimeIn).trim() === '' || String(rawTimeIn).toUpperCase() === 'NO TIME-IN' || String(rawTimeIn).toUpperCase() === 'NULL';
 
@@ -190,7 +190,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
         maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
         consecutiveLates = 0;
         penaltyLabel = (log.excuse_reason || log.reason || rawExcuses.some(e => (e.drill_date === formationDate || e.date === formationDate) && (String(e.status).toUpperCase() === 'REJECTED' || String(e.status).toUpperCase() === 'ABSENT')))
-          ? 'Excuse Rejected / Declared Absent by HQ'
+          ? 'Excuse Rejected / Declared Absent by Admin'
           : `Official Absent (+1 Absent, Streak: ${consecutiveAbsences})`;
         dayType = 'ABSENT';
         entryStatus = 'ABSENT';

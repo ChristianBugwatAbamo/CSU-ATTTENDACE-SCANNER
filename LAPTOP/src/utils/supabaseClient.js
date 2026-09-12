@@ -361,10 +361,50 @@ export async function fetchAttendanceFromSupabase() {
             const lcid = String(l.cadet_id || l.cadetId || '').trim().toUpperCase();
             return ld === exDate && lcid === exCid;
           });
-          const exReason = ex.reason || ex.excuse_reason;
-          if (target && exReason) {
-            target.excuse_reason = exReason;
-            target.reason = exReason;
+          if (target) {
+            const exReason = ex.reason || ex.excuse_reason;
+            if (exReason) {
+              target.excuse_reason = exReason;
+              target.reason = exReason;
+            }
+            if (ex.submitted_at || ex.created_at) {
+              target.excuse_submitted_at = ex.submitted_at || ex.created_at;
+            }
+            target.isExcuseRequest = true;
+            target.is_excuse = true;
+            const rawExSt = String(ex.status || '').toUpperCase();
+            if (rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT') {
+              target.status = 'ABSENT';
+              target.final_daily_status = 'ABSENT';
+              target.finalDailyStatus = 'ABSENT';
+              target.excuse_status = 'REJECTED';
+            } else if (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED') {
+              target.status = 'EXCUSED';
+              target.final_daily_status = 'EXCUSED';
+              target.finalDailyStatus = 'EXCUSED';
+              target.excuse_status = 'APPROVED';
+            }
+          } else {
+            const rawExSt = String(ex.status || '').toUpperCase();
+            const resolvedSt = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
+              ? 'EXCUSED'
+              : (rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT')
+                ? 'ABSENT'
+                : 'EXCUSE_PENDING';
+
+            data.push({
+              id: ex.id || `excuse_${exCid}_${exDate}`,
+              cadet_id: exCid,
+              date: exDate,
+              status: resolvedSt,
+              final_daily_status: resolvedSt,
+              excuse_reason: ex.reason || ex.excuse_reason || '',
+              reason: ex.reason || ex.excuse_reason || '',
+              excuse_submitted_at: ex.submitted_at || ex.created_at || null,
+              isExcuseRequest: true,
+              is_excuse: true,
+              excuse_status: rawExSt
+            });
           }
         });
       }
@@ -1167,7 +1207,7 @@ export async function syncSessionCutoffTime(newCutoffTime) {
         });
     }
 
-    // 2. Update or insert active today session in attendance_sessions table
+    // 2. Update active today session in attendance_sessions table if one already exists
     const { data: existingSession } = await client
       .from('attendance_sessions')
       .select('id')
@@ -1182,16 +1222,6 @@ export async function syncSessionCutoffTime(newCutoffTime) {
           updated_at: new Date().toISOString()
         })
         .eq('session_date', today);
-    } else {
-      await client
-        .from('attendance_sessions')
-        .insert({
-          session_date: today,
-          session_name: 'Formation Session',
-          duty_officer: 'HQ Duty Officer',
-          cutoff_time: cleanCutoff,
-          updated_at: new Date().toISOString()
-        });
     }
 
     // 3. Propagate cutoff update to any today attendance_logs so cloud logs reflect new cutoff immediately
@@ -1426,7 +1456,7 @@ export async function saveSettingsToSupabase(settings) {
       throw res.error;
     }
 
-    // Propagate cutoff to today's session in attendance_sessions
+    // Propagate cutoff to today's session in attendance_sessions if one already exists
     const today = toDateKey(new Date());
     const { data: todaySession } = await client
       .from('attendance_sessions')
@@ -1439,16 +1469,6 @@ export async function saveSettingsToSupabase(settings) {
         .from('attendance_sessions')
         .update({ cutoff_time: cutoff, updated_at: new Date().toISOString() })
         .eq('session_date', today);
-    } else {
-      await client
-        .from('attendance_sessions')
-        .insert({
-          session_date: today,
-          session_name: 'Formation Session',
-          duty_officer: 'HQ Duty Officer',
-          cutoff_time: cutoff,
-          updated_at: new Date().toISOString()
-        });
     }
 
     // Also update any attendance_logs recorded for today
@@ -1745,9 +1765,13 @@ export async function fetchCadetAttendanceHistory(rawCadetId) {
           excuseData.forEach(ex => {
             const rawD = ex.drill_date || ex.date || ex.formation_date || ex.session_date;
             const exDate = toDateKey(rawD) || rawD;
-            const exStatus = (String(ex.status || '').toUpperCase() === 'APPROVED' || String(ex.status || '').toUpperCase() === 'EXCUSED')
+            const rawExSt = String(ex.status || '').toUpperCase();
+            const isExRejected = rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT';
+            const exStatus = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
               ? 'EXCUSED'
-              : 'EXCUSE_PENDING';
+              : (isExRejected || rawExSt === 'ABSENT')
+                ? 'ABSENT'
+                : 'EXCUSE_PENDING';
 
             const matchIdx = logs.findIndex(l => {
               const ld = toDateKey(l.date || l.session_date || l.timestamp) || l.date;
@@ -1831,28 +1855,18 @@ export async function fetchMandatoryFormationDates() {
   const datesSet = new Set();
   let hasSupabaseData = false;
 
-  // 1. Try Supabase attendance_sessions and attendance_logs
+  // 1. Try Supabase attendance_sessions (official formation schedule)
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const [sessionsRes, logsRes] = await Promise.allSettled([
-        supabase.from('attendance_sessions').select('session_date').limit(500),
-        supabase.from('attendance_logs').select('date').order('date', { ascending: false }).limit(1000)
-      ]);
+      const { data, error } = await supabase
+        .from('attendance_sessions')
+        .select('session_date')
+        .limit(500);
 
-      if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value.data)) {
-        sessionsRes.value.data.forEach(s => {
+      if (!error && Array.isArray(data)) {
+        data.forEach(s => {
           const dk = toDateKey(s.session_date);
-          if (dk) {
-            datesSet.add(dk);
-            hasSupabaseData = true;
-          }
-        });
-      }
-
-      if (logsRes.status === 'fulfilled' && Array.isArray(logsRes.value.data)) {
-        logsRes.value.data.forEach(l => {
-          const dk = toDateKey(l.date);
           if (dk) {
             datesSet.add(dk);
             hasSupabaseData = true;
@@ -1864,19 +1878,21 @@ export async function fetchMandatoryFormationDates() {
     console.warn('Error fetching formation dates from Supabase:', e);
   }
 
-  // 2. Add local storage master attendance dates
-  try {
-    const localLogs = localStorage.getItem('csu_rotc_master_attendance');
-    if (localLogs) {
-      const parsed = JSON.parse(localLogs);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(l => {
-          const dk = toDateKey(l.session_date || l.date || l.timestamp);
-          if (dk) datesSet.add(dk);
-        });
+  // 2. Add local storage master attendance dates ONLY if offline / no database data
+  if (datesSet.size === 0) {
+    try {
+      const localLogs = localStorage.getItem('csu_rotc_master_attendance');
+      if (localLogs) {
+        const parsed = JSON.parse(localLogs);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(l => {
+            const dk = toDateKey(l.session_date || l.date || l.timestamp);
+            if (dk) datesSet.add(dk);
+          });
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) {}
+  }
 
   // 3. Fall back to sample schedule ONLY if offline with no database configured and no dates exist
   if (datesSet.size === 0 && !getSupabaseClient()) {
@@ -1919,6 +1935,22 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
   if (!cid || !dateKey) return { error: 'INVALID_DATE', message: 'Invalid formation date selected.' };
 
   try {
+    // 1. Strict validation: Verify that an official formation session exists in attendance_sessions
+    const { data: sessionData, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_name, session_date')
+      .eq('session_date', dateKey)
+      .limit(1)
+      .maybeSingle();
+
+    if (!sessionData || !sessionData.id) {
+      console.warn(`Cannot file excuse: No official formation session found for date ${dateKey}`);
+      return {
+        error: 'NON_FORMATION_DATE',
+        message: `No official formation event was scheduled or conducted by Headquarters on ${dateKey}. Excuses can only be filed for verified formation dates.`
+      };
+    }
+
     const { data: existing } = await client
       .from('attendance_logs')
       .select('id, status, session_id, name, rank, battalion, company, platoon')
@@ -1926,10 +1958,44 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       .eq('date', dateKey)
       .maybeSingle();
 
-    if (existing && existing.status === 'EXCUSED') {
-      console.warn('Cannot file excuse: record is already EXCUSED.');
-      return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+    if (existing) {
+      const exSt = String(existing.status || '').toUpperCase();
+      if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
+        console.warn('Cannot file excuse: record is already EXCUSED.');
+        return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+      }
+      if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+        console.warn('Cannot file excuse: record is already EXCUSE_PENDING.');
+        return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
+      }
+      if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
+        console.warn('Cannot file excuse: request was already REJECTED by HQ.');
+        return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+      }
     }
+
+    // Also check excuse_requests table if present
+    try {
+      const { data: existingEx } = await client
+        .from('excuse_requests')
+        .select('id, status')
+        .eq('cadet_id', cid)
+        .eq('drill_date', dateKey)
+        .maybeSingle();
+
+      if (existingEx) {
+        const exSt = String(existingEx.status || '').toUpperCase();
+        if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
+          return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+        }
+        if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+          return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
+        }
+        if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
+          return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+        }
+      }
+    } catch (_) {}
 
     const now = new Date().toISOString();
 
@@ -1980,15 +2046,8 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
         .eq('id', cid)
         .maybeSingle();
 
-      const { data: sessionData } = await client
-        .from('attendance_sessions')
-        .select('id')
-        .eq('session_date', dateKey)
-        .limit(1)
-        .maybeSingle();
-
       const insertPayload = {
-        session_id: sessionData?.id || null,
+        session_id: sessionData.id,
         cadet_id: cid,
         name: cadetProfile?.name || ('Cadet ' + cid),
         rank: cadetProfile?.rank || 'Cadet',
@@ -2064,6 +2123,33 @@ export async function approveExcuseRequest(logId, cadetId = null, dateKey = null
   const undashed = cleanCid ? cleanCid.replace(/-/g, '') : null;
   const now = new Date().toISOString();
 
+  let resolvedCid = cleanCid;
+  let resolvedDate = dateKey;
+
+  // If cadetId or dateKey was omitted, resolve from attendance_logs using logId
+  if (logId && (!resolvedCid || !resolvedDate)) {
+    try {
+      const { data: logRow } = await client
+        .from('attendance_logs')
+        .select('cadet_id, date')
+        .eq('id', logId)
+        .maybeSingle();
+      if (logRow) {
+        resolvedCid = resolvedCid || String(logRow.cadet_id || '').trim().toUpperCase();
+        resolvedDate = resolvedDate || logRow.date;
+      }
+    } catch (_) {}
+  }
+
+  const cidVariants = Array.from(new Set([
+    resolvedCid,
+    cleanCid,
+    dashed,
+    undashed,
+    resolvedCid?.includes('-') ? resolvedCid : (resolvedCid && resolvedCid.length > 3 ? `${resolvedCid.slice(0, 3)}-${resolvedCid.slice(3)}` : null),
+    resolvedCid?.replace(/-/g, '')
+  ])).filter(Boolean);
+
   try {
     // 1. Update attendance_logs table
     let query = client
@@ -2071,13 +2157,14 @@ export async function approveExcuseRequest(logId, cadetId = null, dateKey = null
       .update({
         status: 'EXCUSED',
         final_daily_status: 'EXCUSED',
+        excuse_status: 'APPROVED',
         updated_at: now
       });
 
     if (logId && (typeof logId === 'number' || (typeof logId === 'string' && !logId.includes('__')))) {
       query = query.eq('id', logId);
-    } else if (cleanCid && dateKey) {
-      query = query.or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`).eq('date', dateKey);
+    } else if (cidVariants.length > 0 && resolvedDate) {
+      query = query.in('cadet_id', cidVariants).eq('date', resolvedDate);
     } else if (logId) {
       query = query.eq('id', logId);
     }
@@ -2085,25 +2172,35 @@ export async function approveExcuseRequest(logId, cadetId = null, dateKey = null
     const { error } = await query;
     if (error) console.warn('attendance_logs approve update notice:', error.message);
 
-    // 2. Also sync to excuse_requests table if present
+    // 2. Also sync to excuse_requests table
     try {
-      let exQuery = client
-        .from('excuse_requests')
-        .update({
-          status: 'APPROVED',
-          reviewed_at: now,
-          updated_at: now
-        });
+      const updateData = {
+        status: 'APPROVED',
+        reviewed_at: now,
+        updated_at: now
+      };
 
-      if (cleanCid && dateKey) {
-        exQuery = exQuery
-          .or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`)
-          .or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
-      } else if (logId) {
-        exQuery = exQuery.eq('id', logId);
+      if (cidVariants.length > 0 && resolvedDate) {
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants)
+          .eq('drill_date', resolvedDate);
+
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants)
+          .eq('date', resolvedDate);
+      } else if (cidVariants.length > 0) {
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants);
       }
-      await exQuery;
-    } catch (_) {}
+    } catch (exErr) {
+      console.warn('excuse_requests approve sync notice:', exErr);
+    }
 
     return true;
   } catch (err) {
@@ -2113,7 +2210,7 @@ export async function approveExcuseRequest(logId, cadetId = null, dateKey = null
 }
 
 /**
- * Admin rejects/voids a cadet's excuse — reverts status to ABSENT.
+ * Admin rejects/voids a cadet's excuse — updates status to ABSENT / REJECTED.
  *
  * @param {string|number} logId - The attendance_logs row ID
  * @param {string} [cadetId] - Fallback Cadet ID
@@ -2129,6 +2226,33 @@ export async function rejectExcuseRequest(logId, cadetId = null, dateKey = null)
   const undashed = cleanCid ? cleanCid.replace(/-/g, '') : null;
   const now = new Date().toISOString();
 
+  let resolvedCid = cleanCid;
+  let resolvedDate = dateKey;
+
+  // If cadetId or dateKey was omitted, resolve from attendance_logs using logId
+  if (logId && (!resolvedCid || !resolvedDate)) {
+    try {
+      const { data: logRow } = await client
+        .from('attendance_logs')
+        .select('cadet_id, date')
+        .eq('id', logId)
+        .maybeSingle();
+      if (logRow) {
+        resolvedCid = resolvedCid || String(logRow.cadet_id || '').trim().toUpperCase();
+        resolvedDate = resolvedDate || logRow.date;
+      }
+    } catch (_) {}
+  }
+
+  const cidVariants = Array.from(new Set([
+    resolvedCid,
+    cleanCid,
+    dashed,
+    undashed,
+    resolvedCid?.includes('-') ? resolvedCid : (resolvedCid && resolvedCid.length > 3 ? `${resolvedCid.slice(0, 3)}-${resolvedCid.slice(3)}` : null),
+    resolvedCid?.replace(/-/g, '')
+  ])).filter(Boolean);
+
   try {
     // 1. Update attendance_logs table
     let query = client
@@ -2136,19 +2260,14 @@ export async function rejectExcuseRequest(logId, cadetId = null, dateKey = null)
       .update({
         status: 'ABSENT',
         final_daily_status: 'ABSENT',
-        time_in: null,
-        time_out: null,
-        scan_mode: null,
-        duty_officer: null,
-        excuse_reason: null,
-        excuse_proof_url: null,
+        excuse_status: 'REJECTED',
         updated_at: now
       });
 
     if (logId && (typeof logId === 'number' || (typeof logId === 'string' && !logId.includes('__')))) {
       query = query.eq('id', logId);
-    } else if (cleanCid && dateKey) {
-      query = query.or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`).eq('date', dateKey);
+    } else if (cidVariants.length > 0 && resolvedDate) {
+      query = query.in('cadet_id', cidVariants).eq('date', resolvedDate);
     } else if (logId) {
       query = query.eq('id', logId);
     }
@@ -2156,25 +2275,35 @@ export async function rejectExcuseRequest(logId, cadetId = null, dateKey = null)
     const { error } = await query;
     if (error) console.warn('attendance_logs reject update notice:', error.message);
 
-    // 2. Also sync to excuse_requests table if present
+    // 2. Also sync to excuse_requests table: update status to REJECTED
     try {
-      let exQuery = client
-        .from('excuse_requests')
-        .update({
-          status: 'REJECTED',
-          reviewed_at: now,
-          updated_at: now
-        });
+      const updateData = {
+        status: 'REJECTED',
+        reviewed_at: now,
+        updated_at: now
+      };
 
-      if (cleanCid && dateKey) {
-        exQuery = exQuery
-          .or(`cadet_id.eq.${dashed},cadet_id.eq.${undashed}`)
-          .or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
-      } else if (logId) {
-        exQuery = exQuery.eq('id', logId);
+      if (cidVariants.length > 0 && resolvedDate) {
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants)
+          .eq('drill_date', resolvedDate);
+
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants)
+          .eq('date', resolvedDate);
+      } else if (cidVariants.length > 0) {
+        await client
+          .from('excuse_requests')
+          .update(updateData)
+          .in('cadet_id', cidVariants);
       }
-      await exQuery;
-    } catch (_) {}
+    } catch (exErr) {
+      console.warn('excuse_requests reject sync notice:', exErr);
+    }
 
     return true;
   } catch (err) {

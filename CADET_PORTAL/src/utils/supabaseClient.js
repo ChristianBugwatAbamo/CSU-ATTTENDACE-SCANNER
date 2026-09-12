@@ -18,14 +18,14 @@ export function getSupabaseConfig() {
       if (parsed.url) url = parsed.url;
       if (parsed.anonKey) anonKey = parsed.anonKey;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Auto-correct historical typo if stored in localStorage
   if (url && url.includes('rsexdynexmqlltzscoip')) {
     url = url.replace('rsexdynexmqlltzscoip', 'rsexdynexmqlitzscoip');
     try {
       localStorage.setItem('csu_rotc_supabase_config', JSON.stringify({ url, anonKey }));
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return { url, anonKey, isConfigured: Boolean(url && anonKey) };
@@ -169,7 +169,7 @@ export async function validatePlatoonCapacity(cadetOrList, client = null) {
   if (!activeClient) return { valid: true };
 
   const list = Array.isArray(cadetOrList) ? cadetOrList : [cadetOrList];
-  
+
   // Group basic cadets by platoon
   const platoonGroups = new Map();
   for (const c of list) {
@@ -196,7 +196,7 @@ export async function validatePlatoonCapacity(cadetOrList, client = null) {
   // Check each platoon against current database count
   for (const group of platoonGroups.values()) {
     const { parts, cadets: incomingCadets } = group;
-    
+
     // Query existing cadets in DB for this platoon
     const { data: dbCadets, error } = await activeClient
       .from('cadets')
@@ -410,7 +410,7 @@ export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) 
           return parsed;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const client = getSupabaseClient();
@@ -443,7 +443,7 @@ export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) 
     _cachedSessionsTime = Date.now();
     try {
       localStorage.setItem('csu_rotc_db_sessions', JSON.stringify(formatted));
-    } catch (_) {}
+    } catch (_) { }
     return formatted;
   } catch (err) {
     console.error('[Supabase] fetchAttendanceSessionsFromSupabase error:', err);
@@ -608,7 +608,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     if (currentSettings && currentSettings.length > 0 && currentSettings[0].formation_cutoff_time) {
       dbCutoff = currentSettings[0].formation_cutoff_time;
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // 1. Group scans by (scanDate, dutyOfficer) to establish distinct session rows per Duty Officer
   const uniqueCadetsMap = new Map();
@@ -633,7 +633,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
         else if (parsed.signatoryName) detectedDutyOfficer = parsed.signatoryName;
         else if (parsed.commandingOfficer) detectedDutyOfficer = parsed.commandingOfficer;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   batchScans.forEach(scan => {
@@ -712,7 +712,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
       if (sessionObj?.id) {
         sessionIdMap.set(groupKey, sessionObj.id);
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // 2. Fetch existing logs for these cadets & dates in one batch query
@@ -951,7 +951,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
             .from('attendance_logs')
             .upsert(chunk, { onConflict: 'cadet_id,date' });
           error = retryResult2.error;
-        } catch (_) {}
+        } catch (_) { }
       }
 
       if (error) {
@@ -985,7 +985,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           .eq('session_date', group.sessionDate)
           .eq('duty_officer', group.dutyOfficer);
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return { success: true, count: batchScans.length };
@@ -1022,7 +1022,7 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
         else if (parsed.signatoryName) dutyOfficerName = parsed.signatoryName;
         else if (parsed.commandingOfficer) dutyOfficerName = parsed.commandingOfficer;
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const finalOfficer = dutyOfficerName || 'HQ Duty Officer';
@@ -1181,16 +1181,6 @@ export async function syncSessionCutoffTime(newCutoffTime) {
           updated_at: new Date().toISOString()
         })
         .eq('session_date', today);
-    } else {
-      await client
-        .from('attendance_sessions')
-        .insert({
-          session_date: today,
-          session_name: 'Formation Session',
-          duty_officer: 'HQ Duty Officer',
-          cutoff_time: cleanCutoff,
-          updated_at: new Date().toISOString()
-        });
     }
 
     // 3. Propagate cutoff update to any today attendance_logs
@@ -1321,7 +1311,7 @@ export function subscribeToPortalRealtime({ onSettingsChange, onSessionsChange, 
             try {
               localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(payload.new));
               window.dispatchEvent(new CustomEvent('csu_settings_updated', { detail: payload.new }));
-            } catch (_) {}
+            } catch (_) { }
           }
           if (onSettingsChange) onSettingsChange(payload);
           if (onAnyChange) onAnyChange({ type: 'system_settings', payload });
@@ -1395,7 +1385,7 @@ export async function fetchSettingsFromSupabase(forceRefresh = false) {
           return parsed;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const client = getSupabaseClient();
@@ -1414,7 +1404,7 @@ export async function fetchSettingsFromSupabase(forceRefresh = false) {
       _cachedSettingsTime = Date.now();
       try {
         localStorage.setItem('csu_rotc_admin_settings', JSON.stringify(data[0]));
-      } catch (_) {}
+      } catch (_) { }
       return data[0];
     }
     return _cachedSettings;
@@ -1443,7 +1433,7 @@ export async function saveSettingsToSupabase(settings) {
       try {
         const savedLh = localStorage.getItem('csu_rotc_letterhead_settings');
         if (savedLh) letterheadObj = JSON.parse(savedLh);
-      } catch (_) {}
+      } catch (_) { }
     }
 
     const activeUnitStructure = settings.unit_structure || settings.unitStructure || null;
@@ -1728,7 +1718,7 @@ export async function fetchCadetByCadetId(rawCadetId) {
           if (dashedId !== cleanId) {
             localStorage.setItem(`csu_rotc_cadet_profile_${dashedId}`, JSON.stringify(profile));
           }
-        } catch (_) {}
+        } catch (_) { }
         return profile;
       }
     }
@@ -1761,7 +1751,7 @@ export async function fetchCadetByCadetId(rawCadetId) {
         if (found) return found;
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return null;
 }
@@ -1780,7 +1770,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
   if (!forceRefresh) {
     try {
       const cached = localStorage.getItem(`csu_rotc_cadet_logs_${cleanId}`) ||
-                     (dashedId !== cleanId ? localStorage.getItem(`csu_rotc_cadet_logs_${dashedId}`) : null);
+        (dashedId !== cleanId ? localStorage.getItem(`csu_rotc_cadet_logs_${dashedId}`) : null);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1789,7 +1779,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
           return parsed;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   let logs = [];
@@ -1849,9 +1839,10 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
             const rawD = ex.drill_date || ex.date || ex.formation_date || ex.session_date;
             const exDate = toDateKey(rawD) || rawD;
             const rawExSt = String(ex.status || '').toUpperCase();
+            const isExRejected = rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT';
             const exStatus = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
               ? 'EXCUSED'
-              : (rawExSt === 'REJECTED' || rawExSt === 'ABSENT')
+              : (isExRejected || rawExSt === 'ABSENT')
                 ? 'ABSENT'
                 : 'EXCUSE_PENDING';
 
@@ -1875,7 +1866,9 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
                 status: resolvedStatus,
                 final_daily_status: resolvedStatus,
                 finalDailyStatus: resolvedStatus,
-                excuse_reason: ex.reason || ex.excuse_reason || existing.excuse_reason,
+                excuse_status: rawExSt,
+                excuseStatus: rawExSt,
+                excuse_reason: ex.reason || ex.excuse_reason || existing.excuse_reason || (isExRejected ? 'Excuse Rejected / Declared Absent by Admin' : ''),
                 excuse_submitted_at: ex.submitted_at || ex.created_at || existing.excuse_submitted_at,
                 is_excuse: resolvedStatus !== 'ABSENT'
               };
@@ -1888,14 +1881,16 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
                 status: exStatus,
                 final_daily_status: exStatus,
                 finalDailyStatus: exStatus,
-                excuse_reason: ex.reason || ex.excuse_reason || (exStatus === 'ABSENT' ? 'Excuse Rejected / Declared Absent' : 'Absence excuse submitted'),
+                excuse_status: rawExSt,
+                excuseStatus: rawExSt,
+                excuse_reason: ex.reason || ex.excuse_reason || (isExRejected ? 'Excuse Rejected / Declared Absent by Admin' : (exStatus === 'ABSENT' ? 'Excuse Rejected / Declared Absent' : 'Absence excuse submitted')),
                 excuse_submitted_at: ex.submitted_at || ex.created_at,
                 is_excuse: exStatus !== 'ABSENT'
               });
             }
           });
         }
-      } catch (_) {}
+      } catch (_) { }
 
       if (logs.length > 0) {
         try {
@@ -1903,7 +1898,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
           if (dashedId !== cleanId) {
             localStorage.setItem(`csu_rotc_cadet_logs_${dashedId}`, JSON.stringify(logs));
           }
-        } catch (_) {}
+        } catch (_) { }
       }
     }
   } catch (err) {
@@ -1937,7 +1932,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Sort descending by date
   const sorted = logs.sort((a, b) => {
@@ -1952,7 +1947,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
       if (dashedId !== cleanId) {
         localStorage.setItem(`csu_rotc_cadet_logs_${dashedId}`, JSON.stringify(sorted));
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   return sorted;
@@ -1986,7 +1981,7 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
           return parsed;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   // Query Supabase attendance_sessions efficiently (no heavy full table log scan)
@@ -2009,19 +2004,21 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
     console.warn('Error fetching formation dates from Supabase:', e);
   }
 
-  // Add local storage master attendance dates if available
-  try {
-    const localLogs = localStorage.getItem('csu_rotc_master_attendance');
-    if (localLogs) {
-      const parsed = JSON.parse(localLogs);
-      if (Array.isArray(parsed)) {
-        parsed.forEach(l => {
-          const dk = toDateKey(l.session_date || l.date || l.timestamp);
-          if (dk) datesSet.add(dk);
-        });
+  // Add local storage master attendance dates ONLY if no Supabase session dates were found (offline fallback)
+  if (datesSet.size === 0) {
+    try {
+      const localLogs = localStorage.getItem('csu_rotc_master_attendance');
+      if (localLogs) {
+        const parsed = JSON.parse(localLogs);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(l => {
+            const dk = toDateKey(l.session_date || l.date || l.timestamp);
+            if (dk) datesSet.add(dk);
+          });
+        }
       }
-    }
-  } catch (_) {}
+    } catch (_) { }
+  }
 
   // Fall back to sample schedule ONLY if offline with no Supabase client and no dates exist
   if (datesSet.size === 0 && !getSupabaseClient()) {
@@ -2033,7 +2030,7 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
   _cachedDatesTime = Date.now();
   try {
     localStorage.setItem('csu_rotc_formation_dates', JSON.stringify(result));
-  } catch (_) {}
+  } catch (_) { }
 
   return result;
 }
@@ -2065,6 +2062,22 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
   if (!cid || !dateKey) return { error: 'INVALID_DATE', message: 'Invalid formation date selected.' };
 
   try {
+    // 1. Strict validation: Verify that an official formation session exists in attendance_sessions
+    const { data: sessionData, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_name, session_date')
+      .eq('session_date', dateKey)
+      .limit(1)
+      .maybeSingle();
+
+    if (!sessionData || !sessionData.id) {
+      console.warn(`Cannot file excuse: No official formation session found for date ${dateKey}`);
+      return {
+        error: 'NON_FORMATION_DATE',
+        message: `No official formation event was scheduled or conducted by Headquarters on ${dateKey}. Excuses can only be filed for verified formation dates.`
+      };
+    }
+
     // Check if record already exists for this cadet and date
     const { data: existing } = await client
       .from('attendance_logs')
@@ -2073,10 +2086,44 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       .eq('date', dateKey)
       .maybeSingle();
 
-    if (existing && existing.status === 'EXCUSED') {
-      console.warn('Cannot file excuse: record is already EXCUSED.');
-      return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+    if (existing) {
+      const exSt = String(existing.status || '').toUpperCase();
+      if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
+        console.warn('Cannot file excuse: record is already EXCUSED.');
+        return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+      }
+      if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+        console.warn('Cannot file excuse: record is already EXCUSE_PENDING.');
+        return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
+      }
+      if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
+        console.warn('Cannot file excuse: request was already REJECTED by HQ.');
+        return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+      }
     }
+
+    // Also check excuse_requests table if present
+    try {
+      const { data: existingEx } = await client
+        .from('excuse_requests')
+        .select('id, status')
+        .eq('cadet_id', cid)
+        .eq('drill_date', dateKey)
+        .maybeSingle();
+
+      if (existingEx) {
+        const exSt = String(existingEx.status || '').toUpperCase();
+        if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
+          return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+        }
+        if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+          return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
+        }
+        if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
+          return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+        }
+      }
+    } catch (_) { }
 
     const now = new Date().toISOString();
 
@@ -2190,7 +2237,7 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
             submitted_at: now,
             updated_at: now
           }, { onConflict: 'cadet_id,drill_date' });
-      } catch (_) {}
+      } catch (_) { }
 
       return { data, created: true, message: 'Excuse request submitted successfully! Awaiting Duty Officer verification.' };
     }
