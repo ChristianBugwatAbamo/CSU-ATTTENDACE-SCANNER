@@ -27,7 +27,8 @@ import {
   rejectExcuseRequest,
   fetchSettingsFromSupabase,
   fetchAttendanceSessionsFromSupabase,
-  fetchDeclaredAbsentCadets
+  fetchDeclaredAbsentCadets,
+  autoExpireExcusePending
 } from '../utils/supabaseClient';
 import { toDateKey } from '../utils/attendanceRules';
 import DutyOfficerActionModal from './DutyOfficerActionModal';
@@ -178,12 +179,16 @@ export default function ExcuseReports({
     (async () => {
       try {
         const sbSettings = await fetchSettingsFromSupabase();
+        let days = gracePeriodDays;
         if (isMounted && sbSettings) {
-          const days = sbSettings.excuse_grace_period_days ?? sbSettings.excuseGracePeriodDays;
-          if (days !== undefined && !isNaN(Number(days))) {
-            setGracePeriodDays(Number(days));
+          const rawDays = sbSettings.excuse_grace_period_days ?? sbSettings.excuseGracePeriodDays;
+          if (rawDays !== undefined && !isNaN(Number(rawDays))) {
+            days = Number(rawDays);
+            setGracePeriodDays(days);
           }
         }
+        // Auto-expire EXCUSE_PENDING rows past the grace period to ABSENT
+        await autoExpireExcusePending(days);
       } catch (_) { }
     })();
     return () => { isMounted = false; };
@@ -222,7 +227,66 @@ export default function ExcuseReports({
     return () => { isCancelled = true; };
   }, []);
 
-  // Extract all report rows: EXCUSE_PENDING, EXCUSED, and DECLARED ABSENT
+  // Official declared absent cadets directly from Supabase excuse_requests table
+  // Queries excuse_requests where status = 'REJECTED' or status = 'ABSENT'
+  const [dbDeclaredAbsent, setDbDeclaredAbsent] = useState([]);
+  const [isDeclaredAbsentLoading, setIsDeclaredAbsentLoading] = useState(false);
+
+  const loadDeclaredAbsent = useCallback(async () => {
+    setIsDeclaredAbsentLoading(true);
+    try {
+      const data = await fetchDeclaredAbsentCadets(selectedDate === 'ALL' ? null : selectedDate);
+      // STRICT: Only use records returned directly from the excuse_requests database query.
+      // If no database row exists (e.g. for cadet 221-00005), do not inject any fallback record.
+      if (Array.isArray(data)) {
+        setDbDeclaredAbsent(data);
+      } else {
+        setDbDeclaredAbsent([]);
+      }
+    } catch (err) {
+      console.error('[ExcuseReports] Failed to fetch declared absent cadets:', err);
+      setDbDeclaredAbsent([]);
+    } finally {
+      setIsDeclaredAbsentLoading(false);
+    }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadDeclaredAbsent();
+  }, [loadDeclaredAbsent]);
+
+  // Transform DB excuse_requests rows (status = REJECTED or ABSENT) into report rows
+  const declaredAbsentRecords = useMemo(() => {
+    if (!Array.isArray(dbDeclaredAbsent)) return [];
+
+    return dbDeclaredAbsent.map(row => {
+      const cid = String(row.cadet_id || row.cadetId || '').trim().toUpperCase();
+      const cadetMeta = cadetsMap.get(cid) || {};
+      const rawDate = row.drill_date || row.date || '';
+      const dateFiled = row.submitted_at || row.created_at || null;
+
+      return {
+        id: row.id,
+        logId: row.id,
+        cadetId: cid,
+        name: row.name && row.name !== 'UNREGISTERED CADET' ? row.name : (cadetMeta.name || `Cadet ${cid}`),
+        rank: row.rank || cadetMeta.rank || 'Cadet',
+        battalion: row.battalion || cadetMeta.battalion || '1st Battalion',
+        company: row.company || cadetMeta.company || 'Alpha Company',
+        platoon: row.platoon || cadetMeta.platoon || '1st Platoon',
+        date: rawDate,
+        status: 'ABSENT',
+        reason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
+        excuseReason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
+        submittedAt: dateFiled,
+        dutyOfficer: row.reviewed_by || 'Admin',
+        proofUrl: row.proof_url || null,
+        source: 'excuse_requests'
+      };
+    });
+  }, [dbDeclaredAbsent, cadetsMap]);
+
+  // Extract all report rows: EXCUSE_PENDING and EXCUSED
   // STRICT: Only displays cadets who submitted an actual excuse request (dateFiled exists or isExcuseRequest === true)
   const excuseRecords = useMemo(() => {
     if (!Array.isArray(effectiveLogs)) return [];
@@ -235,8 +299,8 @@ export default function ExcuseReports({
         const overriddenStatus = localStatusOverrides[log.id] || localStatusOverrides[key] || localStatusOverrides[`${cid}__${rawDate}`];
         const st = (overriddenStatus || String(log.status || log.final_daily_status || log.finalDailyStatus || '')).toUpperCase();
 
-        // 1. Must be one of the excuse workflow statuses
-        const isWorkflowStatus = st === 'EXCUSE_PENDING' || st === 'PENDING' || st === 'EXCUSED' || st === 'APPROVED' || st === 'ABSENT';
+        // 1. Must be one of the excuse workflow statuses (PENDING or EXCUSED)
+        const isWorkflowStatus = st === 'EXCUSE_PENDING' || st === 'PENDING' || st === 'EXCUSED' || st === 'APPROVED';
         if (!isWorkflowStatus) return false;
 
         // 2. Identify if an actual excuse request was filed (dateFiled exists or isExcuseRequest === true)
@@ -261,15 +325,6 @@ export default function ExcuseReports({
           return false;
         }
 
-        // For ABSENT records, make sure it was a submitted excuse that was rejected/declared absent by HQ
-        if (st === 'ABSENT' || st.includes('ABSENT')) {
-          const excuseReason = String(log.excuse_reason || '').trim();
-          const rawReason = String(log.reason || '').trim();
-          const isGenericReason = rawReason.toLowerCase().includes('unexcused absence') || rawReason.toLowerCase().includes('did not attend formation');
-          const hasSpecificExcuse = Boolean(hasDateFiled || excuseReason || (rawReason && !isGenericReason) || localStatusOverrides[log.id] || localStatusOverrides[key]);
-          if (!hasSpecificExcuse) return false;
-        }
-
         return true;
       })
       .map(log => {
@@ -279,7 +334,8 @@ export default function ExcuseReports({
         const key = `${cid}_${rawDate}`;
         const overriddenStatus = localStatusOverrides[log.id] || localStatusOverrides[key] || localStatusOverrides[`${cid}__${rawDate}`];
         let st = (overriddenStatus || String(log.status || log.final_daily_status || log.finalDailyStatus || '')).toUpperCase();
-        if (st.includes('ABSENT')) st = 'ABSENT';
+        if (st === 'APPROVED') st = 'EXCUSED';
+        if (st === 'PENDING') st = 'EXCUSE_PENDING';
 
         const rawReason = log.excuse_reason || log.reason || '';
         const isGenericReason = String(rawReason).toLowerCase().includes('unexcused absence') || String(rawReason).toLowerCase().includes('did not attend formation');
@@ -299,39 +355,44 @@ export default function ExcuseReports({
           platoon: log.platoon || cadetMeta.platoon || '1st Platoon',
           date: rawDate,
           status: st,
-          reason: cadetReason || (st === 'ABSENT' ? 'Declared Absent / Excuse Rejected by HQ' : 'No reason provided'),
-          excuseReason: cadetReason || (st === 'ABSENT' ? 'Declared Absent / Excuse Rejected by HQ' : 'No reason provided'),
+          reason: cadetReason || 'No reason provided',
+          excuseReason: cadetReason || 'No reason provided',
           submittedAt: dateFiled,
           dutyOfficer: log.duty_officer || log.dutyOfficer || 'HQ Duty Officer'
         };
       });
 
     return recordsFromLogs.sort((a, b) => {
-      const order = { 'EXCUSE_PENDING': 1, 'ABSENT': 2, 'EXCUSED': 3 };
+      const order = { 'EXCUSE_PENDING': 1, 'EXCUSED': 2 };
       const diff = (order[a.status] || 99) - (order[b.status] || 99);
       if (diff !== 0) return diff;
       return (b.date || '').localeCompare(a.date || '');
     });
   }, [effectiveLogs, cadetsMap, localStatusOverrides]);
 
+  // Combined records for dropdown filters (Dates & Battalions)
+  const allRecords = useMemo(() => {
+    return [...excuseRecords, ...declaredAbsentRecords];
+  }, [excuseRecords, declaredAbsentRecords]);
+
   // Unique formation dates in excuse records for filter dropdown
   const uniqueDates = useMemo(() => {
     const dates = new Set();
-    excuseRecords.forEach(r => { if (r.date) dates.add(r.date); });
+    allRecords.forEach(r => { if (r.date) dates.add(r.date); });
     return Array.from(dates).sort((a, b) => b.localeCompare(a));
-  }, [excuseRecords]);
+  }, [allRecords]);
 
   // Unique battalions for filter dropdown
   const uniqueBattalions = useMemo(() => {
     const bns = new Set();
-    excuseRecords.forEach(r => { if (r.battalion) bns.add(r.battalion); });
+    allRecords.forEach(r => { if (r.battalion) bns.add(r.battalion); });
     return Array.from(bns).sort();
-  }, [excuseRecords]);
+  }, [allRecords]);
 
   // Summary counts
   const pendingCount = useMemo(() => excuseRecords.filter(r => r.status === 'EXCUSE_PENDING').length, [excuseRecords]);
   const excusedCount = useMemo(() => excuseRecords.filter(r => r.status === 'EXCUSED').length, [excuseRecords]);
-  const absentCount = useMemo(() => excuseRecords.filter(r => r.status === 'ABSENT').length, [excuseRecords]);
+  const absentCount = useMemo(() => declaredAbsentRecords.length, [declaredAbsentRecords]);
 
 
   // Map of all recorded formation dates with metadata (from effectiveLogs, dbSessions, and excuseRecords)
@@ -391,8 +452,25 @@ export default function ExcuseReports({
       }
     });
 
+    // 4. From declared absent records (from excuse_requests table)
+    declaredAbsentRecords.forEach(record => {
+      const key = record.date;
+      if (!key) return;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          dateKey: key,
+          scansCount: 0,
+          excusesCount: 0,
+          pendingCount: 0
+        });
+      }
+      const entry = map.get(key);
+      entry.excusesCount += 1;
+    });
+
     return map;
-  }, [effectiveLogs, dbSessions, excuseRecords]);
+  }, [effectiveLogs, dbSessions, excuseRecords, declaredAbsentRecords]);
 
   // List of all sorted recorded formation dates (most recent first)
   const recordedDatesList = useMemo(() => {
@@ -460,16 +538,19 @@ export default function ExcuseReports({
 
   // Filtered dataset
   const filteredRecords = useMemo(() => {
-    return excuseRecords.filter(item => {
-      // Status filter
-      if (statusFilter === 'PENDING' || statusFilter === 'EXCUSE_PENDING') {
-        if (item.status !== 'EXCUSE_PENDING') return false;
-      } else if (statusFilter === 'EXCUSED') {
-        if (item.status !== 'EXCUSED') return false;
-      } else if (statusFilter === 'ABSENT') {
-        if (item.status !== 'ABSENT') return false;
-      }
+    // When on the DECLARED ABSENT tab, strictly use the records queried from excuse_requests table
+    const recordsToFilter = statusFilter === 'ABSENT'
+      ? declaredAbsentRecords
+      : excuseRecords.filter(item => {
+        if (statusFilter === 'PENDING' || statusFilter === 'EXCUSE_PENDING') {
+          return item.status === 'EXCUSE_PENDING';
+        } else if (statusFilter === 'EXCUSED') {
+          return item.status === 'EXCUSED';
+        }
+        return false;
+      });
 
+    return recordsToFilter.filter(item => {
       // Date filter
       if (selectedDate !== 'ALL' && item.date !== selectedDate) return false;
 
@@ -479,17 +560,17 @@ export default function ExcuseReports({
       // Search query filter (cadet ID, name, company, platoon, reason)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
-        const idMatch = item.cadetId.toLowerCase().includes(q);
-        const nameMatch = item.name.toLowerCase().includes(q);
-        const coMatch = item.company.toLowerCase().includes(q);
-        const plMatch = item.platoon.toLowerCase().includes(q);
+        const idMatch = (item.cadetId || '').toLowerCase().includes(q);
+        const nameMatch = (item.name || '').toLowerCase().includes(q);
+        const coMatch = (item.company || '').toLowerCase().includes(q);
+        const plMatch = (item.platoon || '').toLowerCase().includes(q);
         const reasonMatch = (item.excuseReason || '').toLowerCase().includes(q);
         if (!idMatch && !nameMatch && !coMatch && !plMatch && !reasonMatch) return false;
       }
 
       return true;
     });
-  }, [excuseRecords, statusFilter, selectedDate, selectedBattalion, searchQuery]);
+  }, [excuseRecords, declaredAbsentRecords, statusFilter, selectedDate, selectedBattalion, searchQuery]);
 
   // [✅ Approve Excuse] Action Handler
   const handleApprove = useCallback(async (record) => {
@@ -573,18 +654,24 @@ export default function ExcuseReports({
         }
       } catch (_) { }
 
+      // Reload live declared absent cadets from excuse_requests table
+      await loadDeclaredAbsent();
+
       if (onRefresh) await onRefresh();
     } catch (err) {
       console.error('Declare absent error:', err);
     } finally {
       setActionLoadingId(null);
     }
-  }, [onRefresh]);
+  }, [loadDeclaredAbsent, onRefresh]);
 
   // Manual refresh trigger
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
-    if (onRefresh) await onRefresh();
+    await Promise.allSettled([
+      loadDeclaredAbsent(),
+      onRefresh ? onRefresh() : Promise.resolve()
+    ]);
     setTimeout(() => setIsRefreshing(false), 500);
   };
 
@@ -1348,8 +1435,8 @@ export default function ExcuseReports({
                         {statusFilter === 'PENDING' || statusFilter === 'EXCUSE_PENDING'
                           ? 'There are currently no pending excuse requests awaiting Duty Officer verification.'
                           : statusFilter === 'ABSENT'
-                          ? 'There are currently no cadets flagged as declared absent without excuse.'
-                          : 'No excuse letter submissions match your current filters.'}
+                            ? 'There are currently no cadets flagged as declared absent without excuse.'
+                            : 'No excuse letter submissions match your current filters.'}
                       </div>
                     </div>
                   </td>
@@ -1629,10 +1716,6 @@ export default function ExcuseReports({
           onClose={() => setSelectedRecordForAction(null)}
           onApprove={async (rec) => {
             await handleApprove(rec);
-            setSelectedRecordForAction(null);
-          }}
-          onDeclareAbsent={async (rec) => {
-            await handleDeclareAbsent(rec);
             setSelectedRecordForAction(null);
           }}
           isLoading={actionLoadingId === (selectedRecordForAction.logId || selectedRecordForAction.id)}

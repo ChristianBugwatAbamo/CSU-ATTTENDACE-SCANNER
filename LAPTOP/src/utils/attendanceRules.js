@@ -52,6 +52,32 @@ export function toDateKey(dateInput) {
 }
 
 /**
+ * Format YYYY-MM-DD into a clean, human-readable date (e.g. "Aug 16, 2026")
+ */
+export function formatHumanDate(dateKey) {
+  if (!dateKey) return '';
+  try {
+    const parts = String(dateKey).trim().split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        });
+      }
+    }
+    return String(dateKey);
+  } catch (_) {
+    return String(dateKey);
+  }
+}
+
+/**
  * Evaluates an individual cadet's attendance logs across the active formation schedule.
  */
 export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORMATION_DATES) {
@@ -65,9 +91,10 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
       const dk = toDateKey(ex.drill_date || ex.date || ex.formation_date || ex.session_date);
       if (dk) {
         const exSt = String(ex.status || '').toUpperCase();
+        const isExRejected = exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT' || exSt === 'ABSENT' || exSt === 'EXCUSE_REJECTED';
         const normalizedExStatus = (exSt === 'APPROVED' || exSt === 'EXCUSED')
           ? 'EXCUSED'
-          : (exSt === 'REJECTED' || exSt === 'ABSENT')
+          : (isExRejected || exSt === 'ABSENT')
             ? 'ABSENT'
             : 'EXCUSE_PENDING';
         cadetLogsByDate[dk] = {

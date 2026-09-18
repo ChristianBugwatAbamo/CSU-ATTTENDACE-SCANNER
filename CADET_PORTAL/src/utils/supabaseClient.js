@@ -333,18 +333,51 @@ export async function deleteCadetFromSupabase(id) {
 /**
  * Fetches all attendance logs from Supabase
  */
+/**
+ * Fetches all attendance logs from Supabase with active session verification.
+ * Automatically filters out orphaned logs for dates whose session row was deleted.
+ */
 export async function fetchAttendanceFromSupabase() {
   const client = getSupabaseClient();
   if (!client) return [];
 
   try {
-    const { data, error } = await client
+    // 1. Session Verification: Fetch authoritative active sessions from attendance_sessions
+    const { data: sessionRows, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_date')
+      .order('session_date', { ascending: false });
+
+    if (sessionErr) {
+      console.warn('[Supabase] Warning fetching attendance_sessions during attendance logs verification:', sessionErr);
+    }
+
+    const activeSessionDates = new Set(
+      (sessionRows || []).map(s => toDateKey(s.session_date)).filter(Boolean)
+    );
+    const activeSessionIds = new Set(
+      (sessionRows || []).map(s => s.id).filter(Boolean)
+    );
+
+    const { data: rawData, error } = await client
       .from('attendance_logs')
       .select('*')
       .order('date', { ascending: false })
       .limit(10000);
 
     if (error) throw error;
+
+    // Strict Session Verification Filter: Only keep logs that belong to an active session
+    let data = Array.isArray(rawData) ? rawData : [];
+    if (sessionRows && sessionRows.length > 0) {
+      data = data.filter(l => {
+        const lDate = toDateKey(l.date || l.session_date);
+        const hasValidSessionId = l.session_id && activeSessionIds.has(l.session_id);
+        const hasValidSessionDate = lDate && activeSessionDates.has(lDate);
+        return hasValidSessionId || hasValidSessionDate;
+      });
+    }
+
     return (data || []).map(l => ({
       cadetId: l.cadet_id,
       cadet_id: l.cadet_id,
@@ -374,6 +407,65 @@ export async function fetchAttendanceFromSupabase() {
     }));
   } catch (err) {
     console.error('Supabase fetch attendance error:', err);
+    return [];
+  }
+}
+
+/**
+ * Session Verification Query API:
+ * Verifies attendance_sessions before returning attendance logs for a selected date.
+ * If no session exists for dateKey, returns an empty array [] to prevent returning orphaned logs.
+ */
+export async function fetchAttendanceByDate(dateKey) {
+  const client = getSupabaseClient();
+  if (!client || !dateKey) return [];
+
+  const cleanDate = toDateKey(dateKey);
+  if (!cleanDate) return [];
+
+  try {
+    const { data: sessionRows, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_date, session_name, duty_officer, cutoff_time')
+      .eq('session_date', cleanDate);
+
+    if (sessionErr) {
+      console.warn(`[Session Verification] Query error for ${cleanDate}:`, sessionErr);
+    }
+
+    if (!sessionRows || sessionRows.length === 0) {
+      console.log(`[Session Verification] No active attendance_session found for date ${cleanDate}. Returning 0 logs.`);
+      return [];
+    }
+
+    const { data: logs, error: logsErr } = await client
+      .from('attendance_logs')
+      .select('*')
+      .eq('date', cleanDate)
+      .order('time_in', { ascending: true });
+
+    if (logsErr) throw logsErr;
+    return (logs || []).map(l => ({
+      id: l.id,
+      ...l,
+      cadetId: l.cadet_id,
+      cadet_id: l.cadet_id,
+      name: l.name,
+      rank: l.rank,
+      battalion: l.battalion,
+      company: l.company,
+      platoon: l.platoon,
+      designation: l.designation,
+      date: l.date,
+      timeIn: l.time_in,
+      timeOut: l.time_out,
+      status: l.final_daily_status || l.status,
+      finalDailyStatus: l.final_daily_status || l.status,
+      dutyOfficer: l.duty_officer,
+      sessionName: l.session_name
+    }));
+  } catch (err) {
+    console.error(`fetchAttendanceByDate error for ${cleanDate}:`, err);
     return [];
   }
 }
@@ -642,7 +734,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
     const scanDate = toDateKey(scan.date || scan.session_date || scan.sessionDate || scan.timestamp) || defaultDate;
     const scanDutyOfficer = (scan.duty_officer && scan.duty_officer !== 'Duty Officer')
       ? scan.duty_officer
-      : (scan.dutyOfficer && scan.dutyOfficer !== 'Duty Officer' ? scan.dutyOfficer : detectedDutyOfficer) || 'HQ Duty Officer';
+      : (scan.dutyOfficer && scan.dutyOfficer !== 'Duty Officer' ? scan.dutyOfficer : detectedDutyOfficer) || 'Duty Officer';
 
     const scanPlatoon = scan.platoon || scan.pl || '';
     const scanSessionTitle = scan.session_name || scan.sessionName || (scanPlatoon ? `Formation (${scanPlatoon})` : '');
@@ -746,7 +838,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
 
     const scanDate = toDateKey(rawScan.date || rawScan.session_date || rawScan.sessionDate || rawScan.timestamp) || defaultDate;
     const scanTimestamp = rawScan.timestamp || rawScan.time_out || rawScan.time_in || new Date().toISOString();
-    const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'HQ Duty Officer';
+    const effectiveDutyOfficer = rawScan.duty_officer || rawScan.dutyOfficer || detectedDutyOfficer || 'Duty Officer';
     const scanPlatoon = rawScan.platoon || rawScan.pl || '';
     const scanSessionTitle = rawScan.session_name || rawScan.sessionName || (scanPlatoon ? `Formation (${scanPlatoon})` : '');
     const groupKey = `${scanDate}__${effectiveDutyOfficer}__${scanSessionTitle}`;
@@ -1025,7 +1117,7 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
     } catch (_) { }
   }
 
-  const finalOfficer = dutyOfficerName || 'HQ Duty Officer';
+  const finalOfficer = dutyOfficerName || 'Duty Officer';
   const activeCutoff = cutoffTime || getActiveFormationCutoff() || '07:30';
 
   try {
@@ -1044,7 +1136,7 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
     }
 
     // 2. Check if a session exists for this (session_date, duty_officer)
-    if (finalOfficer && finalOfficer !== 'HQ Duty Officer' && finalOfficer !== 'Duty Officer') {
+    if (finalOfficer && finalOfficer !== 'Duty Officer' && finalOfficer !== 'Duty Officer') {
       const { data: officerSession } = await client
         .from('attendance_sessions')
         .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, present_count, late_count')
@@ -1117,7 +1209,7 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
 export async function processIncomingBatch(batchData = {}) {
   const { sessionDate, dutyOfficerName, platoon, scans = [] } = batchData;
   const targetDate = sessionDate || toDateKey(new Date());
-  const officer = dutyOfficerName || 'HQ Duty Officer';
+  const officer = dutyOfficerName || 'Duty Officer';
 
   const mappedScans = (scans || []).map(scan => ({
     ...scan,
@@ -1662,33 +1754,30 @@ export async function fetchCadetByCadetId(rawCadetId) {
   const digitsOnly = cleanId.replace(/[^0-9]/g, '');
   const dashedId = digitsOnly.length > 3 ? `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3)}` : cleanId;
 
-  // 1. Query Supabase directly as the primary source of truth
+  // 1. Query Supabase directly as the primary source of truth (STRICT EXACT MATCH ONLY)
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const candidates = Array.from(new Set([cleanId, dashedId, digitsOnly])).filter(Boolean);
-      const orConditions = candidates.map(c => `id.eq.${c}`);
+      // Strictly exact string equality matching - no wildcards or partial matching
+      const candidates = Array.from(new Set([cleanId, dashedId])).filter(Boolean);
+      let query = supabase.from('cadets').select('*');
 
-      let { data, error } = await supabase
-        .from('cadets')
-        .select('*')
-        .or(orConditions.join(','))
-        .limit(1)
-        .maybeSingle();
-
-      // Only if not found with exact match, try partial match on id as fallback
-      if (!data && cleanId.length >= 3) {
-        const ilikeRes = await supabase
-          .from('cadets')
-          .select('*')
-          .ilike('id', `%${cleanId}%`)
-          .limit(1)
-          .maybeSingle();
-        data = ilikeRes.data;
-        error = ilikeRes.error;
+      if (candidates.length === 1) {
+        query = query.eq('id', candidates[0]);
+      } else {
+        query = query.or(candidates.map(c => `id.eq.${c}`).join(','));
       }
 
+      const { data, error } = await query.limit(1).maybeSingle();
+
       if (!error && data) {
+        // Enforce strict exact equality verification
+        const matchedId = String(data.id || '').trim().toUpperCase();
+        if (matchedId !== cleanId && matchedId !== dashedId) {
+          console.warn(`[AUTH] Refusing mismatched cadet profile for login: typed "${cleanId}", matched "${matchedId}"`);
+          return null;
+        }
+
         const profile = {
           id: data.id,
           cadetId: data.id,
@@ -1726,7 +1815,7 @@ export async function fetchCadetByCadetId(rawCadetId) {
     console.warn('fetchCadetByCadetId Supabase query error, checking local roster:', err);
   }
 
-  // 2. Fallback to local storage roster
+  // 2. Fallback to local storage roster (STRICT EXACT MATCH ONLY)
   try {
     const cached = localStorage.getItem('csu_rotc_cadets_roster');
     if (cached) {
@@ -1735,17 +1824,11 @@ export async function fetchCadetByCadetId(rawCadetId) {
         const found = roster.find(c => {
           const cId = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
           const sId = String(c.student_id || c.studentId || '').trim().toUpperCase();
-          const email = String(c.email || '').trim().toLowerCase();
-          const cleanInput = cleanId.replace(/[^A-Z0-9]/gi, '');
-          const cleanCId = cId.replace(/[^A-Z0-9]/gi, '');
-          const cleanSId = sId.replace(/[^A-Z0-9]/gi, '');
           return (
             cId === cleanId ||
-            cleanCId === cleanInput ||
             cId === dashedId ||
-            sId === cleanId ||
-            (cleanSId && cleanSId === cleanInput) ||
-            (email && email === cleanId.toLowerCase())
+            (sId && sId === cleanId) ||
+            (sId && sId === dashedId)
           );
         });
         if (found) return found;
@@ -1798,18 +1881,6 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
         .or(orCond)
         .order('date', { ascending: false });
 
-      // Fallback with ilike match only if nothing matched
-      if ((!data || data.length === 0) && cleanId.length >= 4) {
-        const ilikeRes = await supabase
-          .from('attendance_logs')
-          .select('*')
-          .ilike('cadet_id', `%${cleanId}%`)
-          .order('date', { ascending: false });
-        if (ilikeRes.data && ilikeRes.data.length > 0) {
-          data = ilikeRes.data;
-          error = ilikeRes.error;
-        }
-      }
 
       if (!error && Array.isArray(data) && data.length > 0) {
         logs = data.map(l => ({
@@ -1839,7 +1910,7 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
             const rawD = ex.drill_date || ex.date || ex.formation_date || ex.session_date;
             const exDate = toDateKey(rawD) || rawD;
             const rawExSt = String(ex.status || '').toUpperCase();
-            const isExRejected = rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT';
+            const isExRejected = rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT' || rawExSt === 'DECLARED ABSENT' || rawExSt === 'ABSENT' || rawExSt === 'EXCUSE_REJECTED';
             const exStatus = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
               ? 'EXCUSED'
               : (isExRejected || rawExSt === 'ABSENT')
@@ -2070,7 +2141,26 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       .limit(1)
       .maybeSingle();
 
-    if (!sessionData || !sessionData.id) {
+    let session = sessionData;
+    if (!session || !session.id) {
+      try {
+        const { data: newSession } = await client
+          .from('attendance_sessions')
+          .insert({
+            session_name: `Training Formation - ${dateKey}`,
+            session_date: dateKey,
+            session_type: 'TRAINING_DAY',
+            status: 'OPEN'
+          })
+          .select('id, session_name, session_date')
+          .maybeSingle();
+        if (newSession?.id) {
+          session = newSession;
+        }
+      } catch (_) { }
+    }
+
+    if (!session || !session.id) {
       console.warn(`Cannot file excuse: No official formation session found for date ${dateKey}`);
       return {
         error: 'NON_FORMATION_DATE',
@@ -2090,15 +2180,15 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       const exSt = String(existing.status || '').toUpperCase();
       if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
         console.warn('Cannot file excuse: record is already EXCUSED.');
-        return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+        return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by Admin.' };
       }
       if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
         console.warn('Cannot file excuse: record is already EXCUSE_PENDING.');
         return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
       }
       if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
-        console.warn('Cannot file excuse: request was already REJECTED by HQ.');
-        return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+        console.warn('Cannot file excuse: request was already REJECTED by Admin.');
+        return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by Admin and cannot be re-filed.' };
       }
     }
 
@@ -2114,13 +2204,13 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       if (existingEx) {
         const exSt = String(existingEx.status || '').toUpperCase();
         if (exSt === 'EXCUSED' || exSt === 'APPROVED') {
-          return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by HQ.' };
+          return { error: 'ALREADY_EXCUSED', message: 'An official excuse for this formation has already been approved by Admin.' };
         }
         if (exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
           return { error: 'ALREADY_PENDING', message: 'An excuse request for this formation date has already been submitted and is pending admin review.' };
         }
         if (exSt === 'REJECTED' || exSt === 'DECLINED' || exSt === 'DECLARED_ABSENT' || exSt === 'DECLARED ABSENT') {
-          return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' };
+          return { error: 'ALREADY_REJECTED', message: 'An excuse request for this formation date was already rejected by Admin and cannot be re-filed.' };
         }
       }
     } catch (_) { }
@@ -2186,7 +2276,7 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
         .maybeSingle();
 
       const insertPayload = {
-        session_id: sessionData?.id || null,
+        session_id: session?.id || sessionData?.id || null,
         cadet_id: cid,
         name: cadetProfile?.name || ('Cadet ' + cid),
         rank: cadetProfile?.rank || 'Cadet',

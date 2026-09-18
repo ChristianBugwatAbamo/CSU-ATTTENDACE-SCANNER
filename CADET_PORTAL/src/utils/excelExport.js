@@ -170,8 +170,8 @@ export function formatMilitaryDate(dateInput) {
  */
 export async function exportAttendanceToExcel(records = [], sessionName = 'Field Formation Session', customLetterhead = null, formationDate = null) {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'CSU ROTC Admin HQ';
-  workbook.lastModifiedBy = 'CSU ROTC Admin HQ';
+  workbook.creator = 'CSU ROTC Admin';
+  workbook.lastModifiedBy = 'CSU ROTC Admin';
   workbook.created = new Date();
   workbook.modified = new Date();
 
@@ -192,7 +192,7 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
   if (!effectiveFormationDate) {
     try {
       effectiveFormationDate = localStorage.getItem('csu_rotc_selected_formation_date');
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const formattedDate = formatMilitaryDate(effectiveFormationDate);
@@ -212,7 +212,7 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
       if (!isNaN(d.getTime())) {
         return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
       }
-    } catch (_) {}
+    } catch (_) { }
     return String(val);
   };
 

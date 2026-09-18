@@ -18,7 +18,7 @@ const CADET_PHRASES = [
   "Loading Personnel File...",
   "Fetching Attendance Records...",
   "Synchronizing Muster Status...",
-  "Connecting to HQ Database...",
+  "Connecting to  Database...",
   "Loading ROTC Profile...",
   "Checking Formation Status...",
   "Retrieving Unit Assignments...",

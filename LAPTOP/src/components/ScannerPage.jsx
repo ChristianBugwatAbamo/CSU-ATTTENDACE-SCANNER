@@ -183,22 +183,22 @@ export default function ScannerPage({ cadets = [], attendanceLogs = [], onSyncCo
     });
   };
 
-function toDateKey(dateInput) {
-  if (!dateInput) return '';
-  const str = String(dateInput).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    return str;
+  function toDateKey(dateInput) {
+    if (!dateInput) return '';
+    const str = String(dateInput).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return str;
+    }
+    let d = new Date(str);
+    if (isNaN(d.getTime())) {
+      d = new Date(`${str} ${new Date().getFullYear()}`);
+    }
+    if (isNaN(d.getTime())) return '';
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
-  let d = new Date(str);
-  if (isNaN(d.getTime())) {
-    d = new Date(`${str} ${new Date().getFullYear()}`);
-  }
-  if (isNaN(d.getTime())) return '';
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
 
   // Batch Approval: Ingest batch records into attendance logs and Supabase with foreign key fallback and guaranteed state cleanup
   const handleApproveBatch = async (batchId) => {
@@ -211,7 +211,7 @@ function toDateKey(dateInput) {
         // Empty batch, clean up immediately
         setPendingBatches((prev) => {
           const next = prev.filter((b) => b.id !== batchId);
-          try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) {}
+          try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) { }
           return next;
         });
         setExpandedBatchIds((prev) => {
@@ -299,7 +299,7 @@ function toDateKey(dateInput) {
         const next = prev.filter((b) => b.id !== batchId);
         try {
           localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next));
-        } catch (_) {}
+        } catch (_) { }
         return next;
       });
 
@@ -320,7 +320,7 @@ function toDateKey(dateInput) {
         const next = prev.filter((b) => b.id !== batchId);
         try {
           localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next));
-        } catch (_) {}
+        } catch (_) { }
         return next;
       });
       setExpandedBatchIds((prev) => {
@@ -342,7 +342,7 @@ function toDateKey(dateInput) {
     const batch = pendingBatches.find((b) => b.id === batchId);
     setPendingBatches((prev) => {
       const next = prev.filter((b) => b.id !== batchId);
-      try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) {}
+      try { localStorage.setItem('csu_rotc_pending_batches', JSON.stringify(next)); } catch (_) { }
       return next;
     });
     setExpandedBatchIds((prev) => {
@@ -398,7 +398,7 @@ function toDateKey(dateInput) {
       if (allBatchRecords.length === 0) {
         setPendingBatches([]);
         setExpandedBatchIds(new Set());
-        try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) {}
+        try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) { }
         return;
       }
 
@@ -419,7 +419,7 @@ function toDateKey(dateInput) {
         try {
           const s = await ensureSessionWithDutyOfficer(grp.date, grp.officer, grp.title);
           if (s?.id) sessionMap.set(key, s.id);
-        } catch (_) {}
+        } catch (_) { }
       }
 
       allBatchRecords.forEach(r => {
@@ -455,7 +455,7 @@ function toDateKey(dateInput) {
       setExpandedBatchIds(new Set());
       try {
         localStorage.removeItem('csu_rotc_pending_batches');
-      } catch (_) {}
+      } catch (_) { }
 
       setToastMessage({
         type: 'success',
@@ -465,7 +465,7 @@ function toDateKey(dateInput) {
       console.error('❌ Approve all batches ingestion failure:', err);
       setPendingBatches([]);
       setExpandedBatchIds(new Set());
-      try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) {}
+      try { localStorage.removeItem('csu_rotc_pending_batches'); } catch (_) { }
       setToastMessage({
         type: 'warning',
         text: `⚠️ Batches processed with note: ${err.message || 'Check logs'}`
@@ -885,7 +885,7 @@ function toDateKey(dateInput) {
                             }}
                           >
                             <ShieldCheck size={16} />
-                            <span>Approve & Ingest Batch</span>
+                            <span>Approve</span>
                           </button>
                         </div>
                       </div>

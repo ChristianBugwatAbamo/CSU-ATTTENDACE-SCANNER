@@ -46,10 +46,9 @@ export default function DutyOfficerActionModal({
   gracePeriodDays = 3,
   onClose,
   onApprove,
-  onDeclareAbsent,
   isLoading = false
 }) {
-  const [actionType, setActionType] = useState(null); // 'APPROVE' | 'REJECT' | null
+  const [isApproving, setIsApproving] = useState(false);
 
   if (!isOpen || !record) return null;
 
@@ -109,20 +108,11 @@ export default function DutyOfficerActionModal({
   const graceInfo = getGraceInfo();
 
   const handleApproveClick = async () => {
-    setActionType('APPROVE');
+    setIsApproving(true);
     try {
       if (onApprove) await onApprove(record);
     } finally {
-      setActionType(null);
-    }
-  };
-
-  const handleDeclareAbsentClick = async () => {
-    setActionType('REJECT');
-    try {
-      if (onDeclareAbsent) await onDeclareAbsent(record);
-    } finally {
-      setActionType(null);
+      setIsApproving(false);
     }
   };
 
@@ -453,94 +443,56 @@ export default function DutyOfficerActionModal({
           <button
             type="button"
             onClick={onClose}
-            disabled={isLoading}
+            disabled={isLoading || isApproving}
             style={{
-              padding: '0.6rem 1.15rem',
+              padding: '0.65rem 1.25rem',
               borderRadius: '10px',
-              fontSize: '0.82rem',
+              fontSize: '0.84rem',
               fontWeight: 700,
               color: '#475569',
               background: '#ffffff',
               border: '1px solid #cbd5e1',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
+              cursor: (isLoading || isApproving) ? 'not-allowed' : 'pointer',
               transition: 'all 0.15s ease'
             }}
           >
             Cancel
           </button>
 
-          {/* Verification Actions */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            {/* [❌ Declare Absent / Reject] */}
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={handleDeclareAbsentClick}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '0.65rem 1.15rem',
-                borderRadius: '10px',
-                fontSize: '0.82rem',
-                fontWeight: 800,
-                color: '#ffffff',
-                backgroundColor: '#dc2626',
-                border: 'none',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                boxShadow: '0 2px 6px rgba(220, 38, 38, 0.25)',
-                transition: 'all 0.15s ease'
-              }}
-              title="Reject excuse or declare absent"
-            >
-              {actionType === 'REJECT' ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  <span>Declaring Absent...</span>
-                </>
-              ) : (
-                <>
-                  <XCircle size={15} />
-                  <span>Declare Absent</span>
-                </>
-              )}
-            </button>
-
-            {/* [✅ Approve Excuse] */}
-            <button
-              type="button"
-              disabled={isLoading}
-              onClick={handleApproveClick}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '0.65rem 1.25rem',
-                borderRadius: '10px',
-                fontSize: '0.82rem',
-                fontWeight: 800,
-                color: '#ffffff',
-                backgroundColor: '#059669',
-                border: 'none',
-                cursor: isLoading ? 'not-allowed' : 'pointer',
-                boxShadow: '0 2px 6px rgba(5, 150, 105, 0.3)',
-                transition: 'all 0.15s ease'
-              }}
-              title="Approve official excuse upon receipt of physical letter"
-            >
-              {actionType === 'APPROVE' ? (
-                <>
-                  <Loader2 size={15} className="animate-spin" />
-                  <span>Approving...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 size={15} />
-                  <span>Approve Excuse</span>
-                </>
-              )}
-            </button>
-          </div>
+          {/* [✅ Approve Excuse Action] */}
+          <button
+            type="button"
+            disabled={isLoading || isApproving}
+            onClick={handleApproveClick}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '0.65rem 1.4rem',
+              borderRadius: '10px',
+              fontSize: '0.84rem',
+              fontWeight: 800,
+              color: '#ffffff',
+              backgroundColor: '#059669',
+              border: 'none',
+              cursor: (isLoading || isApproving) ? 'not-allowed' : 'pointer',
+              boxShadow: '0 2px 6px rgba(5, 150, 105, 0.3)',
+              transition: 'all 0.15s ease'
+            }}
+            title="Approve official excuse upon presentation of physical proof (marks status as APPROVED)"
+          >
+            {isApproving ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                <span>Approving Excuse...</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={16} />
+                <span>Approve Excuse</span>
+              </>
+            )}
+          </button>
         </div>
 
       </div>

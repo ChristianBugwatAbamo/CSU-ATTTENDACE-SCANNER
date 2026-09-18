@@ -75,7 +75,7 @@ export function formatDisplayTime(timestamp) {
     if (!isNaN(d.getTime())) {
       return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
     }
-  } catch (_) {}
+  } catch (_) { }
   return String(timestamp);
 }
 
@@ -163,7 +163,7 @@ export function reconcileCadetDailyStatus(cadet, timeInScan, timeOutScan, cutoff
     timeOutScan?.final_daily_status ||
     ''
   ).toUpperCase();
-  
+
   const isExcusePending = rawStatus === 'EXCUSE_PENDING' || rawStatus === 'PENDING';
   const isExcused = rawStatus === 'EXCUSED' || rawStatus === 'APPROVED' || rawStatus.includes('EXCUSED');
   const isAbsent = rawStatus === 'ABSENT' || rawStatus.includes('ABSENT') || rawStatus === 'REJECTED';
@@ -296,7 +296,7 @@ export function normalizeDateKey(dateInput) {
         day: '2-digit'
       }).format(d);
     }
-  } catch (_) {}
+  } catch (_) { }
 
   return String(dateInput).slice(0, 10);
 }
@@ -317,9 +317,9 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
   // Filter logs by date if a specific session date is provided
   const relevantLogs = targetDateKey
     ? attendanceLogs.filter(l => {
-        const rawDate = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in || l.created_at;
-        return rawDate && normalizeDateKey(rawDate) === targetDateKey;
-      })
+      const rawDate = l.date || l.sessionDate || l.session_date || l.timestamp || l.scanned_at || l.scannedAt || l.timeIn || l.time_in || l.created_at;
+      return rawDate && normalizeDateKey(rawDate) === targetDateKey;
+    })
     : attendanceLogs;
 
   // Group logs by normalized Cadet ID
@@ -490,7 +490,7 @@ export function normalizeCompany(val) {
   if (s.includes('bravo')) return 'bravo';
   if (s.includes('charlie')) return 'charlie';
   if (s.includes('delta')) return 'delta';
-  if (s.includes('hq') || s.includes('headquarters') || s.includes('officer')) return 'officer';
+
   return s.replace(' company', '').trim();
 }
 
@@ -520,7 +520,7 @@ export function getScannedUnitEchelon(log) {
   if (log.sessionName) {
     const s = log.sessionName;
     if (!bn) {
-      const bnMatch = s.match(/(1st Battalion|2nd Battalion|Brigade HQ|CADET OFFICERS|[1-9](?:st|nd|rd|th)?\s*Battalion)/i);
+      const bnMatch = s.match(/(1st Battalion|2nd Battalion|Brigade |CADET OFFICERS|[1-9](?:st|nd|rd|th)?\s*Battalion)/i);
       if (bnMatch) bn = bnMatch[0];
     }
 
@@ -561,7 +561,7 @@ export function getActiveFormationCutoff() {
     }
     const legacy = localStorage.getItem('csu_rotc_formation_cutoff');
     if (legacy) return legacy;
-  } catch (e) {}
+  } catch (e) { }
   return '07:30';
 }
 

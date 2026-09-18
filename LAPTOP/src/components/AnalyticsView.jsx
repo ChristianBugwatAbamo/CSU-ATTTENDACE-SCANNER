@@ -603,6 +603,15 @@ export default function AnalyticsView({
         const dailyPresentMap = new Map(); // dateKey -> Set of unique cadet_ids
 
         if (client) {
+          // Session Verification: Verify active sessions so orphaned logs from deleted dates are excluded
+          const { data: activeSessions } = await client
+            .from('attendance_sessions')
+            .select('session_date');
+
+          const validSessionDates = new Set(
+            (activeSessions || []).map(s => toDateKey(s.session_date)).filter(Boolean)
+          );
+
           const { data: logs, error: logsError } = await client
             .from('attendance_logs')
             .select('cadet_id, date, timestamp, status, final_daily_status');
@@ -613,6 +622,8 @@ export default function AnalyticsView({
               const rawDate = curr.date || curr.timestamp;
               const dateKey = toDateKey(rawDate);
               if (!dateKey) return;
+              // Strict session verification: Skip logs for deleted / non-session dates
+              if (validSessionDates.size > 0 && !validSessionDates.has(dateKey)) return;
               formationDatesSet.add(dateKey);
 
               const cid = String(curr.cadet_id || '').trim().toUpperCase();

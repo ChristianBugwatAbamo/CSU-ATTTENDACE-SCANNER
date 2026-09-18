@@ -52,7 +52,7 @@ const formatCo = (co) => {
   if (!co) return '';
   let s = String(co).trim().toUpperCase();
   s = s.replace(/COMPANY/g, 'COY').trim();
-  if (!s.includes('COY') && !s.includes('HQ') && !s.includes('BAND')) s = `${s} COY`;
+  if (!s.includes('COY') && !s.includes('') && !s.includes('BAND')) s = `${s} COY`;
   return s;
 };
 

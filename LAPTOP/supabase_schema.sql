@@ -111,7 +111,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_officer ON public.attendance_sessions(du
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.attendance_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    session_id UUID REFERENCES public.attendance_sessions(id) ON DELETE SET NULL,
+    session_id UUID REFERENCES public.attendance_sessions(id) ON DELETE CASCADE,
     cadet_id VARCHAR(30) NOT NULL REFERENCES public.cadets(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     rank VARCHAR(100) NOT NULL DEFAULT 'Cadet',
@@ -153,24 +153,76 @@ CREATE INDEX IF NOT EXISTS idx_logs_company ON public.attendance_logs(company);
 CREATE INDEX IF NOT EXISTS idx_attendance_logs_session_id ON public.attendance_logs(session_id);
 
 -- ==============================================================================
+-- 5B. TABLE: excuse_requests (Cadet Portal Absence Excuses)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.excuse_requests (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cadet_id TEXT NOT NULL REFERENCES public.cadets(id) ON DELETE CASCADE,
+    drill_date DATE NOT NULL,
+    date DATE,
+    reason TEXT,
+    proof_url TEXT,
+    status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'EXCUSED', 'ABSENT')),
+    reviewed_by TEXT,
+    reviewed_at TIMESTAMPTZ,
+    submitted_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT uq_cadet_drill_date UNIQUE (cadet_id, drill_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_excuse_requests_date ON public.excuse_requests(drill_date DESC);
+CREATE INDEX IF NOT EXISTS idx_excuse_requests_cadet ON public.excuse_requests(cadet_id);
+
+-- ==============================================================================
+-- 5C. TRIGGER: Cascade Deletion on attendance_sessions
+-- Ensures that deleting a session row purges all child logs and excuse requests
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.cascade_delete_session_records()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Delete child attendance_logs matching session_id or session_date
+    DELETE FROM public.attendance_logs
+    WHERE session_id = OLD.id
+       OR (session_id IS NULL AND date = OLD.session_date);
+
+    -- Delete child excuse_requests matching session_date
+    DELETE FROM public.excuse_requests
+    WHERE drill_date = OLD.session_date
+       OR date = OLD.session_date;
+
+    RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_cascade_delete_session_records ON public.attendance_sessions;
+CREATE TRIGGER trg_cascade_delete_session_records
+AFTER DELETE ON public.attendance_sessions
+FOR EACH ROW
+EXECUTE FUNCTION public.cascade_delete_session_records();
+
+-- ==============================================================================
 -- 6. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cadets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.excuse_requests ENABLE ROW LEVEL SECURITY;
 
 -- Allow read access to all users (scanner devices & desktop dashboard)
 CREATE POLICY "Allow public read access on system_settings" ON public.system_settings FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on cadets" ON public.cadets FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_sessions" ON public.attendance_sessions FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_logs" ON public.attendance_logs FOR SELECT USING (true);
+CREATE POLICY "Allow public read access on excuse_requests" ON public.excuse_requests FOR SELECT USING (true);
 
 -- Allow all write operations (anon & authenticated)
 CREATE POLICY "Allow all operations on system_settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on cadets" ON public.cadets FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_sessions" ON public.attendance_sessions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_logs" ON public.attendance_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on excuse_requests" ON public.excuse_requests FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
 -- 7. INITIAL SEED: DEFAULT SYSTEM SETTINGS

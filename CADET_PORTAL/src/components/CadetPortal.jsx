@@ -42,11 +42,12 @@ import {
   subscribeToPortalRealtime
 } from '../utils/supabaseClient';
 import CadetPortalHeader from './CadetPortalHeader';
-import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey } from '../utils/attendanceRules';
+import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey, formatHumanDate } from '../utils/attendanceRules';
 import { formatDisplayTime, parseTimeToMinutes, parseCutoffMinutes } from '../utils/attendanceStatus';
 import IDCardPreview from './IDCardPreview';
 import MilitaryLoader from './MilitaryLoader';
 import FormationCalendarSelector from './FormationCalendarSelector';
+import FileExcuseModal from './FileExcuseModal';
 
 // Format YYYY-MM-DD into a friendly, student-readable date (e.g., "Thu, Sep 3, 2026")
 const formatFriendlyDate = (dateStr) => {
@@ -164,8 +165,11 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   // Excuse Request Modal state
   const [showExcuseModal, setShowExcuseModal] = useState(false);
+  const isExcuseModalOpenRef = useRef(false);
+  isExcuseModalOpenRef.current = Boolean(showExcuseModal);
   const [excuseForm, setExcuseForm] = useState({ targetDate: '', reason: '' });
   const [excuseSubmitting, setExcuseSubmitting] = useState(false);
+  const [excuseFile, setExcuseFile] = useState(null);
   const [excuseResult, setExcuseResult] = useState(null); // { success: bool, message: string }
 
 
@@ -223,6 +227,11 @@ export default function CadetPortal({ cadet, onLogout }) {
     const activeCid = cadet?.id || cadet?.cadetId || cadet?.cadet_id || cadet?.student_id;
     if (!activeCid) return;
 
+    // Pause auto-refresh while modal is open: do not trigger background data re-fetching
+    if (isExcuseModalOpenRef.current && !isManual) {
+      return;
+    }
+
     // If cached data is present, sync quietly without blocking the screen
     if (logs.length > 0 && !isManual) {
       setIsBackgroundSyncing(true);
@@ -275,7 +284,9 @@ export default function CadetPortal({ cadet, onLogout }) {
       if (e?.type === 'csu_settings_updated' && e?.detail) {
         setSettings(e.detail);
       }
-      loadData(true);
+      if (!isExcuseModalOpenRef.current) {
+        loadData(false);
+      }
     };
 
     window.addEventListener('storage', handleStorageOrLocalUpdate);
@@ -287,29 +298,35 @@ export default function CadetPortal({ cadet, onLogout }) {
         if (payload?.new) {
           setSettings(payload.new);
         }
-        loadData(true);
+        if (!isExcuseModalOpenRef.current) {
+          loadData(false);
+        }
       },
       onSessionsChange: () => {
-        loadData(true);
+        if (!isExcuseModalOpenRef.current) {
+          loadData(false);
+        }
       },
       onAttendanceChange: () => {
-        loadData(true);
+        if (!isExcuseModalOpenRef.current) {
+          loadData(false);
+        }
       }
     });
 
-    // 3. Tab visibility / window focus: refresh immediately when student switches back to portal tab
+    // 3. Tab visibility / window focus: refresh immediately when student switches back to portal tab (paused when modal is open)
     const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        loadData(true);
+      if (document.visibilityState === 'visible' && !isExcuseModalOpenRef.current) {
+        loadData(false);
       }
     };
     window.addEventListener('visibilitychange', handleVisibilityOrFocus);
     window.addEventListener('focus', handleVisibilityOrFocus);
 
-    // 4. Fallback heartbeat (every 15s while tab is visible) to guarantee zero desynchronization
+    // 4. Fallback heartbeat (every 15s while tab is visible) to guarantee zero desynchronization (paused when modal is open)
     const heartbeatTimer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        loadData(true);
+      if (document.visibilityState === 'visible' && !isExcuseModalOpenRef.current) {
+        loadData(false);
       }
     }, 15000);
 
@@ -337,7 +354,7 @@ export default function CadetPortal({ cadet, onLogout }) {
   // Map each formation date to its actual dynamic session cut-off time configured in the database
   const sessionCutoffsByDate = useMemo(() => {
     const map = new Map();
-    // 1. From database attendance_sessions (primary source matching Admin HQ)
+    // 1. From database attendance_sessions (primary source matching Admin )
     (dbSessions || []).forEach(s => {
       const dk = s.dateKey || s.session_date || s.sessionDate;
       const cutoff = s.cutoffTime || s.cutoff_time;
@@ -560,23 +577,23 @@ export default function CadetPortal({ cadet, onLogout }) {
     return { all: all.length, present, late, noTimeOut, absent, excused };
   }, [evaluated, isExcuseRecord, isValidTime, checkIsLate]);
 
-  // Grace Period Days from system settings (Policy: 4-Day Filing Window)
+  // Grace Period Days dynamically pulling from system_settings.excuse_grace_period_days
   const gracePeriodDays = useMemo(() => {
-    if (settings?.excuse_grace_period_days !== undefined && !isNaN(Number(settings.excuse_grace_period_days))) {
-      return Number(settings.excuse_grace_period_days);
-    }
-    if (settings?.excuseGracePeriodDays !== undefined && !isNaN(Number(settings.excuseGracePeriodDays))) {
-      return Number(settings.excuseGracePeriodDays);
+    const rawVal = settings?.excuse_grace_period_days ?? settings?.excuseGracePeriodDays;
+    if (rawVal !== undefined && rawVal !== null && !isNaN(Number(rawVal)) && Number(rawVal) > 0) {
+      return Number(rawVal);
     }
     try {
       const saved = localStorage.getItem('csu_rotc_admin_settings');
       if (saved) {
         const parsed = JSON.parse(saved);
-        const val = parsed.excuse_grace_period_days ?? parsed.excuseGracePeriodDays;
-        if (val !== undefined && !isNaN(Number(val))) return Number(val);
+        const val = parsed?.excuse_grace_period_days ?? parsed?.excuseGracePeriodDays;
+        if (val !== undefined && val !== null && !isNaN(Number(val)) && Number(val) > 0) {
+          return Number(val);
+        }
       }
     } catch (_) { }
-    return 4; // Policy: 4-Day Filing Window
+    return 3; // Default 3-day fallback
   }, [settings]);
 
   // Cutoff Date string: Today's date minus GRACE_PERIOD_DAYS
@@ -589,51 +606,10 @@ export default function CadetPortal({ cadet, onLogout }) {
     return `${y}-${m}-${d}`;
   }, [gracePeriodDays]);
 
-  // Collect all drill dates that have an active excuse request pending admin review (status: EXCUSE_PENDING or PENDING)
-  // CRITICAL REQUIREMENT: Do NOT flag APPROVED or EXCUSED requests as pending!
-  const pendingExcuseDatesMap = useMemo(() => {
-    const map = new Map();
-    // 1. Raw / Reconciled attendance logs
-    (logs || []).forEach(l => {
-      const rawD = l.date || l.session_date || l.timestamp;
-      const dk = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
-      if (!dk) return;
-      const st = String(l.status || l.final_daily_status || '').trim().toUpperCase();
-      const exSt = String(l.excuse_status || l.excuseStatus || '').trim().toUpperCase();
-      // Skip if approved or excused
-      if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
-        return;
-      }
-      if (st === 'EXCUSE_PENDING' || st === 'PENDING' || exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
-        map.set(dk, { date: dk, status: 'EXCUSE_PENDING', reason: l.excuse_reason || l.reason || '' });
-      }
-    });
-    // 2. Evaluated daily breakdown records
-    (evaluated?.dailyBreakdown || []).forEach(entry => {
-      const dk = toDateKey ? toDateKey(entry.date) : (entry.date ? String(entry.date).slice(0, 10) : '');
-      if (!dk) return;
-      const st = String(entry.status || entry.dayType || entry.final_daily_status || '').trim().toUpperCase();
-      const exSt = String(entry.excuse_status || entry.excuseStatus || '').trim().toUpperCase();
-      // Skip if approved or excused
-      if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
-        return;
-      }
-      if (st === 'EXCUSE_PENDING' || st === 'PENDING' || exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
-        if (!map.has(dk)) {
-          map.set(dk, { date: dk, status: 'EXCUSE_PENDING', reason: entry.excuseReason || '' });
-        }
-      }
-    });
-    return map;
-  }, [logs, evaluated?.dailyBreakdown]);
-
-  // Backward compatibility alias for submittedExcuseDatesMap pointing strictly to pending dates
-  const submittedExcuseDatesMap = pendingExcuseDatesMap;
-
-  // Collect all drill dates where excuse request was APPROVED or EXCUSED by Admin HQ
+  // 1. Collect all drill dates where excuse request was APPROVED or EXCUSED by Admin 
   const approvedExcuseDatesMap = useMemo(() => {
     const map = new Map();
-    // 1. Raw / Reconciled attendance logs
+    // 1a. Raw / Reconciled attendance logs
     (logs || []).forEach(l => {
       const rawD = l.date || l.session_date || l.timestamp;
       const dk = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
@@ -641,10 +617,10 @@ export default function CadetPortal({ cadet, onLogout }) {
       const st = String(l.status || l.final_daily_status || '').trim().toUpperCase();
       const exSt = String(l.excuse_status || l.excuseStatus || '').trim().toUpperCase();
       if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
-        map.set(dk, { date: dk, status: 'EXCUSED', reason: l.excuse_reason || l.reason || 'Approved by Admin HQ' });
+        map.set(dk, { date: dk, status: 'EXCUSED', reason: l.excuse_reason || l.reason || 'Approved by Admin ' });
       }
     });
-    // 2. Evaluated daily breakdown records
+    // 1b. Evaluated daily breakdown records
     (evaluated?.dailyBreakdown || []).forEach(entry => {
       const dk = toDateKey ? toDateKey(entry.date) : (entry.date ? String(entry.date).slice(0, 10) : '');
       if (!dk) return;
@@ -652,23 +628,30 @@ export default function CadetPortal({ cadet, onLogout }) {
       const exSt = String(entry.excuse_status || entry.excuseStatus || '').trim().toUpperCase();
       if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
         if (!map.has(dk)) {
-          map.set(dk, { date: dk, status: 'EXCUSED', reason: entry.excuseReason || entry.reason || 'Approved by Admin HQ' });
+          map.set(dk, { date: dk, status: 'EXCUSED', reason: entry.excuseReason || entry.reason || 'Approved by Admin ' });
         }
       }
     });
     return map;
   }, [logs, evaluated?.dailyBreakdown]);
 
-  // Collect all drill dates where excuse request was REJECTED, DECLINED, or DECLARED_ABSENT by Admin HQ
+  // 2. Collect all drill dates where excuse request was REJECTED, DECLINED, or DECLARED_ABSENT by Admin 
+  // Admin  rejects an excuse request setting status to ABSENT or REJECTED
   const rejectedExcuseDatesMap = useMemo(() => {
     const map = new Map();
-    const isRejected = (val) => {
+    const isExplicitRejected = (val) => {
       if (!val) return false;
       const s = String(val).trim().toUpperCase();
-      return s === 'REJECTED' || s === 'DECLINED' || s === 'DECLARED_ABSENT' || s === 'DECLARED ABSENT' || s === 'EXCUSE_REJECTED';
+      return (
+        s === 'REJECTED' ||
+        s === 'DECLINED' ||
+        s === 'DECLARED_ABSENT' ||
+        s === 'DECLARED ABSENT' ||
+        s === 'EXCUSE_REJECTED'
+      );
     };
 
-    // 1. Raw / Reconciled attendance logs
+    // 2a. Raw / Reconciled attendance logs
     (logs || []).forEach(l => {
       const rawD = l.date || l.session_date || l.timestamp;
       const dk = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
@@ -680,22 +663,26 @@ export default function CadetPortal({ cadet, onLogout }) {
       const st = String(l.status || l.final_daily_status || '').trim().toUpperCase();
       const exSt = String(l.excuse_status || l.excuseStatus || '').trim().toUpperCase();
       const penalty = String(l.penaltyLabel || l.penalty || '').toLowerCase();
+      const hasExcuseHistory = Boolean(l.excuse_reason || l.excuse_submitted_at || l.is_excuse);
 
-      if (
-        isRejected(st) ||
-        isRejected(exSt) ||
+      const isRejected =
+        isExplicitRejected(st) ||
+        isExplicitRejected(exSt) ||
+        exSt === 'ABSENT' ||
         penalty.includes('excuse rejected') ||
-        penalty.includes('declared absent')
-      ) {
+        penalty.includes('declared absent') ||
+        ((st === 'ABSENT' || exSt === 'ABSENT') && hasExcuseHistory && exSt !== 'PENDING' && exSt !== 'EXCUSE_PENDING' && st !== 'EXCUSE_PENDING');
+
+      if (isRejected) {
         map.set(dk, {
           date: dk,
-          status: isRejected(exSt) ? exSt : (isRejected(st) ? st : 'REJECTED'),
-          reason: l.excuse_reason || l.reason || l.remarks || ''
+          status: isExplicitRejected(exSt) ? exSt : (isExplicitRejected(st) ? st : 'REJECTED'),
+          reason: l.excuse_reason || l.reason || l.remarks || 'Excuse request rejected by Headquarters'
         });
       }
     });
 
-    // 2. Evaluated daily breakdown records
+    // 2b. Evaluated daily breakdown records
     (evaluated?.dailyBreakdown || []).forEach(entry => {
       const dk = toDateKey ? toDateKey(entry.date) : (entry.date ? String(entry.date).slice(0, 10) : '');
       if (!dk) return;
@@ -706,18 +693,22 @@ export default function CadetPortal({ cadet, onLogout }) {
       const st = String(entry.status || entry.dayType || entry.final_daily_status || '').trim().toUpperCase();
       const exSt = String(entry.excuse_status || entry.excuseStatus || '').trim().toUpperCase();
       const penalty = String(entry.penaltyLabel || '').toLowerCase();
+      const hasExcuseHistory = Boolean(entry.excuseReason || entry.is_excuse);
 
-      if (
-        isRejected(st) ||
-        isRejected(exSt) ||
+      const isRejected =
+        isExplicitRejected(st) ||
+        isExplicitRejected(exSt) ||
+        exSt === 'ABSENT' ||
         penalty.includes('excuse rejected') ||
-        penalty.includes('declared absent')
-      ) {
+        penalty.includes('declared absent') ||
+        ((st === 'ABSENT' || exSt === 'ABSENT') && hasExcuseHistory && exSt !== 'PENDING' && exSt !== 'EXCUSE_PENDING' && st !== 'EXCUSE_PENDING');
+
+      if (isRejected) {
         if (!map.has(dk)) {
           map.set(dk, {
             date: dk,
-            status: isRejected(exSt) ? exSt : (isRejected(st) ? st : 'REJECTED'),
-            reason: entry.excuseReason || entry.reason || ''
+            status: isExplicitRejected(exSt) ? exSt : (isExplicitRejected(st) ? st : 'REJECTED'),
+            reason: entry.excuseReason || entry.reason || 'Excuse request rejected by Headquarters'
           });
         }
       }
@@ -726,7 +717,75 @@ export default function CadetPortal({ cadet, onLogout }) {
     return map;
   }, [logs, evaluated?.dailyBreakdown, approvedExcuseDatesMap]);
 
-  // Official Formation Dates Set: Strictly from Supabase attendance_sessions (primary) or formationDates
+  // 3. Collect all drill dates that have an active excuse request pending admin review (status: EXCUSE_PENDING or PENDING)
+  // CRITICAL REQUIREMENT: Exclude dates that are already APPROVED or REJECTED/ABSENT!
+  const pendingExcuseDatesMap = useMemo(() => {
+    const map = new Map();
+    // 3a. Raw / Reconciled attendance logs
+    (logs || []).forEach(l => {
+      const rawD = l.date || l.session_date || l.timestamp;
+      const dk = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
+      if (!dk) return;
+
+      // Skip if already approved or rejected
+      if (approvedExcuseDatesMap.has(dk) || rejectedExcuseDatesMap.has(dk)) {
+        return;
+      }
+
+      const st = String(l.status || l.final_daily_status || '').trim().toUpperCase();
+      const exSt = String(l.excuse_status || l.excuseStatus || '').trim().toUpperCase();
+
+      if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
+        return;
+      }
+
+      if (st === 'EXCUSE_PENDING' || st === 'PENDING' || exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+        map.set(dk, { date: dk, status: 'EXCUSE_PENDING', reason: l.excuse_reason || l.reason || '' });
+      }
+    });
+
+    // 3b. Evaluated daily breakdown records
+    (evaluated?.dailyBreakdown || []).forEach(entry => {
+      const dk = toDateKey ? toDateKey(entry.date) : (entry.date ? String(entry.date).slice(0, 10) : '');
+      if (!dk) return;
+
+      // Skip if already approved or rejected
+      if (approvedExcuseDatesMap.has(dk) || rejectedExcuseDatesMap.has(dk)) {
+        return;
+      }
+
+      const st = String(entry.status || entry.dayType || entry.final_daily_status || '').trim().toUpperCase();
+      const exSt = String(entry.excuse_status || entry.excuseStatus || '').trim().toUpperCase();
+
+      if (st === 'APPROVED' || st === 'EXCUSED' || exSt === 'APPROVED' || exSt === 'EXCUSED') {
+        return;
+      }
+
+      if (st === 'EXCUSE_PENDING' || st === 'PENDING' || exSt === 'EXCUSE_PENDING' || exSt === 'PENDING') {
+        if (!map.has(dk)) {
+          map.set(dk, { date: dk, status: 'EXCUSE_PENDING', reason: entry.excuseReason || '' });
+        }
+      }
+    });
+
+    return map;
+  }, [logs, evaluated?.dailyBreakdown, approvedExcuseDatesMap, rejectedExcuseDatesMap]);
+
+  // Backward compatibility alias for submittedExcuseDatesMap pointing strictly to pending dates
+  const submittedExcuseDatesMap = pendingExcuseDatesMap;
+
+  // Resolve exact status of excuse request for a specific date:
+  // Returns 'APPROVED' | 'REJECTED' | 'EXCUSE_PENDING' | null
+  const getExcuseRequestStatus = useCallback((dateKey) => {
+    if (!dateKey) return null;
+    const dk = toDateKey ? toDateKey(dateKey) : dateKey;
+    if (approvedExcuseDatesMap.has(dk)) return 'APPROVED';
+    if (rejectedExcuseDatesMap.has(dk)) return 'REJECTED';
+    if (pendingExcuseDatesMap.has(dk)) return 'EXCUSE_PENDING';
+    return null;
+  }, [approvedExcuseDatesMap, rejectedExcuseDatesMap, pendingExcuseDatesMap, toDateKey]);
+
+  // Official Formation Dates Set: Strictly from Supabase attendance_sessions (primary), formationDates, dailyBreakdown, or logs
   const officialFormationDatesSet = useMemo(() => {
     const s = new Set();
     if (Array.isArray(dbSessions) && dbSessions.length > 0) {
@@ -735,18 +794,32 @@ export default function CadetPortal({ cadet, onLogout }) {
         const cleanKey = toDateKey ? toDateKey(dk) : (dk ? String(dk).slice(0, 10) : '');
         if (cleanKey) s.add(cleanKey);
       });
-    } else if (Array.isArray(formationDates) && formationDates.length > 0) {
+    }
+    if (Array.isArray(formationDates) && formationDates.length > 0) {
       formationDates.forEach(fDate => {
         const cleanKey = toDateKey ? toDateKey(fDate) : (fDate ? String(fDate).slice(0, 10) : '');
         if (cleanKey) s.add(cleanKey);
       });
     }
+    if (Array.isArray(evaluated?.dailyBreakdown) && evaluated.dailyBreakdown.length > 0) {
+      evaluated.dailyBreakdown.forEach(b => {
+        const cleanKey = toDateKey ? toDateKey(b.date) : (b.date ? String(b.date).slice(0, 10) : '');
+        if (cleanKey) s.add(cleanKey);
+      });
+    }
+    if (Array.isArray(logs) && logs.length > 0) {
+      logs.forEach(l => {
+        const rawD = l.date || l.session_date || l.timestamp;
+        const cleanKey = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
+        if (cleanKey) s.add(cleanKey);
+      });
+    }
     return s;
-  }, [dbSessions, formationDates]);
+  }, [dbSessions, formationDates, evaluated?.dailyBreakdown, logs, toDateKey]);
 
   // Filter Eligible Dates: Only dates where cadet is ABSENT, within grace period filing window,
   // EXCLUDING drill dates if cadet already has an existing excuse request with status of EXCUSE_PENDING, APPROVED, or EXCUSED,
-  // and EXCLUDING drill dates if Admin HQ rejected/declined or declared absent (REJECTED, DECLINED, DECLARED_ABSENT).
+  // and EXCLUDING drill dates if Admin  rejected/declined or declared absent (REJECTED, DECLINED, DECLARED_ABSENT).
   const {
     eligibleAbsentDates,
     absentDrillDates,
@@ -781,12 +854,12 @@ export default function CadetPortal({ cadet, onLogout }) {
       const penalty = String(entry.penaltyLabel || '').toLowerCase();
       const drillDateKey = toDateKey ? toDateKey(entry.date) : (entry.date ? String(entry.date).slice(0, 10) : '');
 
-      // Strict requirement: Formation date MUST be an official formation session scheduled/conducted by HQ
+      // Strict requirement: Formation date MUST be an official formation session scheduled/conducted by 
       if (!drillDateKey || !officialFormationDatesSet.has(drillDateKey)) {
         return false;
       }
 
-      // Exclude drill dates if Admin HQ already rejected, declined, or declared absent
+      // Exclude drill dates if Admin  already rejected, declined, or declared absent
       if (
         rawStatus === 'REJECTED' ||
         rawStatus === 'DECLINED' ||
@@ -804,7 +877,7 @@ export default function CadetPortal({ cadet, onLogout }) {
         return false;
       }
 
-      // Exclude drill dates if already approved or excused by HQ
+      // Exclude drill dates if already approved or excused by 
       if (
         rawStatus === 'APPROVED' ||
         rawStatus === 'EXCUSED' ||
@@ -881,25 +954,25 @@ export default function CadetPortal({ cadet, onLogout }) {
         }
       }
 
-      // Deadline: 4 days after formation date at the cut-off time
-      const deadline = new Date(year, month, day + Number(gracePeriodDays), cutoffHour, cutoffMin, 0, 0);
+      // Calculate exact difference in calendar days: CURRENT_DATE - drill date
+      const currentMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const targetMidnight = new Date(year, month, day).getTime();
+      const daysDiff = Math.round((currentMidnight - targetMidnight) / (1000 * 60 * 60 * 24));
 
       // Formation cutoff check for today
       const formationCutoffToday = new Date(year, month, day, cutoffHour, cutoffMin, 0, 0);
-      const todayDateOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const targetDateOnly = new Date(year, month, day);
 
       // Future dates cannot be excused yet
-      if (targetDateOnly.getTime() > todayDateOnly.getTime()) return;
+      if (daysDiff < 0) return;
 
       // If formation is today, muster cut-off must have elapsed for it to be an unexcused absence
-      if (targetDateOnly.getTime() === todayDateOnly.getTime() && now.getTime() < formationCutoffToday.getTime()) return;
+      if (daysDiff === 0 && now.getTime() < formationCutoffToday.getTime()) return;
 
-      // Within 4-day policy window considering cut-off time
-      if (now.getTime() <= deadline.getTime()) {
-        eligible.push({ ...entry, deadline, sessionCutoff });
+      // Strictly check: daysDiff <= gracePeriodDays
+      if (daysDiff <= Number(gracePeriodDays)) {
+        eligible.push({ ...entry, daysDiff, sessionCutoff });
       } else {
-        expired.push({ ...entry, deadline, sessionCutoff });
+        expired.push({ ...entry, daysDiff, sessionCutoff });
       }
     });
 
@@ -946,28 +1019,34 @@ export default function CadetPortal({ cadet, onLogout }) {
     gracePeriodDays
   ]);
 
+  // Current request status for selected formation date: 'APPROVED' | 'REJECTED' | 'EXCUSE_PENDING' | null
+  const currentTargetRequestStatus = useMemo(() => {
+    return getExcuseRequestStatus(excuseForm.targetDate);
+  }, [getExcuseRequestStatus, excuseForm.targetDate]);
+
   // Check if selected date has already been submitted and is pending review
   const isAlreadyPending = useMemo(() => {
-    if (!excuseForm.targetDate) return false;
-    const dk = toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate;
-    return pendingExcuseDatesMap.has(dk);
-  }, [excuseForm.targetDate, pendingExcuseDatesMap]);
+    return currentTargetRequestStatus === 'EXCUSE_PENDING' || (excuseForm.targetDate ? pendingExcuseDatesMap.has(toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate) : false);
+  }, [currentTargetRequestStatus, excuseForm.targetDate, pendingExcuseDatesMap]);
 
   // Backward compatibility alias: only matches pending submissions
   const isAlreadySubmitted = isAlreadyPending;
 
-  // Check if selected date was already approved / excused by Admin HQ
+  // Check if selected date was already approved / excused by Admin 
   const isAlreadyApproved = useMemo(() => {
-    if (!excuseForm.targetDate) return false;
-    const dk = toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate;
-    return approvedExcuseDatesMap.has(dk);
-  }, [excuseForm.targetDate, approvedExcuseDatesMap]);
+    return currentTargetRequestStatus === 'APPROVED' || (excuseForm.targetDate ? approvedExcuseDatesMap.has(toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate) : false);
+  }, [currentTargetRequestStatus, excuseForm.targetDate, approvedExcuseDatesMap]);
 
-  // Check if selected date was already rejected / declined by Admin HQ
+  // Check if selected date was already rejected / declined by Admin 
   const isAlreadyRejected = useMemo(() => {
-    if (!excuseForm.targetDate) return false;
+    return currentTargetRequestStatus === 'REJECTED' || (excuseForm.targetDate ? rejectedExcuseDatesMap.has(toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate) : false);
+  }, [currentTargetRequestStatus, excuseForm.targetDate, rejectedExcuseDatesMap]);
+
+  // Retrieve rejected excuse record if present for details
+  const rejectedRecord = useMemo(() => {
+    if (!excuseForm.targetDate) return null;
     const dk = toDateKey ? toDateKey(excuseForm.targetDate) : excuseForm.targetDate;
-    return rejectedExcuseDatesMap.has(dk);
+    return rejectedExcuseDatesMap.get(dk) || null;
   }, [excuseForm.targetDate, rejectedExcuseDatesMap]);
 
   // Only consider no remaining unsubmitted dates when there ARE pending requests awaiting review
@@ -975,12 +1054,21 @@ export default function CadetPortal({ cadet, onLogout }) {
     return eligibleAbsentDates.length === 0 && pendingAbsentDrillDates.length > 0;
   }, [eligibleAbsentDates.length, pendingAbsentDrillDates.length]);
 
-  // Cadet has 0 active absences (all recorded absences are officially excused/approved by HQ)
+  // Cadet has 0 active absences (all recorded absences are officially excused/approved by )
   const isAllExcusedCompliant = useMemo(() => {
     const zeroActiveAbsences = (counts?.absent === 0) || (eligibleAbsentDates.length === 0 && pendingAbsentDrillDates.length === 0);
     const hasExcusedRecords = approvedAbsentDrillDates.length > 0 || (counts?.excused > 0);
     return Boolean(zeroActiveAbsences && hasExcusedRecords && pendingAbsentDrillDates.length === 0);
   }, [counts?.absent, counts?.excused, eligibleAbsentDates.length, pendingAbsentDrillDates.length, approvedAbsentDrillDates.length]);
+
+  // Clean state check: True if current selected date or entire cadet record has no active unexcused absences
+  const hasNoActiveUnexcusedAbsences = useMemo(() => {
+    return Boolean(
+      isAlreadyApproved ||
+      (isAllExcusedCompliant && !isAlreadyRejected && !isAlreadyPending) ||
+      (eligibleAbsentDates.length === 0 && pendingAbsentDrillDates.length === 0 && (counts?.absent === 0 || approvedAbsentDrillDates.length > 0))
+    );
+  }, [isAlreadyApproved, isAllExcusedCompliant, isAlreadyRejected, isAlreadyPending, eligibleAbsentDates.length, pendingAbsentDrillDates.length, counts?.absent, approvedAbsentDrillDates.length]);
 
   const showAlreadySubmittedBadge = Boolean(isAlreadyPending || (hasNoRemainingUnsubmitted && !isAlreadyRejected && pendingAbsentDrillDates.length > 0));
 
@@ -1053,7 +1141,7 @@ export default function CadetPortal({ cadet, onLogout }) {
     if (isAlreadyRejected || (excuseForm.targetDate && rejectedExcuseDatesMap.has(excuseForm.targetDate))) {
       setExcuseResult({
         success: false,
-        message: 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.'
+        message: 'An excuse request for this formation date was already rejected by  and cannot be re-filed.'
       });
       return;
     }
@@ -1061,7 +1149,7 @@ export default function CadetPortal({ cadet, onLogout }) {
     if (isAlreadyApproved || (excuseForm.targetDate && approvedExcuseDatesMap.has(excuseForm.targetDate))) {
       setExcuseResult({
         success: false,
-        message: 'An official excuse for this formation has already been approved by HQ.'
+        message: 'An official excuse for this formation has already been approved by .'
       });
       return;
     }
@@ -1109,13 +1197,13 @@ export default function CadetPortal({ cadet, onLogout }) {
         setExcuseResult({ success: true, message: result.message || 'Excuse request submitted successfully! It is now awaiting admin review.' });
         setExcuseForm({ targetDate: '', reason: '' });
         // Refresh data so the new EXCUSE_PENDING shows up
-        setTimeout(() => { handleRefresh(); setShowExcuseModal(false); setExcuseResult(null); }, 2500);
+        setTimeout(() => { handleRefresh(); setShowExcuseModal(false); setExcuseResult(null); setExcuseFile(null); }, 2500);
       } else if (result?.error === 'NON_FORMATION_DATE') {
         setExcuseResult({ success: false, message: result.message || 'No official formation event was scheduled or conducted on this date.' });
       } else if (result?.error === 'ALREADY_REJECTED') {
-        setExcuseResult({ success: false, message: result.message || 'An excuse request for this formation date was already rejected by HQ and cannot be re-filed.' });
+        setExcuseResult({ success: false, message: result.message || 'An excuse request for this formation date was already rejected by  and cannot be re-filed.' });
       } else if (result?.error === 'ALREADY_EXCUSED') {
-        setExcuseResult({ success: false, message: result.message || 'An official excuse for this formation has already been approved by HQ.' });
+        setExcuseResult({ success: false, message: result.message || 'An official excuse for this formation has already been approved by .' });
       } else if (result?.error === 'ALREADY_PENDING') {
         setExcuseResult({ success: false, message: result.message || 'An excuse request for this formation date has already been submitted and is pending admin review.' });
       } else {
@@ -1498,18 +1586,6 @@ export default function CadetPortal({ cadet, onLogout }) {
           isLoggingOut={isLoggingOut}
           handleLogoutClick={handleLogoutClick}
           onOpenFileExcuse={() => {
-            const defaultTarget = eligibleAbsentDates.length > 0
-              ? eligibleAbsentDates[0].date
-              : (pendingAbsentDrillDates.length > 0
-                  ? pendingAbsentDrillDates[0].date
-                  : (approvedAbsentDrillDates.length > 0
-                      ? approvedAbsentDrillDates[0].date
-                      : (rejectedAbsentDrillDates.length > 0 ? rejectedAbsentDrillDates[0].date : '')));
-            setExcuseForm(prev => ({
-              targetDate: prev.targetDate || defaultTarget,
-              reason: ''
-            }));
-            setExcuseResult(null);
             setShowExcuseModal(true);
           }}
         />
@@ -2811,7 +2887,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                           badgeBorder = isLight ? '#d8b4fe' : 'rgba(168, 85, 247, 0.4)';
                           badgeColor = isLight ? '#581c87' : '#c084fc';
                           badgeIcon = <span style={{ fontSize: '11px', lineHeight: 1 }}>🟣</span>;
-                          remarkText = 'Online excuse submitted — Awaiting HQ Verification';
+                          remarkText = 'Online excuse submitted — Awaiting  Verification';
                         } else if (isExcused) {
                           badgeLabel = 'EXCUSED';
                           badgeBg = isLight ? '#f0f9ff' : 'rgba(14, 165, 233, 0.15)';
@@ -3059,432 +3135,35 @@ export default function CadetPortal({ cadet, onLogout }) {
           {/* ============================================================ */}
           {/* EXCUSE REQUEST MODAL                                         */}
           {/* ============================================================ */}
-          {showExcuseModal && (
-            <div
-              className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              style={{
-                position: 'fixed', inset: 0, zIndex: 50,
-                background: 'rgba(0,0,0,0.65)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: '1rem'
-              }}
-              onClick={(e) => { if (e.target === e.currentTarget) { setShowExcuseModal(false); setExcuseResult(null); } }}
-            >
-              <div
-                className="overflow-visible relative"
-                style={{
-                  background: isLight ? '#ffffff' : '#1e2836',
-                  borderRadius: '16px',
-                  padding: '1.75rem',
-                  width: '100%',
-                  maxWidth: '500px',
-                  overflow: 'visible',
-                  position: 'relative',
-                  boxShadow: '0 25px 60px rgba(0,0,0,0.45)',
-                  border: isLight ? '1px solid #e2e8f0' : '1px solid rgba(255,255,255,0.08)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '1.1rem'
-                }}
-              >
-                {/* Modal Header */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: '#fef3c7', border: '1px solid #fde68a', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <FileText size={16} color="#d97706" />
-                    </div>
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: '1rem', color: isLight ? '#1e293b' : '#f1f5f9' }}>File Excuse Request</div>
-                      <div style={{ fontSize: '0.73rem', color: isLight ? '#64748b' : '#94a3b8' }}>For formation absence on a past date</div>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { setShowExcuseModal(false); setExcuseResult(null); }}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: isLight ? '#64748b' : '#94a3b8', padding: '4px' }}
-                  >
-                    <X size={18} />
-                  </button>
-                </div>
-
-                {/* Drill Date Selection (Restricted Calendar Picker matching Policy Window) */}
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '0.8rem', fontWeight: 700, color: isLight ? '#374151' : '#cbd5e1' }}>
-                      Drill Date Selection <span style={{ color: '#dc2626' }}>*</span>
-                    </label>
-                    <span
-                      style={{
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        color: isLight ? '#b45309' : '#fbbf24',
-                        background: isLight ? '#fef3c7' : 'rgba(217, 119, 6, 0.2)',
-                        border: `1px solid ${isLight ? '#fde68a' : 'rgba(217, 119, 6, 0.4)'}`,
-                        padding: '1px 7px',
-                        borderRadius: '9999px'
-                      }}
-                    >
-                      Policy: {gracePeriodDays}-Day Filing Window
-                    </span>
-                  </div>
-
-                  {/* Empty State / Status Alert Handling */}
-                  {isAlreadyApproved || (isAllExcusedCompliant && !isAlreadyRejected && !isAlreadyPending) ? (
-                    <div
-                      style={{
-                        background: isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-                        border: isLight ? '1px solid #a7f3d0' : '1px solid rgba(16, 185, 129, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.85rem 1rem',
-                        marginBottom: '0.75rem',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px'
-                      }}
-                    >
-                      <CheckCircle2 size={18} color={isLight ? '#059669' : '#34d399'} style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 800, color: isLight ? '#065f46' : '#34d399' }}>
-                          All Excused / Compliant — 0 Active Absences
-                        </div>
-                        <div style={{ fontSize: '0.74rem', color: isLight ? '#047857' : '#a7f3d0', marginTop: '3px', lineHeight: 1.4 }}>
-                          {isAlreadyApproved
-                            ? `The excuse request for ${formatHumanDate(excuseForm.targetDate)} has already been approved by Admin HQ. Status is officially EXCUSED with 0 pending absences.`
-                            : `All recorded formation absences have been officially approved and excused by Headquarters. You currently have 0 active absences and no pending excuse letters requiring review.`}
-                        </div>
-                      </div>
-                    </div>
-                  ) : isAlreadyRejected ? (
-                    <div
-                      style={{
-                        background: isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
-                        border: isLight ? '1px solid #fecaca' : '1px solid rgba(239, 68, 68, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.85rem 1rem',
-                        marginBottom: '0.75rem',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px'
-                      }}
-                    >
-                      <XCircle size={18} color={isLight ? '#dc2626' : '#f87171'} style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 800, color: isLight ? '#991b1b' : '#f87171' }}>
-                          Excuse Request Rejected by HQ — Re-filing Prohibited
-                        </div>
-                        <div style={{ fontSize: '0.74rem', color: isLight ? '#7f1d1d' : '#fca5a5', marginTop: '3px', lineHeight: 1.4 }}>
-                          The excuse request for this formation was previously reviewed and rejected by Headquarters. Under ROTC attendance regulations, rejected sessions cannot be re-filed.
-                        </div>
-                      </div>
-                    </div>
-                  ) : hasNoRemainingUnsubmitted ? (
-                    <div
-                      style={{
-                        background: isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.12)',
-                        border: isLight ? '1px solid #fde68a' : '1px solid rgba(245, 158, 11, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.85rem 1rem',
-                        marginBottom: '0.75rem',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px'
-                      }}
-                    >
-                      <Clock size={18} color={isLight ? '#d97706' : '#fbbf24'} style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 800, color: isLight ? '#92400e' : '#fbbf24' }}>
-                          Excuse Request Already Submitted — Pending Admin Review
-                        </div>
-                        <div style={{ fontSize: '0.74rem', color: isLight ? '#b45309' : '#fef08a', marginTop: '3px', lineHeight: 1.4 }}>
-                          You have already submitted an excuse request for all recorded absences within the {gracePeriodDays}-day filing window. Your submission is currently awaiting headquarters review. Duplicate submissions are disabled.
-                        </div>
-                      </div>
-                    </div>
-                  ) : eligibleAbsentDates.length === 0 ? (
-                    <div
-                      style={{
-                        background: isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.12)',
-                        border: isLight ? '1px solid #fecaca' : '1px solid rgba(239, 68, 68, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.85rem 1rem',
-                        marginBottom: '0.75rem',
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '10px'
-                      }}
-                    >
-                      <AlertOctagon size={18} color={isLight ? '#dc2626' : '#f87171'} style={{ flexShrink: 0, marginTop: '2px' }} />
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: '0.84rem', fontWeight: 800, color: isLight ? '#991b1b' : '#f87171' }}>
-                          No eligible absent records found within the filing window.
-                        </div>
-                        <div style={{ fontSize: '0.74rem', color: isLight ? '#7f1d1d' : '#fca5a5', marginTop: '3px', lineHeight: 1.4 }}>
-                          {expiredAbsentDrillDates.length > 0
-                            ? `You have ${expiredAbsentDrillDates.length} recorded absence(s), but they exceeded the official ${gracePeriodDays}-day filing policy window (considering cut-off time). Online excuse letters can no longer be submitted.`
-                            : `Excuse letters can only be filed for absent formations. You have 0 absent records within the ${gracePeriodDays}-day filing window (cadets marked Present or Late are not eligible).`}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.72rem', color: isLight ? '#64748b' : '#94a3b8', marginBottom: '6px', flexWrap: 'wrap', gap: '4px' }}>
-                      <span>
-                        🟢 <strong>{eligibleAbsentDates.length}</strong> eligible absent date{eligibleAbsentDates.length > 1 ? 's' : ''} available (Policy: {gracePeriodDays}-Day Filing Window)
-                      </span>
-                      {expiredAbsentDrillDates.length > 0 && (
-                        <span style={{ color: isLight ? '#b91c1c' : '#fca5a5', fontWeight: 600 }}>
-                          ⚠️ {expiredAbsentDrillDates.length} older absent date{expiredAbsentDrillDates.length > 1 ? 's' : ''} expired
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Status banner when selecting an already-approved date */}
-                  {isAlreadyApproved && !isAlreadyRejected && (
-                    <div
-                      style={{
-                        background: isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.12)',
-                        border: isLight ? '1px solid #a7f3d0' : '1px solid rgba(16, 185, 129, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.65rem 0.85rem',
-                        marginBottom: '0.65rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontSize: '0.76rem',
-                        color: isLight ? '#065f46' : '#34d399',
-                        fontWeight: 600
-                      }}
-                    >
-                      <CheckCircle2 size={15} color={isLight ? '#059669' : '#34d399'} style={{ flexShrink: 0 }} />
-                      <span>The excuse request for this formation date has been reviewed and APPROVED by Admin HQ. Status: EXCUSED.</span>
-                    </div>
-                  )}
-
-                  {/* Warning banner when selecting an already-submitted date while other unsubmitted dates remain */}
-                  {isAlreadyPending && !hasNoRemainingUnsubmitted && !isAlreadyRejected && (
-                    <div
-                      style={{
-                        background: isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.12)',
-                        border: isLight ? '1px solid #fde68a' : '1px solid rgba(245, 158, 11, 0.35)',
-                        borderRadius: '8px',
-                        padding: '0.65rem 0.85rem',
-                        marginBottom: '0.65rem',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        fontSize: '0.76rem',
-                        color: isLight ? '#92400e' : '#fbbf24',
-                        fontWeight: 600
-                      }}
-                    >
-                      <Clock size={15} color={isLight ? '#d97706' : '#fbbf24'} style={{ flexShrink: 0 }} />
-                      <span>An excuse request for this formation date has already been submitted and is currently pending admin review.</span>
-                    </div>
-                  )}
-
-                  {/* Formation Calendar Selector: enables eligible absent dates and shows already submitted/approved/rejected dates */}
-                  <FormationCalendarSelector
-                    selectedDate={excuseForm.targetDate}
-                    onSelectDate={dateKey => {
-                      setExcuseForm(prev => ({ ...prev, targetDate: dateKey }));
-                      if (excuseResult) setExcuseResult(null);
-                    }}
-                    recordedDates={eligibleAbsentDates.map(d => d.date)}
-                    submittedDates={excuseCalendarPendingDates}
-                    approvedDates={excuseCalendarApprovedDates}
-                    rejectedDates={excuseCalendarRejectedDates}
-                    disabled={excuseCalendarRecordedDates.length === 0}
-                    placeholder={
-                      isAlreadyApproved
-                        ? 'Excuse Approved by HQ (EXCUSED)'
-                        : isAlreadyRejected
-                          ? 'Excuse Request Rejected by HQ'
-                          : hasNoRemainingUnsubmitted
-                            ? 'Excuse Request Already Submitted'
-                            : isAllExcusedCompliant
-                              ? 'All Excused / Compliant'
-                              : eligibleAbsentDates.length === 0
-                                ? 'No eligible absent records found'
-                                : 'Select an Eligible Absent Date'
-                    }
-                    legendLabel="Eligible Absent Date"
-                    allowClear={false}
-                    isLight={isLight}
-                    t={t}
-                    fullWidth={true}
-                  />
-                </div>
-
-                {/* Reason */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: isLight ? '#374151' : '#cbd5e1', marginBottom: '4px' }}>
-                    Reason for Absence <span style={{ color: '#dc2626' }}>*</span>
-                  </label>
-                  <textarea
-                    rows={4}
-                    placeholder={
-                      isAlreadyApproved
-                        ? 'Excuse request for this date was approved by HQ (Status: EXCUSED)...'
-                        : isAlreadyRejected
-                          ? 'Excuse request for this date was rejected by HQ (re-filing not allowed)...'
-                          : showAlreadySubmittedBadge
-                            ? 'Excuse request already submitted for this date (pending admin review)...'
-                            : isAllExcusedCompliant
-                              ? 'All absences have been excused. No pending absences remain...'
-                              : 'Briefly describe why you were absent from this formation...'
-                    }
-                    value={excuseForm.reason}
-                    disabled={showAlreadySubmittedBadge || isAlreadyRejected || isAlreadyApproved || isAllExcusedCompliant}
-                    onChange={e => setExcuseForm(prev => ({ ...prev, reason: e.target.value }))}
-                    style={{
-                      width: '100%', padding: '0.65rem 0.85rem', borderRadius: '8px',
-                      border: isLight ? '1px solid #d1d5db' : '1px solid rgba(255,255,255,0.12)',
-                      background: (showAlreadySubmittedBadge || isAlreadyRejected || isAlreadyApproved || isAllExcusedCompliant)
-                        ? (isLight ? '#f1f5f9' : 'rgba(255,255,255,0.02)')
-                        : (isLight ? '#f9fafb' : 'rgba(255,255,255,0.05)'),
-                      color: (showAlreadySubmittedBadge || isAlreadyRejected || isAlreadyApproved || isAllExcusedCompliant)
-                        ? (isLight ? '#94a3b8' : '#64748b')
-                        : (isLight ? '#1e293b' : '#f1f5f9'),
-                      fontSize: '0.85rem', outline: 'none', resize: 'vertical',
-                      fontFamily: 'inherit', boxSizing: 'border-box',
-                      cursor: (showAlreadySubmittedBadge || isAlreadyRejected || isAlreadyApproved || isAllExcusedCompliant) ? 'not-allowed' : 'text'
-                    }}
-                  />
-                </div>
-
-                {/* Result Message */}
-                {excuseResult && (
-                  <div style={{
-                    padding: '0.75rem 1rem', borderRadius: '8px', fontSize: '0.84rem', fontWeight: 600,
-                    background: excuseResult.success ? '#ecfdf5' : '#fef2f2',
-                    color: excuseResult.success ? '#065f46' : '#991b1b',
-                    border: `1px solid ${excuseResult.success ? '#a7f3d0' : '#fecaca'}`
-                  }}>
-                    {excuseResult.message}
-                  </div>
-                )}
-
-                {/* Dedicated Badges */}
-                {isAlreadyApproved || (isAllExcusedCompliant && !isAlreadyRejected && !showAlreadySubmittedBadge) ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '10px',
-                      fontSize: '0.84rem',
-                      fontWeight: 800,
-                      background: isLight ? '#ecfdf5' : 'rgba(16, 185, 129, 0.15)',
-                      border: `1.5px solid ${isLight ? '#10b981' : 'rgba(16, 185, 129, 0.5)'}`,
-                      color: isLight ? '#065f46' : '#34d399',
-                      textAlign: 'center',
-                      boxShadow: '0 2px 8px rgba(16, 185, 129, 0.15)',
-                      letterSpacing: '0.2px'
-                    }}
-                  >
-                    <CheckCircle2 size={16} style={{ flexShrink: 0 }} />
-                    <span>All Excused / Compliant — No Pending Absences</span>
-                  </div>
-                ) : isAlreadyRejected ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '10px',
-                      fontSize: '0.84rem',
-                      fontWeight: 800,
-                      background: isLight ? '#fef2f2' : 'rgba(239, 68, 68, 0.15)',
-                      border: `1.5px solid ${isLight ? '#ef4444' : 'rgba(239, 68, 68, 0.5)'}`,
-                      color: isLight ? '#991b1b' : '#f87171',
-                      textAlign: 'center',
-                      boxShadow: '0 2px 8px rgba(239, 68, 68, 0.15)',
-                      letterSpacing: '0.2px'
-                    }}
-                  >
-                    <XCircle size={16} style={{ flexShrink: 0 }} />
-                    <span>Excuse Request Rejected by HQ — Re-filing Prohibited</span>
-                  </div>
-                ) : showAlreadySubmittedBadge ? (
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '8px',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '10px',
-                      fontSize: '0.84rem',
-                      fontWeight: 800,
-                      background: isLight ? '#fffbeb' : 'rgba(245, 158, 11, 0.15)',
-                      border: `1.5px solid ${isLight ? '#f59e0b' : 'rgba(245, 158, 11, 0.5)'}`,
-                      color: isLight ? '#92400e' : '#fbbf24',
-                      textAlign: 'center',
-                      boxShadow: '0 2px 8px rgba(245, 158, 11, 0.15)',
-                      letterSpacing: '0.2px'
-                    }}
-                  >
-                    <Clock size={16} style={{ flexShrink: 0 }} />
-                    <span>Excuse Request Already Submitted — Pending Admin Review</span>
-                  </div>
-                ) : null}
-
-                {/* Submit Button */}
-                <button
-                  type="button"
-                  disabled={
-                    excuseSubmitting ||
-                    showAlreadySubmittedBadge ||
-                    isAlreadyRejected ||
-                    isAlreadyApproved ||
-                    isAllExcusedCompliant ||
-                    eligibleAbsentDates.length === 0 ||
-                    !excuseForm.targetDate
-                  }
-                  onClick={handleSubmitExcuse}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-                    padding: '0.75rem 1.25rem', borderRadius: '10px',
-                    fontSize: '0.88rem', fontWeight: 800,
-                    cursor: (excuseSubmitting || showAlreadySubmittedBadge || isAlreadyRejected || isAlreadyApproved || isAllExcusedCompliant || eligibleAbsentDates.length === 0 || !excuseForm.targetDate) ? 'not-allowed' : 'pointer',
-                    background: (isAlreadyApproved || isAllExcusedCompliant)
-                      ? (isLight ? '#059669' : '#10b981')
-                      : (excuseSubmitting || showAlreadySubmittedBadge || isAlreadyRejected || eligibleAbsentDates.length === 0 || !excuseForm.targetDate)
-                        ? '#9ca3af'
-                        : 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
-                    color: '#ffffff', border: 'none',
-                    boxShadow: (excuseSubmitting || showAlreadySubmittedBadge || isAlreadyRejected || eligibleAbsentDates.length === 0 || !excuseForm.targetDate) && !(isAlreadyApproved || isAllExcusedCompliant) ? 'none' : '0 4px 14px rgba(217, 119, 6, 0.35)',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  {(isAlreadyApproved || isAllExcusedCompliant) ? (
-                    <CheckCircle2 size={15} />
-                  ) : (
-                    <Send size={15} />
-                  )}
-                  {excuseSubmitting
-                    ? 'Submitting...'
-                    : (isAlreadyApproved || isAllExcusedCompliant)
-                      ? 'All Excused / Compliant'
-                      : isAlreadyRejected
-                        ? 'Excuse Request Rejected by HQ'
-                        : showAlreadySubmittedBadge
-                          ? 'Excuse Request Already Submitted'
-                          : eligibleAbsentDates.length === 0
-                            ? 'No Eligible Absent Records'
-                            : 'Submit Excuse Request'}
-                </button>
-
-                <p style={{ margin: 0, fontSize: '0.72rem', color: isLight ? '#94a3b8' : '#64748b', textAlign: 'center' }}>
-                  Your request will be reviewed by your unit's commanding officer. You will be notified of the outcome.
-                </p>
-              </div>
-            </div>
-          )}
+          <FileExcuseModal
+            isOpen={showExcuseModal}
+            onClose={() => {
+              setShowExcuseModal(false);
+              setExcuseResult(null);
+              setTimeout(() => {
+                loadData(false);
+              }, 200);
+            }}
+            cadetId={cid}
+            isLight={isLight}
+            settings={settings}
+            logs={logs}
+            evaluated={evaluated}
+            formationDates={formationDates}
+            dbSessions={dbSessions}
+            eligibleAbsentDates={eligibleAbsentDates}
+            expiredAbsentDrillDates={expiredAbsentDrillDates}
+            pendingAbsentDrillDates={pendingAbsentDrillDates}
+            approvedAbsentDrillDates={approvedAbsentDrillDates}
+            rejectedAbsentDrillDates={rejectedAbsentDrillDates}
+            rejectedExcuseDatesMap={rejectedExcuseDatesMap}
+            approvedExcuseDatesMap={approvedExcuseDatesMap}
+            pendingExcuseDatesMap={pendingExcuseDatesMap}
+            officialFormationDatesSet={officialFormationDatesSet}
+            onSubmitSuccess={() => {
+              handleRefresh();
+            }}
+          />
 
           {/* ============================================================ */}
           {/* 6. ATTENDANCE PERFORMANCE POLICY RULES REFERENCE CARD        */}

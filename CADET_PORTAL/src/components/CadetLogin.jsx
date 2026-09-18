@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Shield, ArrowLeft, User, AlertCircle, Loader2, ChevronRight } from 'lucide-react';
 import { fetchCadetByCadetId } from '../utils/supabaseClient';
 import MilitaryLoader from './MilitaryLoader';
@@ -42,6 +42,12 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
     const cleanId = cadetIdInput.trim();
     if (!cleanId) {
       setErrorMsg('Please enter your Cadet ID Number (e.g. 221-01231).');
+      return;
+    }
+
+    const digitsOnly = cleanId.replace(/\D/g, '');
+    if (digitsOnly.length < 7) {
+      setErrorMsg('Please enter your complete Cadet ID (e.g. 221-00002). Incomplete IDs cannot be authenticated.');
       return;
     }
 

@@ -164,41 +164,19 @@ export default function AttendanceHistory({
   const todayKey = useMemo(() => toDateKey(new Date()), []);
   const calendarPopoverRef = useRef(null);
 
-  // 1. Discover all unique formation dates from TWO sources:
-  //    a) attendance_logs records (actual scan data)
-  //    b) attendance_sessions records from Supabase (the authoritative list of
-  //       scheduled formations — shows dates even when no scans have been recorded yet)
+  // 1. Discover all unique formation dates with Strict Session Verification:
+  //    Authoritative Source: attendance_sessions records from Supabase
+  //    Only formation dates with an active session in attendance_sessions are listed.
+  //    Orphaned logs from deleted sessions are strictly excluded.
   const historicalDates = useMemo(() => {
     const datesMap = new Map();
+    const activeSessionDates = new Set();
 
-    // Source A: build from actual scan log records
-    effectiveLogs.forEach((log) => {
-      const rawDate = log.timestamp || log.date || log.receivedAt;
-      const key = toDateKey(rawDate);
-      if (!key) return;
-
-      if (!datesMap.has(key)) {
-        datesMap.set(key, {
-          dateKey: key,
-          scansCount: 0,
-          sessionNames: new Set(),
-          dutyOfficers: new Set(),
-          sampleDate: new Date(rawDate),
-          hasSession: false
-        });
-      }
-      const entry = datesMap.get(key);
-      entry.scansCount += 1;
-      if (log.sessionName) entry.sessionNames.add(log.sessionName);
-      if (log.dutyOfficer) entry.dutyOfficers.add(log.dutyOfficer);
-    });
-
-    // Source B: merge session records — these establish formation dates even
-    // if attendance_logs is empty (e.g. right after a seed script runs, or
-    // when RLS policies block log reads but allow session reads)
+    // Source A: Populate authoritative session records from attendance_sessions
     dbSessions.forEach((session) => {
       const key = session.dateKey;
       if (!key) return;
+      activeSessionDates.add(key);
 
       if (!datesMap.has(key)) {
         datesMap.set(key, {
@@ -216,11 +194,63 @@ export default function AttendanceHistory({
       if (session.dutyOfficer) entry.dutyOfficers.add(session.dutyOfficer);
     });
 
-    // Include any date that has either actual scans OR a session record
+    // Source B: Count actual scans — ONLY attached to dates that have an active session in attendance_sessions
+    effectiveLogs.forEach((log) => {
+      const rawDate = log.timestamp || log.date || log.receivedAt;
+      const key = toDateKey(rawDate);
+      if (!key) return;
+
+      // When attendance_sessions records are available, discard logs for unverified / deleted sessions
+      if (dbSessions.length > 0 && !activeSessionDates.has(key)) {
+        return;
+      }
+
+      if (!datesMap.has(key)) {
+        datesMap.set(key, {
+          dateKey: key,
+          scansCount: 0,
+          sessionNames: new Set(),
+          dutyOfficers: new Set(),
+          sampleDate: new Date(rawDate),
+          hasSession: activeSessionDates.has(key)
+        });
+      }
+      const entry = datesMap.get(key);
+      entry.scansCount += 1;
+      if (log.sessionName) entry.sessionNames.add(log.sessionName);
+      if (log.dutyOfficer) entry.dutyOfficers.add(log.dutyOfficer);
+    });
+
+    // If dbSessions are loaded, only return dates that have an active verified session!
     return Array.from(datesMap.values())
-      .filter(d => d.scansCount > 0 || d.hasSession)
+      .filter(d => dbSessions.length > 0 ? d.hasSession : (d.scansCount > 0 || d.hasSession))
       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
   }, [effectiveLogs, dbSessions]);
+
+  // Auto-Purge Orphaned Local Storage Cache:
+  // When active sessions are loaded from Supabase, remove any cached logs for deleted sessions
+  useEffect(() => {
+    if (dbSessions.length > 0) {
+      try {
+        const raw = localStorage.getItem('csu_rotc_master_attendance');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const validDates = new Set(dbSessions.map(s => s.dateKey || s.session_date).filter(Boolean));
+            const filtered = parsed.filter(l => {
+              const ld = toDateKey(l.date || l.session_date || l.timestamp);
+              return !ld || validDates.has(ld);
+            });
+            if (filtered.length !== parsed.length) {
+              console.log(`[AttendanceHistory] Purged ${parsed.length - filtered.length} orphaned log(s) from local cache.`);
+              localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(filtered));
+              window.dispatchEvent(new Event('local-attendance-update'));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+  }, [dbSessions]);
 
   // Fast map lookup for valid recorded dates
   const historicalDatesMap = useMemo(() => {
@@ -274,9 +304,15 @@ export default function AttendanceHistory({
   }, [onRefresh]);
 
   // Guard: whether the currently selected date actually has recorded formation data
+  // and has a verified active session in attendance_sessions
   const isRecordedDate = useMemo(() => {
-    return !!selectedDate && historicalDatesMap.has(selectedDate);
-  }, [selectedDate, historicalDatesMap]);
+    if (!selectedDate) return false;
+    if (dbSessions.length > 0) {
+      const hasActiveSession = dbSessions.some(s => (s.dateKey || s.session_date) === selectedDate);
+      if (!hasActiveSession) return false;
+    }
+    return historicalDatesMap.has(selectedDate);
+  }, [selectedDate, historicalDatesMap, dbSessions]);
 
   // True when a session exists in Supabase for this date but attendance_logs has 0 scan records.
   // In this case the roster table renders (showing all as ABSENT) with an informational banner.
@@ -394,9 +430,15 @@ export default function AttendanceHistory({
       };
     }
 
+    // Session Verification: Pass only logs matching this verified session date
+    const verifiedDateLogs = (effectiveLogs || []).filter(l => {
+      const ld = toDateKey(l.date || l.session_date || l.timestamp || l.receivedAt);
+      return ld === selectedDate;
+    });
+
     return reconcileRosterAttendance(
       effectiveCadets,
-      effectiveLogs,
+      verifiedDateLogs,
       new Date(`${selectedDate}T12:00:00`),
       selectedSessionCutoff
     );

@@ -331,20 +331,50 @@ export async function deleteCadetFromSupabase(id) {
 // ==============================================================================
 
 /**
- * Fetches all attendance logs from Supabase
+ * Fetches all attendance logs from Supabase with active session verification.
+ * Automatically filters out orphaned logs for dates whose session row was deleted.
  */
 export async function fetchAttendanceFromSupabase() {
   const client = getSupabaseClient();
   if (!client) return [];
 
   try {
-    const { data, error } = await client
+    // 1. Session Verification: Fetch authoritative active sessions from attendance_sessions
+    const { data: sessionRows, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_date')
+      .order('session_date', { ascending: false });
+
+    if (sessionErr) {
+      console.warn('[Supabase] Warning fetching attendance_sessions during attendance logs verification:', sessionErr);
+    }
+
+    const activeSessionDates = new Set(
+      (sessionRows || []).map(s => toDateKey(s.session_date)).filter(Boolean)
+    );
+    const activeSessionIds = new Set(
+      (sessionRows || []).map(s => s.id).filter(Boolean)
+    );
+
+    const { data: rawData, error } = await client
       .from('attendance_logs')
       .select('*')
       .order('date', { ascending: false })
       .limit(10000);
 
     if (error) throw error;
+
+    // Strict Session Verification Filter: Only keep logs that belong to an active session
+    // (matches active session_id OR matches an active session_date)
+    let data = Array.isArray(rawData) ? rawData : [];
+    if (sessionRows && sessionRows.length > 0) {
+      data = data.filter(l => {
+        const lDate = toDateKey(l.date || l.session_date);
+        const hasValidSessionId = l.session_id && activeSessionIds.has(l.session_id);
+        const hasValidSessionDate = lDate && activeSessionDates.has(lDate);
+        return hasValidSessionId || hasValidSessionDate;
+      });
+    }
 
     // Also query excuse_requests table if present to merge submitted reasons
     try {
@@ -353,7 +383,15 @@ export async function fetchAttendanceFromSupabase() {
         .select('*');
 
       if (Array.isArray(excuseRows) && excuseRows.length > 0) {
-        excuseRows.forEach(ex => {
+        // Filter out excuse requests for unverified or deleted session dates
+        const verifiedExcuseRows = (sessionRows && sessionRows.length > 0)
+          ? excuseRows.filter(ex => {
+              const exDate = toDateKey(ex.drill_date || ex.date);
+              return exDate && activeSessionDates.has(exDate);
+            })
+          : excuseRows;
+
+        verifiedExcuseRows.forEach(ex => {
           const exDate = ex.drill_date || ex.date;
           const exCid = String(ex.cadet_id || ex.cadetId || '').trim().toUpperCase();
           const target = (data || []).find(l => {
@@ -447,6 +485,114 @@ export async function fetchAttendanceFromSupabase() {
     }));
   } catch (err) {
     console.error('Supabase fetch attendance error:', err);
+    return [];
+  }
+}
+
+/**
+ * Session Verification Query API:
+ * Verifies attendance_sessions before returning attendance logs for a selected date.
+ * If no session exists for dateKey, returns an empty array [] to prevent returning orphaned logs.
+ *
+ * @param {string} dateKey - Selected ISO date string (YYYY-MM-DD)
+ * @returns {Promise<Array>} Verified attendance logs for this session date
+ */
+export async function fetchAttendanceByDate(dateKey) {
+  const client = getSupabaseClient();
+  if (!client || !dateKey) return [];
+
+  const cleanDate = toDateKey(dateKey);
+  if (!cleanDate) return [];
+
+  try {
+    // 1. Session Verification: Check attendance_sessions table first
+    const { data: sessionRows, error: sessionErr } = await client
+      .from('attendance_sessions')
+      .select('id, session_date, session_name, duty_officer, cutoff_time')
+      .eq('session_date', cleanDate);
+
+    if (sessionErr) {
+      console.warn(`[Session Verification] Query error for ${cleanDate}:`, sessionErr);
+    }
+
+    if (!sessionRows || sessionRows.length === 0) {
+      console.log(`[Session Verification] No active attendance_session found for date ${cleanDate}. Returning 0 logs.`);
+      return [];
+    }
+
+    // 2. Verified active session exists -> query attendance_logs for this date
+    const { data: logs, error: logsErr } = await client
+      .from('attendance_logs')
+      .select('*')
+      .eq('date', cleanDate)
+      .order('time_in', { ascending: true });
+
+    if (logsErr) throw logsErr;
+
+    // 3. Query excuse_requests for this date and merge
+    try {
+      const { data: excuses } = await client
+        .from('excuse_requests')
+        .select('*')
+        .or(`drill_date.eq.${cleanDate},date.eq.${cleanDate}`);
+
+      if (Array.isArray(excuses) && excuses.length > 0) {
+        excuses.forEach(ex => {
+          const exCid = String(ex.cadet_id || ex.cadetId || '').trim().toUpperCase();
+          const target = (logs || []).find(l => {
+            const lcid = String(l.cadet_id || l.cadetId || '').trim().toUpperCase();
+            return lcid === exCid;
+          });
+          if (target) {
+            target.excuse_reason = ex.reason || ex.excuse_reason || target.excuse_reason;
+            target.is_excuse = true;
+          } else {
+            const rawExSt = String(ex.status || '').toUpperCase();
+            const resolvedSt = (rawExSt === 'APPROVED' || rawExSt === 'EXCUSED')
+              ? 'EXCUSED'
+              : (rawExSt === 'REJECTED' || rawExSt === 'DECLINED' || rawExSt === 'DECLARED_ABSENT')
+                ? 'ABSENT'
+                : 'EXCUSE_PENDING';
+            logs.push({
+              id: ex.id || `excuse_${exCid}_${cleanDate}`,
+              cadet_id: exCid,
+              date: cleanDate,
+              status: resolvedSt,
+              final_daily_status: resolvedSt,
+              excuse_reason: ex.reason || ex.excuse_reason || '',
+              is_excuse: true,
+              excuse_status: rawExSt
+            });
+          }
+        });
+      }
+    } catch (_) {}
+
+    return (logs || []).map(l => ({
+      id: l.id,
+      ...l,
+      cadetId: l.cadet_id,
+      cadet_id: l.cadet_id,
+      name: l.name,
+      rank: l.rank,
+      battalion: l.battalion,
+      company: l.company,
+      platoon: l.platoon,
+      designation: l.designation,
+      date: l.date,
+      timeIn: l.time_in,
+      timeOut: l.time_out,
+      time_in: l.time_in,
+      time_out: l.time_out,
+      timestamp: l.timestamp || l.time_in || l.time_out,
+      status: l.final_daily_status || l.status,
+      finalDailyStatus: l.final_daily_status || l.status,
+      dutyOfficer: l.duty_officer,
+      sessionName: l.session_name,
+      scannedBy: l.scanned_by
+    }));
+  } catch (err) {
+    console.error(`fetchAttendanceByDate error for ${cleanDate}:`, err);
     return [];
   }
 }
@@ -2336,8 +2482,9 @@ export async function fetchExcuseRequests() {
 }
 
 /**
- * SQL / Supabase query to pull cadets declared absent or without excuses for formation drill sessions.
- * Queries attendance_logs for status = 'ABSENT' and joins with cadets profile.
+ * SQL / Supabase query to pull cadets declared absent under the Excuse Reports & Verification workflow.
+ * STRICT: Queries excuse_requests table where status = 'REJECTED' or status = 'ABSENT'.
+ * Never falls back to hardcoded/fake cadet arrays (e.g. cadet 221-00005) if no database row exists.
  *
  * @param {string} [dateKey] - Specific formation date (YYYY-MM-DD) or 'ALL'
  * @returns {Promise<Array>}
@@ -2348,16 +2495,19 @@ export async function fetchDeclaredAbsentCadets(dateKey = null) {
 
   try {
     let query = client
-      .from('attendance_logs')
-      .select('id, cadet_id, name, rank, battalion, company, platoon, date, status, final_daily_status, excuse_reason, created_at, updated_at')
-      .eq('status', 'ABSENT');
+      .from('excuse_requests')
+      .select('id, cadet_id, drill_date, date, reason, proof_url, status, reviewed_by, reviewed_at, submitted_at, created_at, updated_at')
+      .or('status.eq.REJECTED,status.eq.ABSENT,status.eq.rejected,status.eq.absent');
 
     if (dateKey && dateKey !== 'ALL') {
-      query = query.eq('date', dateKey);
+      query = query.or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
     }
 
-    const { data, error } = await query.order('date', { ascending: false });
-    if (error) throw error;
+    const { data, error } = await query.order('submitted_at', { ascending: false });
+    if (error) {
+      console.warn('[fetchDeclaredAbsentCadets] Query note:', error.message);
+      return [];
+    }
     return data || [];
   } catch (err) {
     console.error('fetchDeclaredAbsentCadets error:', err);
@@ -2372,40 +2522,104 @@ export async function fetchDeclaredAbsentCadets(dateKey = null) {
  * @param {number} gracePeriodDays - Days after formation date before excuse expires
  * @returns {Promise<number>} Count of records expired
  */
-export async function autoExpireExcusePending(gracePeriodDays = 3) {
+export async function autoExpireExcusePending(gracePeriodDays = null) {
   const client = getSupabaseClient();
   if (!client) return 0;
 
   try {
+    let effectiveGrace = gracePeriodDays;
+    if (effectiveGrace === null || effectiveGrace === undefined || isNaN(Number(effectiveGrace))) {
+      try {
+        const { data: sData } = await client
+          .from('system_settings')
+          .select('excuse_grace_period_days')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (sData?.excuse_grace_period_days !== undefined && sData?.excuse_grace_period_days !== null) {
+          effectiveGrace = Number(sData.excuse_grace_period_days);
+        } else {
+          effectiveGrace = 2;
+        }
+      } catch (_) {
+        effectiveGrace = 2;
+      }
+    }
+
+    // 1. Try invoking database RPC function if installed
+    try {
+      const { data: rpcCount, error: rpcErr } = await client.rpc('expire_pending_excuse_requests');
+      if (!rpcErr && typeof rpcCount === 'number') {
+        console.log(`[ExcuseWorkflow] Auto-expired ${rpcCount} record(s) via database RPC.`);
+      }
+    } catch (_) { }
+
+    // 2. Client-side cutoff calculation
     const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - gracePeriodDays);
+    cutoffDate.setDate(cutoffDate.getDate() - Number(effectiveGrace));
     const cutoffKey = toDateKey(cutoffDate);
 
+    let totalExpired = 0;
+
+    // Update unverified EXCUSE_PENDING in attendance_logs
     const { data: pendingRows } = await client
       .from('attendance_logs')
       .select('id, date')
       .eq('status', 'EXCUSE_PENDING');
 
-    if (!Array.isArray(pendingRows) || pendingRows.length === 0) return 0;
+    if (Array.isArray(pendingRows) && pendingRows.length > 0) {
+      const expiredIds = pendingRows
+        .filter(r => r.date && r.date <= cutoffKey)
+        .map(r => r.id);
 
-    const expiredIds = pendingRows
-      .filter(r => r.date && r.date <= cutoffKey)
-      .map(r => r.id);
+      if (expiredIds.length > 0) {
+        const { error } = await client
+          .from('attendance_logs')
+          .update({
+            status: 'ABSENT',
+            final_daily_status: 'ABSENT',
+            updated_at: new Date().toISOString()
+          })
+          .in('id', expiredIds);
 
-    if (expiredIds.length === 0) return 0;
+        if (!error) {
+          totalExpired += expiredIds.length;
+          console.log(`[ExcuseWorkflow] Auto-expired ${expiredIds.length} EXCUSE_PENDING record(s) past grace period (${effectiveGrace} days).`);
+        }
+      }
+    }
 
-    const { error } = await client
-      .from('attendance_logs')
-      .update({
-        status: 'ABSENT',
-        final_daily_status: 'ABSENT',
-        updated_at: new Date().toISOString()
-      })
-      .in('id', expiredIds);
+    // Update unverified PENDING in excuse_requests table (if present)
+    try {
+      const { data: pendingReqs } = await client
+        .from('excuse_requests')
+        .select('id, drill_date, date')
+        .eq('status', 'PENDING');
 
-    if (error) throw error;
-    console.log(`[ExcuseWorkflow] Auto-expired ${expiredIds.length} EXCUSE_PENDING record(s) past grace period.`);
-    return expiredIds.length;
+      if (Array.isArray(pendingReqs) && pendingReqs.length > 0) {
+        const expiredReqIds = pendingReqs
+          .filter(r => {
+            const d = r.drill_date || r.date;
+            return d && d <= cutoffKey;
+          })
+          .map(r => r.id);
+
+        if (expiredReqIds.length > 0) {
+          await client
+            .from('excuse_requests')
+            .update({
+              status: 'ABSENT',
+              reviewed_by: 'System Auto-Expiry',
+              reviewed_at: new Date().toISOString()
+            })
+            .in('id', expiredReqIds);
+
+          totalExpired += expiredReqIds.length;
+        }
+      }
+    } catch (_) { }
+
+    return totalExpired;
   } catch (err) {
     console.error('autoExpireExcusePending error:', err);
     return 0;
