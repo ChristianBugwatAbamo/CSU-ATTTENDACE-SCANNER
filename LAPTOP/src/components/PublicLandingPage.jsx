@@ -162,12 +162,13 @@ export default function PublicLandingPage({
       )}
       <div
         style={{
-          minHeight: '100vh',
+          height: '100vh',
           width: '100%',
           maxWidth: '100%',
           background: '#f8fafc',
           color: '#1e293b',
           fontFamily: 'Inter, system-ui, sans-serif',
+          overflowY: 'auto',
           overflowX: 'hidden',
           boxSizing: 'border-box'
         }}

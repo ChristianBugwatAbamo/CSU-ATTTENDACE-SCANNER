@@ -9,6 +9,8 @@ import {
   normalizeCompany,
   normalizePlatoon
 } from './attendanceStatus';
+import { getSupabaseClient } from './supabaseClient';
+import { DEFAULT_UNIT_STRUCTURE } from '../components/AdminSettings';
 
 export const DEFAULT_LETTERHEAD = {
   topMotto: 'ARMY 2040: WORLD CLASS. MULTI-MISSION READY. CROSS-DOMAIN CAPABLE',
@@ -20,6 +22,84 @@ export const DEFAULT_LETTERHEAD = {
   leftLogoUrl: '/csu-logo.png',
   rightLogoUrl: '/rotc-seal-transparent.png'
 };
+
+/**
+ * Dynamically fetches letterhead configuration from Supabase system_settings or Unit Settings
+ * Matches: motto_text, heading_title, unit_name, unit_address, base64 seal images
+ */
+export async function fetchActiveLetterhead(providedLetterhead = null) {
+  if (providedLetterhead && typeof providedLetterhead === 'object' && Object.keys(providedLetterhead).length > 0) {
+    return { ...DEFAULT_LETTERHEAD, ...providedLetterhead };
+  }
+
+  // 1. Query Supabase system_settings
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('system_settings')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!error && data) {
+        const lhConfig = data.letterhead_config || {};
+
+        // Extract motto, heading, unit name, address/location from system_settings
+        const topMotto = data.motto_text || data.top_motto || lhConfig.motto_text || lhConfig.mottoText || lhConfig.topMotto || DEFAULT_LETTERHEAD.topMotto;
+        const headquarters = data.heading_title || data.headquarters || lhConfig.heading_title || lhConfig.headingTitle || lhConfig.headquarters || DEFAULT_LETTERHEAD.headquarters;
+        const unitName = data.unit_name || data.unitName || lhConfig.unit_name || lhConfig.unitName || DEFAULT_LETTERHEAD.unitName;
+        const parentCommand = data.parent_command || data.parentCommand || lhConfig.parent_command || lhConfig.parentCommand || DEFAULT_LETTERHEAD.parentCommand;
+        const location = data.unit_address || data.host_institution || data.hostInstitution || data.location || lhConfig.unit_address || lhConfig.unitAddress || lhConfig.location || DEFAULT_LETTERHEAD.location;
+        const officeSymbol = data.office_symbol || data.officeSymbol || lhConfig.office_symbol || lhConfig.officeSymbol || DEFAULT_LETTERHEAD.officeSymbol;
+
+        // Base64 seal images or URL paths
+        const leftLogoUrl = data.left_logo_url || data.university_logo_url || lhConfig.left_logo_url || lhConfig.leftLogoUrl || DEFAULT_LETTERHEAD.leftLogoUrl;
+        const rightLogoUrl = data.right_logo_url || data.rotc_seal_url || lhConfig.right_logo_url || lhConfig.rightLogoUrl || DEFAULT_LETTERHEAD.rightLogoUrl;
+
+        return {
+          topMotto,
+          headquarters,
+          unitName,
+          parentCommand,
+          location,
+          officeSymbol,
+          leftLogoUrl,
+          rightLogoUrl
+        };
+      }
+    } catch (err) {
+      console.warn('Could not fetch letterhead from system_settings:', err);
+    }
+  }
+
+  // 2. Fallback to localStorage settings
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const savedLh = localStorage.getItem('csu_rotc_letterhead_settings');
+      if (savedLh) {
+        return { ...DEFAULT_LETTERHEAD, ...JSON.parse(savedLh) };
+      }
+      const savedAdmin = localStorage.getItem('csu_rotc_admin_settings');
+      if (savedAdmin) {
+        const parsed = JSON.parse(savedAdmin);
+        return {
+          topMotto: parsed.motto_text || parsed.mottoText || DEFAULT_LETTERHEAD.topMotto,
+          headquarters: parsed.heading_title || parsed.headingTitle || DEFAULT_LETTERHEAD.headquarters,
+          unitName: parsed.unitName || parsed.unit_name || DEFAULT_LETTERHEAD.unitName,
+          parentCommand: parsed.parentCommand || parsed.parent_command || DEFAULT_LETTERHEAD.parentCommand,
+          location: parsed.unit_address || parsed.unitAddress || parsed.hostInstitution || parsed.location || DEFAULT_LETTERHEAD.location,
+          officeSymbol: parsed.officeSymbol || parsed.office_symbol || DEFAULT_LETTERHEAD.officeSymbol,
+          leftLogoUrl: parsed.leftLogoUrl || parsed.universityLogoUrl || DEFAULT_LETTERHEAD.leftLogoUrl,
+          rightLogoUrl: parsed.rightLogoUrl || parsed.rotcSealUrl || DEFAULT_LETTERHEAD.rightLogoUrl
+        };
+      }
+    }
+  } catch (_) { }
+
+  return DEFAULT_LETTERHEAD;
+}
 
 /**
  * Retrieves saved letterhead settings from localStorage or fallback to defaults
@@ -60,36 +140,41 @@ export function formatSheetName(echelon, isOfficer = false) {
 }
 
 /**
- * Helper to process Base64 Data URLs or asset URLs into ExcelJS image IDs
+ * Helper to process Base64 Data URLs, raw Base64 strings, or asset URLs into ExcelJS image IDs
  */
 async function addLogoToWorkbook(workbook, logoInput) {
   if (!logoInput || typeof logoInput !== 'string' || !logoInput.trim()) return null;
+  const trimmed = logoInput.trim();
   try {
-    if (logoInput.startsWith('data:image/')) {
-      const match = logoInput.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
+    if (trimmed.startsWith('data:image/')) {
+      const match = trimmed.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/);
       if (match) {
         let rawExt = match[1].toLowerCase();
         let ext = 'png';
         if (rawExt.includes('jpeg') || rawExt.includes('jpg')) ext = 'jpeg';
         else if (rawExt.includes('gif')) ext = 'gif';
         else if (rawExt.includes('png')) ext = 'png';
-        else {
-          // Unsupported image format for direct ExcelJS embedding (e.g. svg, webp)
-          return null;
-        }
+        else return null;
 
         return workbook.addImage({
           base64: match[2].trim(),
           extension: ext
         });
       }
-    } else {
+    } else if (trimmed.startsWith('iVBORw0KGgo') || trimmed.startsWith('/9j/') || (trimmed.length > 200 && !trimmed.includes('/') && !trimmed.includes(' '))) {
+      // Direct raw base64 string without data:image prefix
+      const ext = trimmed.startsWith('/9j/') ? 'jpeg' : 'png';
+      return workbook.addImage({
+        base64: trimmed,
+        extension: ext
+      });
+    } else if (typeof fetch !== 'undefined') {
       // Fetch public asset path
-      const res = await fetch(logoInput);
+      const res = await fetch(trimmed);
       if (res.ok) {
         const blob = await res.blob();
         const buffer = await blob.arrayBuffer();
-        const lower = logoInput.toLowerCase();
+        const lower = trimmed.toLowerCase();
         let ext = 'png';
         if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) ext = 'jpeg';
         else if (lower.endsWith('.gif')) ext = 'gif';
@@ -192,7 +277,7 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
   if (!effectiveFormationDate) {
     try {
       effectiveFormationDate = localStorage.getItem('csu_rotc_selected_formation_date');
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const formattedDate = formatMilitaryDate(effectiveFormationDate);
@@ -212,7 +297,7 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
       if (!isNaN(d.getTime())) {
         return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
       }
-    } catch (_) {}
+    } catch (_) { }
     return String(val);
   };
 
@@ -629,3 +714,843 @@ export async function exportAttendanceToExcel(records = [], sessionName = 'Field
 
 // Re-export as alias for compatibility
 export const exportAttendanceReport = exportAttendanceToExcel;
+
+/**
+ * Parses cadet name into last_name, first_name, and middle_initial
+ */
+export function parseCadetNameComponents(cadet = {}) {
+  let lastName = cadet.last_name || cadet.lastName || '';
+  let firstName = cadet.first_name || cadet.firstName || '';
+  let middleInitial = cadet.middle_initial || cadet.middleInitial || '';
+
+  if (!lastName && !firstName && cadet.name) {
+    const raw = String(cadet.name).trim();
+    if (raw.includes(',')) {
+      const parts = raw.split(',');
+      lastName = parts[0].trim().toUpperCase();
+      const rest = (parts[1] || '').trim();
+      const nameTokens = rest.split(/\s+/);
+      if (nameTokens.length > 1 && /^[a-zA-Z]\.?$/.test(nameTokens[nameTokens.length - 1])) {
+        middleInitial = nameTokens.pop().replace(/\./g, '').toUpperCase();
+      }
+      firstName = nameTokens.join(' ').toUpperCase();
+    } else {
+      const tokens = raw.split(/\s+/);
+      if (tokens.length >= 2) {
+        if (/^[a-zA-Z]\.?$/.test(tokens[tokens.length - 1])) {
+          middleInitial = tokens.pop().replace(/\./g, '').toUpperCase();
+        }
+        lastName = tokens.pop().toUpperCase();
+        firstName = tokens.join(' ').toUpperCase();
+      } else {
+        lastName = raw.toUpperCase();
+      }
+    }
+  }
+
+  const miFormatted = middleInitial
+    ? (middleInitial.replace(/\./g, '').trim().toUpperCase() + '.')
+    : '';
+
+  return {
+    lastName: lastName.trim().toUpperCase(),
+    firstName: firstName.trim().toUpperCase(),
+    middleInitial: miFormatted
+  };
+}
+
+/**
+ * Dynamic Filipino cadet profile templates for realistic sample row generation
+ */
+const SAMPLE_NAME_POOL = [
+  { lastName: 'DELA CRUZ', firstName: 'JUAN', mi: 'M.', gender: 'Male', dept: 'CCIS', prog: 'BSCS', contact: '09123456789' },
+  { lastName: 'SANTOS', firstName: 'MARIA', mi: 'A.', gender: 'Female', dept: 'CEGS', prog: 'BSCE', contact: '09187654321' },
+  { lastName: 'GARCIA', firstName: 'CARLOS', mi: 'D.', gender: 'Male', dept: 'CCIS', prog: 'BSIT', contact: '09201234567' },
+  { lastName: 'LOPEZ', firstName: 'ANA', mi: 'P.', gender: 'Female', dept: 'CED', prog: 'BSED', contact: '09309876543' },
+  { lastName: 'REYES', firstName: 'MARK ANTHONY', mi: 'L.', gender: 'Male', dept: 'CAS', prog: 'BACOMM', contact: '09171122334' },
+  { lastName: 'TORRES', firstName: 'BEA MARIE', mi: 'K.', gender: 'Female', dept: 'CHASS', prog: 'BSN', contact: '09224455667' },
+  { lastName: 'CRUZ', firstName: 'ANGELO', mi: 'J.', gender: 'Male', dept: 'CEGS', prog: 'BSME', contact: '09337788990' },
+  { lastName: 'FLORES', firstName: 'ANGELICA', mi: 'T.', gender: 'Female', dept: 'CHASS', prog: 'BSN', contact: '09193344556' },
+  { lastName: 'MENDOZA', firstName: 'PAULO', mi: 'R.', gender: 'Male', dept: 'CEGS', prog: 'BSEE', contact: '09285566778' },
+  { lastName: 'AQUINO', firstName: 'JOSHUA', mi: 'E.', gender: 'Male', dept: 'CCIS', prog: 'BSCS', contact: '09397788991' },
+  { lastName: 'CASTILLO', firstName: 'KEVIN', mi: 'B.', gender: 'Male', dept: 'CAS', prog: 'BSMATH', contact: '09162233445' },
+  { lastName: 'DELOS SANTOS', firstName: 'ELLA', mi: 'N.', gender: 'Female', dept: 'CAA', prog: 'BSF', contact: '09274455668' },
+  { lastName: 'MORALES', firstName: 'CEDRIC', mi: 'P.', gender: 'Male', dept: 'CEGS', prog: 'BSGE', contact: '09386677889' },
+  { lastName: 'BAUTISTA', firstName: 'DIANA', mi: 'M.', gender: 'Female', dept: 'CED', prog: 'BEED', contact: '09491122336' },
+  { lastName: 'NAVARRO', firstName: 'CLARA', mi: 'F.', gender: 'Female', dept: 'CCIS', prog: 'BSIS', contact: '09441122335' },
+  { lastName: 'RAMOS', firstName: 'GABRIEL', mi: 'V.', gender: 'Male', dept: 'CAS', prog: 'BSBIO', contact: '09405678901' }
+];
+
+/**
+ * Robust matcher for echelon names (battalion, company, platoon)
+ */
+function matchesEchelon(cadetVal = '', configVal = '') {
+  const cNorm = String(cadetVal || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  const cfgNorm = String(configVal || '').trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!cNorm || !cfgNorm) return false;
+  if (cNorm === cfgNorm) return true;
+
+  // Compare numerical digits for platoons (e.g. "1st Platoon" vs "1" or "1PLTN")
+  const cPltMatch = cNorm.match(/(\d+)/);
+  const cfgPltMatch = cfgNorm.match(/(\d+)/);
+  if (cPltMatch && cfgPltMatch && cPltMatch[1] === cfgPltMatch[1]) {
+    if ((cfgNorm.includes('platoon') || cfgNorm.includes('plt')) && (cNorm.includes('platoon') || cNorm.includes('plt') || /^\d+(st|nd|rd|th)?$/.test(cNorm))) {
+      return true;
+    }
+    if ((cfgNorm.includes('battalion') || cfgNorm.includes('bn')) && (cNorm.includes('battalion') || cNorm.includes('bn') || /^\d+(st|nd|rd|th)?$/.test(cNorm))) {
+      return true;
+    }
+  }
+
+  // Compare company names (Alpha, Bravo, Charlie, Delta, etc.)
+  const coKeywords = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot'];
+  for (const kw of coKeywords) {
+    if (cNorm.includes(kw) && cfgNorm.includes(kw)) {
+      return true;
+    }
+  }
+
+  return cNorm.includes(cfgNorm) || cfgNorm.includes(cNorm);
+}
+
+/**
+ * Dynamically queries active Unit Structure from Supabase or Unit Settings
+ */
+export async function fetchActiveUnitStructure(providedStructure = null) {
+  // 1. Structure passed directly by caller
+  if (Array.isArray(providedStructure) && providedStructure.length > 0) {
+    return providedStructure;
+  }
+
+  // 2. Query Supabase database
+  const client = getSupabaseClient();
+  if (client) {
+    // 2a. Check if dedicated unit_structure table exists
+    try {
+      const { data: tableData, error: tableError } = await client
+        .from('unit_structure')
+        .select('*');
+
+      if (!tableError && Array.isArray(tableData) && tableData.length > 0) {
+        if (tableData[0]?.companies && Array.isArray(tableData[0]?.companies)) {
+          return tableData;
+        }
+        if (tableData[0]?.battalion && tableData[0]?.company) {
+          const bnMap = new Map();
+          tableData.forEach((row) => {
+            const bName = row.battalion || '1st Battalion';
+            const cName = row.company || 'Alpha Company';
+            const pName = row.platoon || '1st Platoon';
+            if (!bnMap.has(bName)) {
+              bnMap.set(bName, { id: `bn-${bnMap.size + 1}`, name: bName, companies: new Map() });
+            }
+            const bnObj = bnMap.get(bName);
+            if (!bnObj.companies.has(cName)) {
+              bnObj.companies.set(cName, { id: `co-${bnObj.companies.size + 1}`, name: cName, platoons: [] });
+            }
+            const coObj = bnObj.companies.get(cName);
+            if (!coObj.platoons.some((p) => p.name === pName)) {
+              coObj.platoons.push({
+                id: `pl-${coObj.platoons.length + 1}`,
+                name: pName,
+                shortCode: `${pName.charAt(0)}PLTN`,
+                targetQuota: row.target_quota || 37
+              });
+            }
+          });
+          const parsed = Array.from(bnMap.values()).map((b) => ({
+            ...b,
+            companies: Array.from(b.companies.values())
+          }));
+          if (parsed.length > 0) return parsed;
+        }
+      }
+    } catch (_) {
+      // Table doesn't exist or query failed, fall through to system_settings
+    }
+
+    // 2b. Check system_settings table (unit_structure JSONB column)
+    try {
+      const { data: settingsData, error: settingsError } = await client
+        .from('system_settings')
+        .select('unit_structure')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (!settingsError && settingsData && settingsData.length > 0) {
+        const struct = settingsData[0].unit_structure;
+        if (Array.isArray(struct) && struct.length > 0) {
+          return struct;
+        }
+      }
+    } catch (_) { }
+  }
+
+  // 3. Check browser localStorage
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = localStorage.getItem('csu_rotc_admin_settings') || localStorage.getItem('csu_rotc_system_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const struct = parsed.unit_structure || parsed.unitStructure;
+        if (Array.isArray(struct) && struct.length > 0) {
+          return struct;
+        }
+      }
+    }
+  } catch (_) { }
+
+  // 4. Default Unit Structure fallback (1st & 2nd Battalion, 2 Companies each, 2 Platoons each)
+  return DEFAULT_UNIT_STRUCTURE || [
+    {
+      id: 'bn-1',
+      name: '1st Battalion',
+      companies: [
+        {
+          id: 'co-1-alpha',
+          name: 'Alpha Company',
+          platoons: [
+            { id: 'pl-1-a-1', name: '1st Platoon', targetQuota: 37 },
+            { id: 'pl-1-a-2', name: '2nd Platoon', targetQuota: 37 }
+          ]
+        },
+        {
+          id: 'co-1-bravo',
+          name: 'Bravo Company',
+          platoons: [
+            { id: 'pl-1-b-1', name: '1st Platoon', targetQuota: 37 },
+            { id: 'pl-1-b-2', name: '2nd Platoon', targetQuota: 37 }
+          ]
+        }
+      ]
+    },
+    {
+      id: 'bn-2',
+      name: '2nd Battalion',
+      companies: [
+        {
+          id: 'co-2-charlie',
+          name: 'Charlie Company',
+          platoons: [
+            { id: 'pl-2-c-1', name: '1st Platoon', targetQuota: 37 },
+            { id: 'pl-2-c-2', name: '2nd Platoon', targetQuota: 37 }
+          ]
+        },
+        {
+          id: 'co-2-delta',
+          name: 'Delta Company',
+          platoons: [
+            { id: 'pl-2-d-1', name: '1st Platoon', targetQuota: 37 },
+            { id: 'pl-2-d-2', name: '2nd Platoon', targetQuota: 37 }
+          ]
+        }
+      ]
+    }
+  ];
+}
+
+/**
+ * Dynamically generates sample cadet rows ONLY for platoons configured in unit_structure
+ */
+export function generateSampleCadetsForStructure(unitStructure = []) {
+  const sampleCadets = [];
+  let sampleIdIndex = 1;
+  let poolIdx = 0;
+
+  unitStructure.forEach((bn) => {
+    const bnName = bn.name || '1st Battalion';
+    (bn.companies || []).forEach((coy) => {
+      const coyName = coy.name || 'Alpha Company';
+      (coy.platoons || []).forEach((plt) => {
+        const pltName = plt.name || '1st Platoon';
+        // Generate exactly 2 realistic sample cadet rows per configured platoon
+        for (let k = 0; k < 2; k++) {
+          const profile = SAMPLE_NAME_POOL[poolIdx % SAMPLE_NAME_POOL.length];
+          poolIdx++;
+          const idNum = String(sampleIdIndex++).padStart(5, '0');
+          sampleCadets.push({
+            id: `221-${idNum}`,
+            name: `${profile.lastName}, ${profile.firstName} ${profile.mi}`,
+            gender: profile.gender,
+            department: profile.dept,
+            program: profile.prog,
+            contact_number: profile.contact,
+            battalion: bnName,
+            company: coyName,
+            platoon: pltName,
+            rank: 'Cadet',
+            type: 'Basic Cadet'
+          });
+        }
+      });
+    });
+  });
+
+  return sampleCadets;
+}
+
+/**
+ * Standard Columns for Cadet Registration & Roster Ledger
+ */
+const STANDARD_CADET_COLUMNS = [
+  { header: '#', key: 'index', width: 6 },
+  { header: 'Cadet ID', key: 'cadet_id', width: 16 },
+  { header: 'Last Name', key: 'last_name', width: 22 },
+  { header: 'First Name', key: 'first_name', width: 22 },
+  { header: 'Middle Initial', key: 'middle_initial', width: 14 },
+  { header: 'Contact Number', key: 'contact_number', width: 18 },
+  { header: 'Gender', key: 'gender', width: 12 },
+  { header: 'Department', key: 'department', width: 16 },
+  { header: 'Academic Program', key: 'academic_program', width: 22 }
+];
+
+/**
+ * Exports Cadet Roster or Registration Template to Excel with dynamic echelon grouping:
+ * Battalion > Company > Platoon with green text section banners and ROTC forest green (#006633) headers.
+ * Queries active unit structure to ensure section headers and sample rows strictly match configured units.
+ */
+export async function exportCadetRosterToExcel(cadetsInput = [], options = {}) {
+  const {
+    isTemplate = false,
+    filename: customFilename = null,
+    sheetTitle = isTemplate ? 'Cadet Registration Template' : 'Cadet Roster Ledger',
+    unitStructure: customStructure = null
+  } = options;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'CSU ROTC Admin HQ';
+  workbook.lastModifiedBy = 'CSU ROTC Admin HQ';
+  workbook.created = new Date();
+  workbook.modified = new Date();
+
+  const letterhead = await fetchActiveLetterhead(options.letterhead);
+  const leftLogoId = await addLogoToWorkbook(workbook, letterhead.leftLogoUrl);
+  const rightLogoId = await addLogoToWorkbook(workbook, letterhead.rightLogoUrl);
+
+  // 1. Dynamically fetch active unit structure
+  const activeStructure = await fetchActiveUnitStructure(customStructure);
+
+  // 2. Determine records to process (for live roster export or template pre-fill)
+  let rawList = (Array.isArray(cadetsInput) && cadetsInput.length > 0)
+    ? cadetsInput
+    : (Array.isArray(options.cadets) && options.cadets.length > 0)
+      ? options.cadets
+      : [];
+
+  // Query existing registered cadets from Supabase if none provided
+  if (rawList.length === 0) {
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data, error } = await client
+          .from('cadets')
+          .select('*')
+          .order('last_name', { ascending: true });
+        if (!error && Array.isArray(data)) {
+          rawList = data;
+        }
+      } catch (err) {
+        console.warn('Could not query existing cadets from Supabase for template:', err);
+      }
+    }
+  }
+
+  // 3. Normalize and parse every cadet record
+  const normalizedCadets = rawList.map((c, i) => {
+    const { lastName, firstName, middleInitial } = parseCadetNameComponents(c);
+    const bn = normalizeBattalion(c.battalion || '1st Battalion');
+    const coy = normalizeCompany(c.company || 'Alpha Company');
+    const plt = c.platoon ? (String(c.platoon).toLowerCase().endsWith('platoon') ? c.platoon : `${c.platoon} Platoon`) : '1st Platoon';
+
+    return {
+      index: i + 1,
+      id: String(c.id || c.cadet_id || c.cadetId || '').trim().toUpperCase(),
+      lastName,
+      firstName,
+      middleInitial,
+      contactNumber: String(c.contact_number || c.contactNumber || c.phone || '').trim(),
+      gender: c.gender ? (String(c.gender).toUpperCase().startsWith('F') ? 'Female' : 'Male') : 'Male',
+      department: String(c.department || c.dept || 'CCIS').trim().toUpperCase(),
+      program: String(c.academic_program || c.academicProgram || c.program || c.course || 'BSCS').trim().toUpperCase(),
+      battalion: bn,
+      company: coy,
+      platoon: plt,
+      rank: c.rank || 'Cadet',
+      type: c.type || 'Basic Cadet'
+    };
+  });
+
+  // 4. Pre-seed hierarchy strictly from the configured unit structure
+  // Only configured platoons (e.g. max 2 per company) will exist as section headers
+  const hierarchy = new Map();
+
+  activeStructure.forEach((bn) => {
+    const coyMap = new Map();
+    (bn.companies || []).forEach((coy) => {
+      const pltMap = new Map();
+      (coy.platoons || []).forEach((plt) => {
+        pltMap.set(plt.name, []);
+      });
+      coyMap.set(coy.name, pltMap);
+    });
+    hierarchy.set(bn.name, coyMap);
+  });
+
+  // 5. Populate cadets strictly into configured unit echelons
+  normalizedCadets.forEach((cadet) => {
+    let assigned = false;
+    for (const [bnName, coyMap] of hierarchy.entries()) {
+      if (matchesEchelon(cadet.battalion, bnName)) {
+        for (const [coyName, pltMap] of coyMap.entries()) {
+          if (matchesEchelon(cadet.company, coyName)) {
+            for (const pltName of pltMap.keys()) {
+              if (matchesEchelon(cadet.platoon, pltName)) {
+                pltMap.get(pltName).push(cadet);
+                assigned = true;
+                break;
+              }
+            }
+            if (assigned) break;
+          }
+        }
+        if (assigned) break;
+      }
+    }
+  });
+
+  // Helper function to build a structured worksheet
+  const buildRosterWorksheet = (worksheet, titleBanner, subInfo, bnEntries) => {
+    // 1. Column Widths
+    worksheet.columns = STANDARD_CADET_COLUMNS.map(col => ({
+      key: col.key,
+      width: col.width
+    }));
+
+    // 2. Row Heights for Header Rows 1-6
+    worksheet.getRow(1).height = 18;
+    worksheet.getRow(2).height = 20;
+    worksheet.getRow(3).height = 22;
+    worksheet.getRow(4).height = 19;
+    worksheet.getRow(5).height = 24;
+    worksheet.getRow(6).height = 18;
+
+    // Row 1: Motto Banner (A1:I1)
+    worksheet.mergeCells('A1:I1');
+    const mottoCell = worksheet.getCell('A1');
+    mottoCell.value = letterhead.topMotto || 'ARMY 2040: WORLD CLASS. MULTI-MISSION READY. CROSS-DOMAIN CAPABLE';
+    mottoCell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF0F172A' } };
+    mottoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Row 2-4: Left Logo (A2:B4)
+    worksheet.mergeCells('A2:B4');
+    const leftLogoCell = worksheet.getCell('A2');
+    leftLogoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Center Title Text: Columns C to G (Rows 2, 3, 4)
+    worksheet.mergeCells('C2:G2');
+    const hqCell = worksheet.getCell('C2');
+    hqCell.value = letterhead.headquarters || 'H E A D Q U A R T E R S';
+    hqCell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF003E1D' } };
+    hqCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    worksheet.mergeCells('C3:G3');
+    const unitCell = worksheet.getCell('C3');
+    unitCell.value = letterhead.unitName || 'CARAGA STATE UNIVERSITY MAIN CAMPUS ROTC UNIT (ACTIVATED)';
+    unitCell.font = { name: 'Arial', size: 10.5, bold: true, color: { argb: 'FF1E293B' } };
+    unitCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    worksheet.mergeCells('C4:G4');
+    const cmdCell = worksheet.getCell('C4');
+    cmdCell.value = `${letterhead.parentCommand || '1501 (ADN), 15TH (CARAGA) RCDG, ARESCOM'} • ${letterhead.location || 'Ampayon, Butuan City'}`;
+    cmdCell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF334155' } };
+    cmdCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Row 2-4: Right Logo (H2:I4)
+    worksheet.mergeCells('H2:I4');
+    const rightLogoCell = worksheet.getCell('H2');
+    rightLogoCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Embed Logos if loaded
+    if (leftLogoId !== null) {
+      try {
+        worksheet.addImage(leftLogoId, {
+          tl: { col: 0.2, row: 1.1 },
+          br: { col: 1.8, row: 3.9 },
+          editAs: 'oneCell'
+        });
+      } catch (_) { }
+    }
+
+    if (rightLogoId !== null) {
+      try {
+        worksheet.addImage(rightLogoId, {
+          tl: { col: 7.2, row: 1.1 },
+          br: { col: 8.8, row: 3.9 },
+          editAs: 'oneCell'
+        });
+      } catch (_) { }
+    }
+
+    // Row 5: Sheet Title Banner (A5:I5)
+    worksheet.mergeCells('A5:I5');
+    const titleCell = worksheet.getCell('A5');
+    titleCell.value = titleBanner.toUpperCase();
+    titleCell.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFFFF' } };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF006633' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Row 6: Subtitle info line (A6:I6)
+    worksheet.mergeCells('A6:I6');
+    const subCell = worksheet.getCell('A6');
+    subCell.value = subInfo;
+    subCell.font = { name: 'Arial', size: 9, italic: true, color: { argb: 'FF475569' } };
+    subCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    // Row 7: Spacer
+    worksheet.addRow([]);
+    worksheet.getRow(7).height = 10;
+
+    let runningIndex = 1;
+
+    // ── Build Battalion > Company > Platoon Blocks ──
+    bnEntries.forEach(([bnName, companyMap]) => {
+      // Calculate Battalion Total Strength
+      let bnTotalCadets = 0;
+      companyMap.forEach(pltMap => {
+        pltMap.forEach(list => { bnTotalCadets += list.length; });
+      });
+
+      // Battalion Level Header Banner (Merged A:I, Centered, #006633 fill, bold white font)
+      const bnRow = worksheet.addRow([` ${bnName.toUpperCase()}`]);
+      worksheet.mergeCells(`A${bnRow.number}:I${bnRow.number}`);
+      bnRow.height = 28;
+      const bnCell = bnRow.getCell(1);
+      bnCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF006633' } };
+      bnCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FFFFFFFF' } };
+      bnCell.alignment = { horizontal: 'center', vertical: 'middle' };
+      bnCell.border = {
+        top: { style: 'medium', color: { argb: 'FF004D26' } },
+        bottom: { style: 'medium', color: { argb: 'FF004D26' } },
+        left: { style: 'medium', color: { argb: 'FF004D26' } },
+        right: { style: 'medium', color: { argb: 'FF004D26' } }
+      };
+
+      // Sort companies: Alpha -> Bravo -> Charlie -> Delta
+      const sortedCompanies = Array.from(companyMap.keys()).sort((a, b) => {
+        const coOrder = ['alpha', 'bravo', 'charlie', 'delta'];
+        const aIdx = coOrder.findIndex(c => a.toLowerCase().includes(c));
+        const bIdx = coOrder.findIndex(c => b.toLowerCase().includes(c));
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+        return a.localeCompare(b);
+      });
+
+      sortedCompanies.forEach(companyName => {
+        const platoonMap = companyMap.get(companyName);
+
+        // Compute Company Strength
+        let companyCadets = [];
+        platoonMap.forEach(list => companyCadets.push(...list));
+
+        // ── 1. SECTION BANNER ROW: COMPANY NAME (Merged A:I, Centered, #006633 fill, bold white font) ──
+        const compRow = worksheet.addRow([`${companyName.toUpperCase()}`]);
+        worksheet.mergeCells(`A${compRow.number}:I${compRow.number}`);
+        compRow.height = 26;
+        const compCell = compRow.getCell(1);
+        compCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF006633' } };
+        compCell.font = { name: 'Arial', size: 11.5, bold: true, color: { argb: 'FFFFFFFF' } };
+        compCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        compCell.border = {
+          top: { style: 'medium', color: { argb: 'FF004D26' } },
+          bottom: { style: 'thin', color: { argb: 'FF004D26' } },
+          left: { style: 'medium', color: { argb: 'FF004D26' } },
+          right: { style: 'medium', color: { argb: 'FF004D26' } }
+        };
+
+        // Sort Platoons (1st -> 2nd -> 3rd -> 4th)
+        const sortedPlatoons = Array.from(platoonMap.keys()).sort((a, b) => {
+          const aNum = parseInt(a, 10) || 99;
+          const bNum = parseInt(b, 10) || 99;
+          return aNum - bNum;
+        });
+
+        sortedPlatoons.forEach(platoonName => {
+          const platoonCadets = platoonMap.get(platoonName);
+
+          // ── 2. SUB-HEADER: PLATOON NAME (Merged A:I, Centered, #008040 fill, bold white font) ──
+          const pltRow = worksheet.addRow([`${platoonName.toUpperCase()}`]);
+          worksheet.mergeCells(`A${pltRow.number}:I${pltRow.number}`);
+          pltRow.height = 22;
+          const pltCell = pltRow.getCell(1);
+          pltCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF008040' } };
+          pltCell.font = { name: 'Arial', size: 10.5, bold: true, color: { argb: 'FFFFFFFF' } };
+          pltCell.alignment = { horizontal: 'center', vertical: 'middle' };
+          pltCell.border = {
+            top: { style: 'thin', color: { argb: 'FF006633' } },
+            bottom: { style: 'thin', color: { argb: 'FF006633' } },
+            left: { style: 'thin', color: { argb: 'FF006633' } },
+            right: { style: 'thin', color: { argb: 'FF006633' } }
+          };
+
+          // ── 3. STANDARD COLUMNS TABLE HEADERS: ROTC Forest Green (#006633 background with white text) ──
+          const tableHeaderRow = worksheet.addRow(STANDARD_CADET_COLUMNS.map(col => col.header));
+          tableHeaderRow.height = 24;
+          tableHeaderRow.eachCell(cell => {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FF006633' } // Forest Green #006633
+            };
+            cell.font = {
+              name: 'Arial',
+              size: 9.5,
+              bold: true,
+              color: { argb: 'FFFFFFFF' } // White text
+            };
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FF004D26' } },
+              bottom: { style: 'thin', color: { argb: 'FF004D26' } },
+              left: { style: 'thin', color: { argb: 'FF004D26' } },
+              right: { style: 'thin', color: { argb: 'FF004D26' } }
+            };
+          });
+
+          // ── 4. CADET ROWS IN PLATOON BLOCK ──
+          if (isTemplate) {
+            // Sort existing registered cadets under this platoon alphabetically by Last Name, First Name
+            const sortedRegistered = [...platoonCadets].sort((a, b) =>
+              (a.lastName || '').localeCompare(b.lastName || '') ||
+              (a.firstName || '').localeCompare(b.firstName || '')
+            );
+
+            let slotIndex = 1;
+
+            // 4a. Populate registered cadets under their assigned Platoon first
+            sortedRegistered.forEach(cadet => {
+              const rowData = [
+                slotIndex,
+                cadet.id,
+                cadet.lastName,
+                cadet.firstName,
+                cadet.middleInitial,
+                cadet.contactNumber || '—',
+                cadet.gender,
+                cadet.department,
+                cadet.program
+              ];
+
+              const cRow = worksheet.addRow(rowData);
+              cRow.height = 20;
+
+              const isEven = slotIndex % 2 === 0;
+
+              cRow.eachCell((cell, colNum) => {
+                cell.font = { name: 'Arial', size: 9.5, color: { argb: 'FF111827' } };
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { argb: isEven ? 'FFF9FAFB' : 'FFFFFFFF' }
+                };
+                cell.border = {
+                  top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+                };
+
+                // Alignments
+                if (colNum === 1 || colNum === 2 || colNum === 5 || colNum === 6 || colNum === 7 || colNum === 8 || colNum === 9) {
+                  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                } else {
+                  cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+                }
+
+                // Row index # styling
+                if (colNum === 1) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF475569' } };
+                }
+                // Bold ID & Cadet Name
+                if (colNum === 2) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF064E2E' } };
+                }
+                if (colNum === 3 || colNum === 4) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF111827' } };
+                }
+              });
+
+              slotIndex++;
+            });
+
+            // 4b. Fill any remaining slots up to 37 with numbered blank rows
+            for (let rowIdx = slotIndex; rowIdx <= 37; rowIdx++) {
+              const rowData = [
+                rowIdx,         // Col 1: # (rowIdx up to 37)
+                '',             // Col 2: Cadet ID (blank for user entry)
+                '',             // Col 3: Last Name (blank for user entry)
+                '',             // Col 4: First Name (blank for user entry)
+                '',             // Col 5: Middle Initial (blank for user entry)
+                '',             // Col 6: Contact Number (blank for user entry)
+                '',             // Col 7: Gender (blank for user entry)
+                '',             // Col 8: Department (blank for user entry)
+                ''              // Col 9: Academic Program (blank for user entry)
+              ];
+
+              const cRow = worksheet.addRow(rowData);
+              cRow.height = 20;
+
+              const isEven = rowIdx % 2 === 0;
+
+              cRow.eachCell((cell, colNum) => {
+                cell.font = { name: 'Arial', size: 9.5, color: { argb: 'FF111827' } };
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { argb: isEven ? 'FFF9FAFB' : 'FFFFFFFF' }
+                };
+                cell.border = {
+                  top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+                };
+
+                // Alignments
+                if (colNum === 1 || colNum === 2 || colNum === 5 || colNum === 6 || colNum === 7 || colNum === 8 || colNum === 9) {
+                  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                } else {
+                  cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+                }
+
+                // Row index # styling
+                if (colNum === 1) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF475569' } };
+                }
+              });
+            }
+          } else {
+            // Live Roster Export: Output actual registered cadet records
+            platoonCadets.forEach(cadet => {
+              const rowData = [
+                runningIndex++,
+                cadet.id,
+                cadet.lastName,
+                cadet.firstName,
+                cadet.middleInitial,
+                cadet.contactNumber || '—',
+                cadet.gender,
+                cadet.department,
+                cadet.program
+              ];
+
+              const cRow = worksheet.addRow(rowData);
+              cRow.height = 20;
+
+              const isEven = runningIndex % 2 === 0;
+
+              cRow.eachCell((cell, colNum) => {
+                cell.font = { name: 'Arial', size: 9.5, color: { argb: 'FF111827' } };
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { argb: isEven ? 'FFF9FAFB' : 'FFFFFFFF' }
+                };
+                cell.border = {
+                  top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+                  right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
+                };
+
+                // Alignments
+                if (colNum === 1 || colNum === 2 || colNum === 5 || colNum === 6 || colNum === 7 || colNum === 8 || colNum === 9) {
+                  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+                } else {
+                  cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+                }
+
+                // Bold ID & Cadet Name
+                if (colNum === 2) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF064E2E' } };
+                }
+                if (colNum === 3 || colNum === 4) {
+                  cell.font = { name: 'Arial', size: 9.5, bold: true, color: { argb: 'FF111827' } };
+                }
+              });
+            });
+          }
+
+          // Small spacer row after each platoon block
+          const spacerRow = worksheet.addRow([]);
+          spacerRow.height = 8;
+        });
+
+        // Medium spacer row after each company block
+        const compSpacer = worksheet.addRow([]);
+        compSpacer.height = 12;
+      });
+    });
+  };
+
+  // ── 1. Create Master Roster Sheet (All Echelons) ──
+  const masterSheet = workbook.addWorksheet(isTemplate ? 'Registration Template' : 'Master Cadet Ledger');
+  const allEntries = Array.from(hierarchy.entries());
+  const subInfo = isTemplate
+    ? `Official Cadet Registration Template | Pre-filled Existing Cadets (${normalizedCadets.length} Registered) | 37 Cadet Slots Per Platoon`
+    : `Complete Cadet Ledger | Total Enrolled: ${normalizedCadets.length} Cadets | Generated: ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
+
+  buildRosterWorksheet(
+    masterSheet,
+    sheetTitle,
+    subInfo,
+    allEntries
+  );
+
+  // ── 2. Create Dedicated Sheets for Each Battalion ──
+  allEntries.forEach(([bnName, companyMap]) => {
+    const cleanBnName = bnName.replace(' Battalion', ' Bn');
+    const bnSheet = workbook.addWorksheet(cleanBnName.slice(0, 31));
+    let bnCount = 0;
+    companyMap.forEach(pltMap => { pltMap.forEach(list => { bnCount += list.length; }); });
+
+    const bnSub = isTemplate
+      ? `${bnName} | Registration Template (Pre-filled Existing Cadets + Up to 37 Slots per Platoon)`
+      : `${bnName} | Total Strength: ${bnCount} Cadets | ROTC Formative Record`;
+
+    buildRosterWorksheet(
+      bnSheet,
+      `${bnName.toUpperCase()} ${isTemplate ? 'REGISTRATION TEMPLATE' : 'CADET LEDGER'}`,
+      bnSub,
+      [[bnName, companyMap]]
+    );
+  });
+
+  // ── 3. Write Buffer & Trigger File Download ──
+  const defaultFile = isTemplate
+    ? 'CSU_ROTC_Cadet_Registration_Template.xlsx'
+    : `CSU_ROTC_Cadet_Roster_Master_${new Date().toISOString().slice(0, 10)}.xlsx`;
+
+  const finalFilename = customFilename || defaultFile;
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8' });
+  saveAs(blob, finalFilename);
+
+  return { success: true, filename: finalFilename, count: normalizedCadets.length };
+}
+
+/**
+ * Dynamic Cadet Template Downloader:
+ * Generates an Excel workbook with official letterhead, centered unit section banners,
+ * pre-fills existing registered cadets queried from Supabase under their assigned platoon,
+ * and fills any remaining slots up to 37 with numbered blank rows strictly across 9 columns:
+ * #, Cadet ID, Last Name, First Name, Middle Initial, Contact Number, Gender, Department, Academic Program.
+ */
+export async function downloadDynamicCadetTemplate(options = {}) {
+  return exportCadetRosterToExcel(options.cadets || [], {
+    ...options,
+    isTemplate: true,
+    filename: options.filename || 'CSU_ROTC_Cadet_Registration_Template.xlsx',
+    sheetTitle: options.sheetTitle || 'CSU ROTC Cadet Registration Template'
+  });
+}
+
+

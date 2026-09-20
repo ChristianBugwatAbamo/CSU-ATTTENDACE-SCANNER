@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   User, CheckCircle2, AlertTriangle, X, Building, GraduationCap,
-  Users, Database, Shield, ClipboardList, RefreshCw
+  Users, Database, Shield, ClipboardList, RefreshCw, FileSpreadsheet
 } from 'lucide-react';
+import BulkCadetUpload from './BulkCadetUpload';
 import { DEFAULT_UNIT_STRUCTURE } from './AdminSettings';
 import {
   getSupabaseClient,
@@ -193,6 +194,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [alertModal, setAlertModal] = useState(null);
+  const [registrationMode, setRegistrationMode] = useState('single'); // 'single' | 'bulk'
 
   // Persist form to localStorage
   useEffect(() => {
@@ -410,7 +412,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   };
 
   return (
-    <div className="w-full p-6 md:p-8" style={{ width: '100%', padding: '2rem' }}>
+    <div className="w-full" style={{ width: '100%', maxWidth: '100%' }}>
       {/* ── Page Header ── */}
       <div style={{ marginBottom: '1.75rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
@@ -433,20 +435,116 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
             </div>
           </div>
 
+          {/* Segmented Pill Tab Switcher */}
+          <div
+            role="tablist"
+            aria-label="Cadet Registration Mode"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              backgroundColor: '#f1f5f9',
+              padding: '4px',
+              borderRadius: '9999px',
+              border: '1.5px solid #cbd5e1',
+              boxShadow: 'inset 0 1px 2px rgba(0, 0, 0, 0.05)',
+              gap: '4px'
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={registrationMode === 'single'}
+              onClick={() => setRegistrationMode('single')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0.5rem 1.25rem',
+                borderRadius: '9999px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: registrationMode === 'single' ? '#064e2e' : 'transparent',
+                color: registrationMode === 'single' ? '#ffffff' : '#64748b',
+                boxShadow: registrationMode === 'single' ? '0 2px 6px rgba(6, 78, 46, 0.3)' : 'none',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+              onMouseEnter={(e) => {
+                if (registrationMode !== 'single') {
+                  e.currentTarget.style.backgroundColor = 'rgba(6, 78, 46, 0.08)';
+                  e.currentTarget.style.color = '#064e2e';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (registrationMode !== 'single') {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#64748b';
+                }
+              }}
+            >
+              <User size={16} color={registrationMode === 'single' ? '#e5a900' : '#64748b'} />
+              <span>Single Cadet</span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={registrationMode === 'bulk'}
+              onClick={() => setRegistrationMode('bulk')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '0.5rem 1.25rem',
+                borderRadius: '9999px',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                border: 'none',
+                cursor: 'pointer',
+                backgroundColor: registrationMode === 'bulk' ? '#064e2e' : 'transparent',
+                color: registrationMode === 'bulk' ? '#ffffff' : '#64748b',
+                boxShadow: registrationMode === 'bulk' ? '0 2px 6px rgba(6, 78, 46, 0.3)' : 'none',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+              }}
+              onMouseEnter={(e) => {
+                if (registrationMode !== 'bulk') {
+                  e.currentTarget.style.backgroundColor = 'rgba(6, 78, 46, 0.08)';
+                  e.currentTarget.style.color = '#064e2e';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (registrationMode !== 'bulk') {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#64748b';
+                }
+              }}
+            >
+              <FileSpreadsheet size={16} color={registrationMode === 'bulk' ? '#e5a900' : '#64748b'} />
+              <span>Bulk Excel Upload</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* ── Emphasized Workspace Card Container ── */}
-      <div
-        className="w-full bg-white border-2 border-emerald-800/20 shadow-xl rounded-2xl p-6 md:p-8"
-        style={{
-          backgroundColor: '#ffffff',
-          border: '2px solid rgba(6, 78, 46, 0.2)',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
-          borderRadius: '1rem',
-          padding: '2rem'
-        }}
-      >
+      {registrationMode === 'bulk' ? (
+        <BulkCadetUpload
+          cadets={cadets}
+          onRefresh={onRefresh}
+          onBackToSingle={() => setRegistrationMode('single')}
+        />
+      ) : (
+        /* ── Emphasized Workspace Card Container ── */
+        <div
+          className="w-full bg-white border-2 border-emerald-800/20 shadow-xl rounded-2xl p-6 md:p-8"
+          style={{
+            backgroundColor: '#ffffff',
+            border: '2px solid rgba(6, 78, 46, 0.2)',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            borderRadius: '1rem',
+            padding: '2rem'
+          }}
+        >
         {/* ── 1. PERSONAL INFORMATION ── */}
         <div style={{ marginBottom: '2.25rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
@@ -744,6 +842,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
           </button>
         </div>
       </div>
+      )}
 
       {/* Capacity Alert Modal */}
       <CapacityAlertModal

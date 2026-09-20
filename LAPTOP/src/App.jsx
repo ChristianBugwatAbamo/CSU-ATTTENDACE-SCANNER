@@ -510,7 +510,7 @@ export default function App() {
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container h-screen overflow-hidden">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -520,7 +520,7 @@ export default function App() {
         attendanceLogs={attendanceLogs}
       />
 
-      <main className="main-wrapper">
+      <main className="main-wrapper flex-1 h-full overflow-y-auto">
         <header className="top-header no-print print:hidden">
           <div className="page-title-group">
             <h2>CSU ROTC ATTENDANCE</h2>
