@@ -13,7 +13,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
 );
 
 // Register PWA Service Worker for 100% Offline Field Attendance Scanning
-if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('./sw.js')
       .then(reg => console.log('PWA Offline Service Worker Registered:', reg.scope))
