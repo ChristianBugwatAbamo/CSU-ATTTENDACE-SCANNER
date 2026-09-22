@@ -29,8 +29,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Dependencies
-        run: npm install --include=dev
+      - name: Clean & Install Linux Dependencies
+        run: |
+          rm -rf node_modules
+          npm install --include=dev
 
       - name: Build Web Application
         run: npx vite build
