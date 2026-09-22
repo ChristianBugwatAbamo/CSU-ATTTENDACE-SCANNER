@@ -59,10 +59,15 @@ jobs:
           name: gradle-build-log.txt
           path: SMARTPHONE/android/gradle_output.txt
 
+      - name: Locate and Stage APK
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/build-apk-output
+          find . -name "*.apk" -exec cp -v {} $GITHUB_WORKSPACE/build-apk-output/ \;
+          ls -la $GITHUB_WORKSPACE/build-apk-output/
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CSU-ROTC-Scanner-v1.0-debug
-          path: "**/*.apk"
-          if-no-files-found: error
+          path: build-apk-output/*.apk
           retention-days: 30
