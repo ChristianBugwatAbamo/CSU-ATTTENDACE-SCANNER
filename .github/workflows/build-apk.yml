@@ -33,30 +33,34 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Clean & Install Linux Dependencies
-        run: |
-          rm -rf node_modules
-          npm install --include=dev
+      - name: Install Dependencies
+        run: npm install --include=dev
 
       - name: Build Web Application
         run: npx vite build
 
-      - name: Copy Web Assets to Android
+      - name: Sync Capacitor (regenerates capacitor-cordova-android-plugins)
         run: |
           npx cap telemetry off || true
-          npx cap copy android || (mkdir -p android/app/src/main/assets/public && cp -r dist/* android/app/src/main/assets/public/)
+          npx cap sync android
+
+      - name: Verify Capacitor Plugin Files Exist
+        run: |
+          echo "=== Checking capacitor-cordova-android-plugins ==="
+          ls -la android/capacitor-cordova-android-plugins/
+          echo "=== cordova.variables.gradle ==="
+          cat android/capacitor-cordova-android-plugins/cordova.variables.gradle
 
       - name: Build Debug APK with Gradle
-        working-directory: SMARTPHONE/android
         run: |
+          cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Locate and Stage APK
-        working-directory: SMARTPHONE/android
         run: |
           mkdir -p $GITHUB_WORKSPACE/build-apk-output
-          cp -v app/build/outputs/apk/debug/*.apk $GITHUB_WORKSPACE/build-apk-output/
+          cp -v android/app/build/outputs/apk/debug/*.apk $GITHUB_WORKSPACE/build-apk-output/
           ls -la $GITHUB_WORKSPACE/build-apk-output/
 
       - name: Upload APK Artifact
