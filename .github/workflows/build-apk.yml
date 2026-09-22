@@ -50,19 +50,13 @@ jobs:
         working-directory: SMARTPHONE/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace 2>&1 | tee gradle_output.txt
-
-      - name: Upload Build Log (if failed)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gradle-build-log.txt
-          path: SMARTPHONE/android/gradle_output.txt
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Locate and Stage APK
+        working-directory: SMARTPHONE/android
         run: |
           mkdir -p $GITHUB_WORKSPACE/build-apk-output
-          find . -name "*.apk" -exec cp -v {} $GITHUB_WORKSPACE/build-apk-output/ \;
+          cp -v app/build/outputs/apk/debug/*.apk $GITHUB_WORKSPACE/build-apk-output/
           ls -la $GITHUB_WORKSPACE/build-apk-output/
 
       - name: Upload APK Artifact
