@@ -2,6 +2,49 @@ import React from 'react';
 import { CheckCircle2, Clock } from 'lucide-react';
 import { useUnitStructure } from '../context/UnitContext';
 
+// Normalizes Battalion string (e.g., '1st Battalion' -> '1ST BATTALION')
+export function normalizeBattalionKey(bat) {
+  if (!bat) return '';
+  const str = String(bat.name || bat).trim().toUpperCase();
+  const digitMatch = str.match(/(\d+)/);
+  if (digitMatch) {
+    const num = digitMatch[1];
+    const suffix = num === '1' ? '1ST' : num === '2' ? '2ND' : num === '3' ? '3RD' : `${num}TH`;
+    return `${suffix} BATTALION`;
+  }
+  if (str.includes('1ST') || str.includes('FIRST') || str.includes('1BN')) return '1ST BATTALION';
+  if (str.includes('2ND') || str.includes('SECOND') || str.includes('2BN')) return '2ND BATTALION';
+  if (str.includes('3RD') || str.includes('THIRD') || str.includes('3BN')) return '3RD BATTALION';
+  return str;
+}
+
+// Normalizes Company string (e.g., 'Bravo Company' / 'Bravo COY' -> 'BRAVO')
+export function normalizeCompanyKey(coy) {
+  if (!coy) return '';
+  let str = String(coy.name || coy.shortCode || coy).trim().toUpperCase();
+  str = str
+    .replace(/\bCOMPANY\b/g, '')
+    .replace(/\bCOY\b/g, '')
+    .replace(/\bCO\b/g, '')
+    .trim();
+  return str.replace(/\s+/g, ' ').trim();
+}
+
+// Normalizes Platoon string (e.g., '1st Platoon' / '1 Platoon' / '1PLTN' -> '1PLTN')
+export function normalizePlatoonKey(pl) {
+  if (!pl) return '';
+  const str = String(pl.name || pl.shortCode || pl).trim().toUpperCase();
+  const digitMatch = str.match(/(\d+)/);
+  if (digitMatch) {
+    return `${digitMatch[1]}PLTN`;
+  }
+  if (str.includes('1ST') || str.includes('FIRST')) return '1PLTN';
+  if (str.includes('2ND') || str.includes('SECOND')) return '2PLTN';
+  if (str.includes('3RD') || str.includes('THIRD')) return '3PLTN';
+  if (str.includes('4TH') || str.includes('FOURTH')) return '4PLTN';
+  return str.replace(/[^A-Z0-9]/g, '');
+}
+
 // Helper function to check if a timestamp/date string matches today (YYYY-MM-DD)
 const isToday = (dateInput) => {
   if (!dateInput) return false;
@@ -31,31 +74,33 @@ const isToday = (dateInput) => {
 export default function BatchSyncHierarchyTracker({ ingestedBatches = [] }) {
   const { unitStructure } = useUnitStructure();
 
-  // Check if a specific platoon has been scanned TODAY
+  // Check if a specific platoon has been scanned TODAY using unified normalized keys
   const isPlatoonScanned = (bat, coy, pl) => {
+    const targetBnKey = normalizeBattalionKey(bat);
+    const targetCoyKey = normalizeCompanyKey(coy);
+    const targetPlKey = normalizePlatoonKey(pl);
+
     return ingestedBatches.some((b) => {
+      // Guardrail: Exclude excuse records and unapproved batches
+      if (b.is_excuse === true || b.isExcuse === true || b.isExcuseRequest === true) return false;
+      const st = String(b.status || b.final_daily_status || '').toUpperCase();
+      if (st === 'EXCUSED' || st === 'EXCUSE_PENDING' || st === 'PENDING') return false;
+      if (b.excuse_status && String(b.excuse_status).toUpperCase() !== 'NONE') return false;
+      if (b.submission_type && b.submission_type !== 'BATCH_QR') return false;
+
       // Verify date timestamp is today
-      const batchDate = b.scannedAt || b.timestamp || b.created_at || b.date || b.receivedAt || b.timeIn || b.timeOut;
+      const batchDate = b.date || b.scannedAt || b.timestamp || b.created_at || b.receivedAt || b.timeIn || b.timeOut;
       if (!isToday(batchDate)) return false;
 
-      const bBn = String(b.battalion || '').toLowerCase();
-      const bCo = String(b.company || '').toLowerCase();
-      const bPl = String(b.platoon || '').toLowerCase();
+      const bBnKey = b.normalizedBattalion || normalizeBattalionKey(b.battalion);
+      const bCoyKey = b.normalizedCompany || normalizeCompanyKey(b.company);
+      const bPlKey = b.normalizedPlatoon || normalizePlatoonKey(b.platoon);
 
-      const targetBn = String(bat || '').toLowerCase();
-      const targetCoy = String(coy || '').toLowerCase();
-      const targetPl = String(pl || '').toLowerCase();
-
-      // Check matching Battalion (e.g., '1st battalion' or contains '1')
-      const targetBnNum = (targetBn.match(/(\d+)/) || [])[1];
-      const matchBn = bBn.includes(targetBn) || (targetBnNum && bBn.includes(targetBnNum));
-      // Check matching Company (e.g., 'alpha' or 'alpha company')
-      const matchCo = bCo.includes(targetCoy) || targetCoy.includes(bCo);
-      // Check matching Platoon (e.g., '1st platoon' or contains '1')
-      const targetPlNum = (targetPl.match(/(\d+)/) || [])[1];
-      const matchPl = bPl.includes(targetPl) || (targetPlNum && (bPl.includes(targetPlNum) || bPl.includes(`${targetPlNum}pltn`)));
-
-      return matchBn && matchCo && matchPl;
+      return (
+        bBnKey === targetBnKey &&
+        bCoyKey === targetCoyKey &&
+        bPlKey === targetPlKey
+      );
     });
   };
 

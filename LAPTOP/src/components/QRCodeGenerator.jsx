@@ -4,7 +4,7 @@ import {
   QrCode, Search, Users, CheckSquare, Square, Printer,
   RefreshCw, X, Shield, CheckCircle2, ChevronRight, AlertTriangle
 } from 'lucide-react';
-import { getSupabaseClient, supabase } from '../supabaseClient';
+import { getSupabaseClient, supabase } from '../utils/supabaseClient';
 import { generateQrPayload, getLastNameOnly } from './BasicCadetRegistration';
 import UnitHierarchyDrillDown from './UnitHierarchyDrillDown';
 import { getDepartmentStyle } from './CadetRosterTable';

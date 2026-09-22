@@ -42,7 +42,13 @@ import {
   subscribeToPortalRealtime
 } from '../utils/supabaseClient';
 import CadetPortalHeader from './CadetPortalHeader';
-import { evaluateCadetAttendance, calculateCadetAbsences, toDateKey, formatHumanDate } from '../utils/attendanceRules';
+import {
+  evaluateCadetAttendance,
+  calculateCadetAttendanceStats,
+  calculateCadetAbsences,
+  toDateKey,
+  formatHumanDate
+} from '../utils/attendanceRules';
 import { formatDisplayTime, parseTimeToMinutes, parseCutoffMinutes } from '../utils/attendanceStatus';
 import IDCardPreview from './IDCardPreview';
 import MilitaryLoader from './MilitaryLoader';
@@ -422,7 +428,7 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   // 1. Official ROTC Rule Engine Evaluation
   const evaluated = useMemo(() => {
-    return calculateCadetAbsences(
+    return calculateCadetAttendanceStats(
       {
         ...cadet,
         attendance_logs: reconciledLogs
@@ -441,6 +447,7 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   const isPenalty = !isDropped && Boolean(
     evaluated?.status === 'PENALTY / WARNING' ||
+    evaluated?.hasExcusePenalty ||
     evaluated?.status?.includes('PENALTY') ||
     evaluated?.badgeLabel?.startsWith('Penalized')
   );
@@ -1746,8 +1753,16 @@ export default function CadetPortal({ cadet, onLogout }) {
                 <div style={{ fontWeight: 800, fontSize: '0.9rem', color: isLight ? '#9a3412' : '#fdba74' }}>
                   Attendance Penalty Alert: {evaluated.badgeLabel || evaluated.reason || 'Converted Absences Applied'}
                 </div>
-                <div style={{ fontSize: '0.8rem', color: isLight ? '#c2410c' : '#fed7aa', marginTop: '2px' }}>
-                  Accumulated late arrivals or incomplete scans have converted to <strong>{metrics.absences} Converted Absent</strong> on your standing. Please ensure complete and timely check-ins.
+                <div style={{ fontSize: '0.8rem', color: isLight ? '#c2410c' : '#fed7aa', marginTop: '2px', lineHeight: 1.4 }}>
+                  {evaluated.hasExcusePenalty ? (
+                    <span>
+                      Excuse Accumulation Policy Triggered: <strong>+{evaluated.totalExcuseConversions} Equivalent Absent</strong> incurred ({evaluated.excusePenaltyBreakdown?.reasons?.join(', ') || 'from approved excuse accumulation'}). Under ROTC training regulations, 3 consecutive excuses or 4 cumulative excuses convert to 1 equivalent absent.
+                    </span>
+                  ) : (
+                    <span>
+                      Accumulated late arrivals or incomplete scans have converted to <strong>{metrics.absences} Converted Absent</strong> on your standing. Please ensure complete and timely check-ins.
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -2378,6 +2393,11 @@ export default function CadetPortal({ cadet, onLogout }) {
                     <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#b91c1c' : '#f87171', whiteSpace: 'nowrap' }}>
                       {counts.absent} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Absences</span>
                     </div>
+                    {evaluated?.totalExcuseConversions > 0 && (
+                      <div style={{ marginTop: '2px', fontSize: '0.66rem', fontWeight: 800, color: '#ea580c', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <span>⚠️ +{evaluated.totalExcuseConversions} from Excuse Policy</span>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -2428,6 +2448,15 @@ export default function CadetPortal({ cadet, onLogout }) {
                     <div style={{ fontSize: 'clamp(1.15rem, 3.5vw, 1.45rem)', fontWeight: 800, color: isLight ? '#6d28d9' : '#c084fc', whiteSpace: 'nowrap' }}>
                       {counts.excused} <span style={{ fontSize: '0.72rem', color: t.textMuted, fontWeight: 600 }}>Sessions</span>
                     </div>
+                    {evaluated?.hasExcusePenalty ? (
+                      <div style={{ marginTop: '2px', fontSize: '0.66rem', fontWeight: 800, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        <span>⚠️ Penalty Active</span>
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: '2px', fontSize: '0.66rem', color: t.textMuted }}>
+                        Streak: {evaluated?.consecutiveExcuses || 0}/3 • Total: {evaluated?.totalIntervalExcuses || 0}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div style={{ fontSize: '0.7rem', color: t.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -3364,6 +3393,42 @@ export default function CadetPortal({ cadet, onLogout }) {
                   <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Lates:</strong> Automatically penalized and converted to <strong>1 Absent</strong>.</li>
                   <li style={{ marginBottom: '4px' }}><strong>4 Interval Lates:</strong> Every 4 cumulative late scans converts to <strong>1 Absent</strong>.</li>
                   <li><strong>4 Interval No Time-In/Out:</strong> Every 4 missing scans converts to <strong>1 Absent</strong>.</li>
+                </ul>
+              </div>
+
+              {/* Card 4: Excuse Accumulation Policy (Purple / Violet) */}
+              <div
+                style={{
+                  backgroundColor: isLight ? '#ffffff' : 'rgba(15, 23, 42, 0.45)',
+                  border: isLight ? '1px solid #ddd6fe' : '1px solid rgba(124, 58, 237, 0.3)',
+                  borderRadius: '10px',
+                  padding: '1rem',
+                  boxShadow: isLight ? '0 1px 2px rgba(0, 0, 0, 0.03)' : 'none',
+                  boxSizing: 'border-box'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                      color: isLight ? '#6d28d9' : '#c084fc',
+                      backgroundColor: isLight ? '#f3e8ff' : 'rgba(124, 58, 237, 0.15)',
+                      padding: '2px 8px',
+                      borderRadius: '6px',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    <FileText size={12} style={{ flexShrink: 0 }} /> Excuse Accumulation
+                  </span>
+                  <span style={{ fontSize: '0.68rem', color: t.textSubtle, fontWeight: 700 }}>Rule 8 & 9</span>
+                </div>
+                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.76rem', color: t.textMain, lineHeight: '1.55' }}>
+                  <li style={{ marginBottom: '4px' }}><strong>3 Consecutive Excuses:</strong> Converted to <strong>+1 Equivalent Absent</strong>.</li>
+                  <li><strong>4 Interval/Cumulative Excuses:</strong> Every 4 accumulated excuses converts to <strong>+1 Equivalent Absent</strong>.</li>
                 </ul>
               </div>
             </div>

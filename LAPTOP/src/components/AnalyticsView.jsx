@@ -48,6 +48,7 @@ import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import { getSupabaseClient } from '../utils/supabaseClient';
 import {
   evaluateCadetAttendance,
+  calculateCadetAttendanceStats,
   calculateCadetAbsences,
   sortCadetAlertsAscending,
   ACTIVE_FORMATION_DATES,
@@ -457,7 +458,7 @@ export default function AnalyticsView({
 
       // 2. Evaluate each cadet against ROTC attendance rules across every active formation date
       const evaluatedList = (cadetsData || []).map((cadet) => {
-        return calculateCadetAbsences(cadet, sortedFormationDates);
+        return calculateCadetAttendanceStats(cadet, sortedFormationDates);
       });
 
       // Filter only cadets needing admin action and apply ascending multi-level sort
@@ -1946,6 +1947,37 @@ export default function AnalyticsView({
                 <li><strong>4 Interval No Time-In/Out:</strong> Every 4 missing scans converts to <strong>1 Absent</strong>.</li>
               </ul>
             </div>
+
+            {/* Card 4: Excuse Accumulation Policy (Purple / Violet) */}
+            <div style={{
+              backgroundColor: '#ffffff',
+              border: '1px solid #ddd6fe',
+              borderRadius: '10px',
+              padding: '0.85rem 1rem',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#6d28d9',
+                  backgroundColor: '#f3e8ff',
+                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  textTransform: 'uppercase'
+                }}>
+                  <FileText size={11} /> Excuse Accumulation
+                </span>
+                <span style={{ fontSize: '0.68rem', color: '#94a3b8', fontWeight: 700 }}>Rule 8 & 9</span>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#334155', lineHeight: '1.5' }}>
+                <li><strong>3 Consecutive Excuses:</strong> Converted to <strong>+1 Equivalent Absent</strong>.</li>
+                <li><strong>4 Interval/Cumulative Excuses:</strong> Every 4 accumulated excuses converts to <strong>+1 Equivalent Absent</strong>.</li>
+              </ul>
+            </div>
           </div>
         </div>
 
@@ -2224,7 +2256,50 @@ export default function AnalyticsView({
                 </div>
               </div>
 
-              {/* Card 5: Rule Status */}
+              {/* Card 5: Excuses Logged & Conversions */}
+              <div style={{
+                backgroundColor: '#f5f3ff',
+                border: '1px solid #ddd6fe',
+                borderRadius: '12px',
+                padding: '0.75rem 0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                minHeight: '82px',
+                textAlign: 'center'
+              }}>
+                <div style={{
+                  height: '28px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  color: '#6d28d9',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.02em',
+                  lineHeight: 1.15
+                }}>
+                  Excuses Logged
+                </div>
+                <div style={{
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                  lineHeight: 1
+                }}>
+                  <span style={{ fontSize: '1.35rem', fontWeight: 900, color: '#0f172a' }}>
+                    {evidenceCadet.totalIntervalExcuses || 0}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', fontWeight: 700, color: (evidenceCadet.totalExcuseConversions || 0) > 0 ? '#ea580c' : '#64748b' }}>
+                    (+{evidenceCadet.totalExcuseConversions || 0} Abs)
+                  </span>
+                </div>
+              </div>
+
+              {/* Card 6: Rule Status */}
               <div style={{
                 backgroundColor: evidenceCadet.status === 'DROPPED' ? '#ffe4e6' : (evidenceCadet.status?.includes('PENALTY') ? '#fff7ed' : '#fef3c7'),
                 border: `1px solid ${evidenceCadet.status === 'DROPPED' ? '#fecdd3' : (evidenceCadet.status?.includes('PENALTY') ? '#fed7aa' : '#fde68a')}`,

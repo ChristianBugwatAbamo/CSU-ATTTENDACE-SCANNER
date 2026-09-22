@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { supabase, getSupabaseClient } from '../supabaseClient';
+import { supabase, getSupabaseClient } from '../utils/supabaseClient';
 import {
   Users,
   RefreshCw,

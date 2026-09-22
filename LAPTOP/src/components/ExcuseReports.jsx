@@ -30,7 +30,7 @@ import {
   fetchDeclaredAbsentCadets,
   autoExpireExcusePending
 } from '../utils/supabaseClient';
-import { toDateKey } from '../utils/attendanceRules';
+import { toDateKey, calculateCadetAttendanceStats } from '../utils/attendanceRules';
 import DutyOfficerActionModal from './DutyOfficerActionModal';
 
 const MONTH_NAMES = [
@@ -200,6 +200,19 @@ export default function ExcuseReports({
     effectiveCadets.forEach(c => {
       const cid = String(c.id || c.cadetId || '').trim().toUpperCase();
       if (cid) map.set(cid, c);
+    });
+    return map;
+  }, [effectiveCadets]);
+
+  // Pre-calculate attendance & excuse accumulation policy stats per cadet
+  const cadetStatsMap = useMemo(() => {
+    const map = new Map();
+    effectiveCadets.forEach(c => {
+      const cid = String(c.id || c.cadetId || '').trim().toUpperCase();
+      if (cid) {
+        const stats = calculateCadetAttendanceStats(c);
+        map.set(cid, stats);
+      }
     });
     return map;
   }, [effectiveCadets]);
@@ -1484,6 +1497,30 @@ export default function ExcuseReports({
                         <div style={{ fontSize: '0.74rem', color: '#64748b' }}>
                           {record.rank}
                         </div>
+                        {(() => {
+                          const stats = cadetStatsMap.get(record.cadetId);
+                          if (stats?.hasExcusePenalty) {
+                            return (
+                              <div style={{ marginTop: '3px' }}>
+                                <span style={{
+                                  fontSize: '0.67rem',
+                                  fontWeight: 800,
+                                  color: '#6d28d9',
+                                  background: '#f3e8ff',
+                                  border: '1px solid #ddd6fe',
+                                  padding: '2px 6px',
+                                  borderRadius: '4px',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '3px'
+                                }}>
+                                  ⚠️ {stats.badgeLabel || 'Excuse Penalty (+1 Absent)'}
+                                </span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
                       </td>
 
                       {/* Drill Date */}

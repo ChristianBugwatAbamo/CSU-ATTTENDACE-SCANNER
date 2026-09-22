@@ -31,7 +31,9 @@ export const ATTENDANCE_POLICY_RULES = [
   { id: 4, type: 'WARNING', title: '2 Absences', description: 'Warning for Drop' },
   { id: 5, type: 'CONVERSION', title: '3 Consecutive Lates', description: 'Converted to 1 Absent' },
   { id: 6, type: 'CONVERSION', title: '4 Interval Lates', description: 'Converted to 1 Absent' },
-  { id: 7, type: 'CONVERSION', title: '4 Interval No Time-In / Time-Out', description: 'Converted to 1 Absent' }
+  { id: 7, type: 'CONVERSION', title: '4 Interval No Time-In / Time-Out', description: 'Converted to 1 Absent' },
+  { id: 8, type: 'CONVERSION', title: '3 Consecutive Excuses', description: 'Converted to 1 Equivalent Absent' },
+  { id: 9, type: 'CONVERSION', title: '4 Interval Excuses', description: 'Converted to 1 Equivalent Absent' }
 ];
 
 export function toDateKey(dateInput) {
@@ -154,6 +156,12 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
   let consecutiveLateConversions = 0;
   let totalIntervalLates = 0;
   let totalIntervalMissingScans = 0; // Tracks No Time-In or No Time-Out occurrences
+
+  // Rule 8 & 9: Excuse Accumulation Tracking
+  let consecutiveExcuses = 0;
+  let maxConsecutiveExcuses = 0;
+  let consecutiveExcuseConversions = 0;
+  let totalIntervalExcuses = 0;
   const dailyBreakdown = [];
 
   sortedDates.forEach((formationDate) => {
@@ -202,16 +210,29 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
       if (isExcusePending) {
         consecutiveAbsences = 0;
         consecutiveLates = 0;
+        consecutiveExcuses = 0;
         dayType = 'EXCUSE_PENDING';
         entryStatus = 'EXCUSE_PENDING';
         penaltyLabel = 'Online excuse submitted — Awaiting HQ Verification';
       } else if (isExcused) {
         consecutiveAbsences = 0;
         consecutiveLates = 0;
+        totalIntervalExcuses += 1;
+        consecutiveExcuses += 1;
+        maxConsecutiveExcuses = Math.max(maxConsecutiveExcuses, consecutiveExcuses);
         dayType = 'EXCUSED';
         entryStatus = 'EXCUSED';
-        penaltyLabel = 'Official Excuse Approved by Duty Officer';
+
+        // Rule 8: 3 Consecutive Excuses = +1 Equivalent Absent
+        if (consecutiveExcuses === 3) {
+          consecutiveExcuseConversions += 1;
+          consecutiveExcuses = 0;
+          penaltyLabel = '3rd Consecutive Excuse (+1 Equivalent Absent)';
+        } else {
+          penaltyLabel = `Official Excuse Approved (Consecutive: ${consecutiveExcuses}/3, Total Excused: ${totalIntervalExcuses})`;
+        }
       } else if (st === 'ABSENT' || (!hasTimeIn && !hasTimeOut)) {
+        consecutiveExcuses = 0;
         unexcusedAbsences += 1;
         consecutiveAbsences += 1;
         maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
@@ -222,6 +243,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
         dayType = 'ABSENT';
         entryStatus = 'ABSENT';
       } else if (hasTimeIn && !hasTimeOut) {
+        consecutiveExcuses = 0;
         totalIntervalMissingScans += 1;
         consecutiveAbsences = 0;
         consecutiveLates = 0;
@@ -230,6 +252,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
         entryStatus = isLate ? 'LATE / NO TIME-OUT' : 'NO TIME-OUT';
         penaltyLabel = `Missing Time-Out Scan (+1/4 Interval Penalty)`;
       } else if (!hasTimeIn && hasTimeOut) {
+        consecutiveExcuses = 0;
         totalIntervalMissingScans += 1;
         consecutiveAbsences = 0;
         consecutiveLates = 0;
@@ -237,6 +260,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
         entryStatus = 'NO TIME-IN';
         penaltyLabel = `Missing Time-In Scan (+1/4 Interval Penalty)`;
       } else if (log.isLate !== undefined ? Boolean(log.isLate) : st.includes('LATE')) {
+        consecutiveExcuses = 0;
         consecutiveAbsences = 0;
         consecutiveLates += 1;
         maxConsecutiveLates = Math.max(maxConsecutiveLates, consecutiveLates);
@@ -253,6 +277,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
           penaltyLabel = `Late Scan (Consecutive: ${consecutiveLates}/3, Total Lates: ${totalIntervalLates})`;
         }
       } else {
+        consecutiveExcuses = 0;
         consecutiveAbsences = 0;
         consecutiveLates = 0;
         penaltyLabel = `Present & Verified`;
@@ -276,6 +301,7 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
       });
     } else {
       // Unrecorded on an active formation date -> ABSENT
+      consecutiveExcuses = 0;
       unexcusedAbsences += 1;
       consecutiveAbsences += 1;
       maxConsecutiveAbsences = Math.max(maxConsecutiveAbsences, consecutiveAbsences);
@@ -299,8 +325,14 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
   // Rule 7: 4 interval No Time-In / No Time-Out = 1 absent
   const missingScanConversions = Math.floor(totalIntervalMissingScans / 4);
 
-  // Total converted absences from rules 5, 6, and 7
-  const totalConvertedAbsences = consecutiveLateConversions + lateConversions + missingScanConversions;
+  // Rule 9: 4 interval/cumulative excuses = 1 equivalent absent
+  const intervalExcuseConversions = Math.floor(totalIntervalExcuses / 4);
+
+  // Total excuse conversion equivalent absences
+  const totalExcuseConversions = consecutiveExcuseConversions + intervalExcuseConversions;
+
+  // Total converted absences from rules 5, 6, 7, 8, and 9
+  const totalConvertedAbsences = consecutiveLateConversions + lateConversions + missingScanConversions + totalExcuseConversions;
 
   // Calculated Absences column incorporates converted absences
   const totalAbsences = unexcusedAbsences + totalConvertedAbsences;
@@ -321,11 +353,21 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
     reason = 'Dropped (Exceeded 3 Interval Absences)';
     badgeLabel = 'DROPPED';
     ruleId = 2;
-  } else if (totalAbsences === 3 && (unexcusedAbsences === 3 || (!consecutiveLateConversions && !lateConversions && !missingScanConversions))) {
+  } else if (totalAbsences === 3 && (unexcusedAbsences === 3 || (!consecutiveLateConversions && !lateConversions && !missingScanConversions && !totalExcuseConversions))) {
     status = 'WARNING';
     reason = 'Warning (3 Interval Absences)';
     badgeLabel = 'WARNING';
     ruleId = 3;
+  } else if (consecutiveExcuseConversions > 0 || maxConsecutiveExcuses >= 3) {
+    status = 'PENALTY / WARNING';
+    reason = 'Penalized (3 Consecutive Excuses)';
+    badgeLabel = 'Penalized (3 Consecutive Excuses)';
+    ruleId = 8;
+  } else if (intervalExcuseConversions > 0 || totalIntervalExcuses >= 4) {
+    status = 'PENALTY / WARNING';
+    reason = 'Penalized (4 Interval Excuses)';
+    badgeLabel = 'Penalized (4 Interval Excuses)';
+    ruleId = 9;
   } else if (consecutiveLateConversions > 0 || maxConsecutiveLates >= 3) {
     status = 'PENALTY / WARNING';
     reason = 'Penalized (3 Consecutive Lates)';
@@ -354,6 +396,13 @@ export function evaluateCadetAttendance(cadet = {}, formationDates = ACTIVE_FORM
     consecutiveLateConversions,
     lateConversions,
     missingScanConversions,
+    consecutiveExcuses,
+    maxConsecutiveExcuses,
+    consecutiveExcuseConversions,
+    totalIntervalExcuses,
+    intervalExcuseConversions,
+    totalExcuseConversions,
+    hasExcusePenalty: totalExcuseConversions > 0,
     totalConvertedAbsences,
     totalAbsences,
     maxConsecutiveAbsences,
@@ -422,12 +471,17 @@ export function sortCadetAlertsAscending(cadets = []) {
 }
 
 /**
- * Shared utility to calculate a cadet's converted absences and adjusted attendance rate.
+ * Centralized utility to calculate a cadet's complete attendance statistics,
+ * performance metrics, excuse accumulation penalties, and drop/warning status.
  * Enforces official ROTC training regulation formulas:
- * - Converted Absences: Raw Absences + ⌊Missing Scans / 4⌋ + ⌊Interval Lates / 4⌋ + ⌊Consecutive Lates / 3⌋
+ * - Rule 5: 3 Consecutive Lates = +1 Converted Absent
+ * - Rule 6: 4 Interval Lates = +1 Converted Absent
+ * - Rule 7: 4 Interval Missing Scans = +1 Converted Absent
+ * - Rule 8: 3 Consecutive Excuses = +1 Equivalent Absent
+ * - Rule 9: 4 Cumulative/Interval Excuses = +1 Equivalent Absent
  * - Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
  */
-export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_DATES) {
+export function calculateCadetAttendanceStats(cadet, formationDates = ACTIVE_FORMATION_DATES) {
   const evaluated = evaluateCadetAttendance(cadet, formationDates);
   const rawAbsences = Number(evaluated.unexcusedAbsences || 0);
   const missingScans = Number(evaluated.totalIntervalMissingScans || 0);
@@ -442,32 +496,80 @@ export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_
   const missingScanConversions = Math.floor(missingScans / 4);
   const intervalLateConversions = Math.floor(intervalLates / 4);
 
-  // Converted Absences: Raw Absences + ⌊Missing Scans / 4⌋ + ⌊Interval Lates / 4⌋ + ⌊Consecutive Lates / 3⌋
-  const convertedAbsences = rawAbsences + missingScanConversions + intervalLateConversions + consecutiveLateConversions;
+  // Excuse Accumulation Policy (Rules 8 & 9)
+  const totalExcuses = Number(evaluated.totalIntervalExcuses || 0);
+  const consecutiveExcuses = Number(evaluated.consecutiveExcuses || 0);
+  const maxConsecutiveExcuses = Number(evaluated.maxConsecutiveExcuses || 0);
+  const consecutiveExcuseConversions = Number(evaluated.consecutiveExcuseConversions || 0);
+  const intervalExcuseConversions = Number(evaluated.intervalExcuseConversions || 0);
+  const totalExcuseConversions = consecutiveExcuseConversions + intervalExcuseConversions;
+  const hasExcusePenalty = totalExcuseConversions > 0;
+
+  // Build human-readable excuse penalty breakdown reasons
+  const excusePenaltyReasons = [];
+  if (consecutiveExcuseConversions > 0) {
+    excusePenaltyReasons.push(`${consecutiveExcuseConversions} equivalent absent from 3 consecutive excuses`);
+  }
+  if (intervalExcuseConversions > 0) {
+    excusePenaltyReasons.push(`${intervalExcuseConversions} equivalent absent from 4 cumulative excuses`);
+  }
+
+  // Total Converted Absences: Raw Absences + Missing Scan Converted + Late Converted + Consecutive Late Converted + Excuse Converted
+  const convertedAbsences = Number(
+    evaluated.totalAbsences ?? (rawAbsences + missingScanConversions + intervalLateConversions + consecutiveLateConversions + totalExcuseConversions)
+  );
 
   const totalFormations = (evaluated.dailyBreakdown && evaluated.dailyBreakdown.length > 0)
     ? evaluated.dailyBreakdown.length
     : (formationDates && formationDates.length > 0 ? formationDates.length : 1);
 
-  // Adjusted Attendance Rate: ((Total Formations - Converted Absences) / Total Formations) * 100
   let adjustedAttendanceRate = 100;
   if (totalFormations > 0) {
     const rate = ((totalFormations - convertedAbsences) / totalFormations) * 100;
     adjustedAttendanceRate = Math.max(0, Math.min(100, Math.round(rate)));
   }
 
+  const attendedSessions = Math.max(0, totalFormations - convertedAbsences);
+
   return {
     ...evaluated,
     rawAbsences,
+    unexcusedAbsences: rawAbsences,
     missingScans,
     intervalLates,
     consecutiveLateConversions,
     missingScanConversions,
     intervalLateConversions,
+
+    // Excuse accumulation metrics
+    totalExcuses,
+    totalIntervalExcuses: totalExcuses,
+    consecutiveExcuses,
+    maxConsecutiveExcuses,
+    consecutiveExcuseConversions,
+    intervalExcuseConversions,
+    totalExcuseConversions,
+    hasExcusePenalty,
+    excusePenaltyBreakdown: {
+      consecutivePenalties: consecutiveExcuseConversions,
+      intervalPenalties: intervalExcuseConversions,
+      totalEquivalentAbsences: totalExcuseConversions,
+      reasons: excusePenaltyReasons
+    },
+
     convertedAbsences,
     totalAbsences: convertedAbsences,
     totalFormations,
+    attendedSessions,
     adjustedAttendanceRate,
     complianceRate: adjustedAttendanceRate
   };
+}
+
+/**
+ * Shared utility to calculate a cadet's converted absences and adjusted attendance rate.
+ * Maintained as an alias delegating directly to calculateCadetAttendanceStats for full backwards-compatibility.
+ */
+export function calculateCadetAbsences(cadet, formationDates = ACTIVE_FORMATION_DATES) {
+  return calculateCadetAttendanceStats(cadet, formationDates);
 }
