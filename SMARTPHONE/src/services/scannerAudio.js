@@ -6,7 +6,8 @@ class ScannerAudioManager {
     this.audioCtx = null;
     this.lastPlayTimestamp = 0;
     this.lastEventType = null;
-    this.cooldownMs = 400; // Prevent duplicate rapid-fire audio overlap on the same scan tick
+    this.lastVibrateTimestamp = 0;
+    this.cooldownMs = 350; // Prevent duplicate rapid-fire audio overlap on the same scan tick
   }
 
   // Initialize or resume the AudioContext safely on user interaction
@@ -23,15 +24,28 @@ class ScannerAudioManager {
     return this.audioCtx;
   }
 
-  // Check if sound can play (guaranteed single play per trigger)
-  canPlay(eventType, minInterval = 300) {
+  // Check if sound can play (guaranteed single play per trigger with global cooldown)
+  canPlay(eventType, minInterval = 350) {
     const now = Date.now();
-    if (this.lastEventType === eventType && now - this.lastPlayTimestamp < minInterval) {
+    // Global throttle: prevent overlapping sounds within minInterval
+    if (now - this.lastPlayTimestamp < minInterval) {
       return false;
     }
     this.lastPlayTimestamp = now;
     this.lastEventType = eventType;
     return true;
+  }
+
+  // Safe throttled haptic feedback (guards navigator.vibrate from stacking)
+  triggerHaptic(pattern = [100, 50, 100], cooldownMs = 400) {
+    const now = Date.now();
+    if (now - this.lastVibrateTimestamp < cooldownMs) return;
+    this.lastVibrateTimestamp = now;
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(pattern);
+      }
+    } catch (_) {}
   }
 
   // 1. TIME-IN SUCCESS: Crisp, bright rising double-tone chime (Major 5th: 880Hz -> 1320Hz)

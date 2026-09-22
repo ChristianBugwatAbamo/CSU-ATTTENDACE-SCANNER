@@ -10,66 +10,8 @@
 export const UNIT_STRUCTURE_STORAGE_KEY = 'csu_rotc_unit_structure';
 export const UNIT_UPDATE_EVENT = 'csu_smartphone_unit_updated';
 
-export const DEFAULT_UNIT_STRUCTURE = [
-  {
-    id: 'bn-1',
-    name: '1st Battalion',
-    shortCode: '1BN',
-    companies: [
-      {
-        id: 'co-1-alpha',
-        name: 'Alpha Company',
-        shortCode: 'ALPHA',
-        platoons: [
-          { id: 'pl-1-a-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN' },
-          { id: 'pl-1-a-3', name: '3rd Platoon', shortCode: '3PLTN' },
-          { id: 'pl-1-a-4', name: '4th Platoon', shortCode: '4PLTN' }
-        ]
-      },
-      {
-        id: 'co-1-bravo',
-        name: 'Bravo Company',
-        shortCode: 'BRAVO',
-        platoons: [
-          { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN' },
-          { id: 'pl-1-b-3', name: '3rd Platoon', shortCode: '3PLTN' },
-          { id: 'pl-1-b-4', name: '4th Platoon', shortCode: '4PLTN' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'bn-2',
-    name: '2nd Battalion',
-    shortCode: '2BN',
-    companies: [
-      {
-        id: 'co-2-charlie',
-        name: 'Charlie Company',
-        shortCode: 'CHARLIE',
-        platoons: [
-          { id: 'pl-2-c-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN' },
-          { id: 'pl-2-c-3', name: '3rd Platoon', shortCode: '3PLTN' },
-          { id: 'pl-2-c-4', name: '4th Platoon', shortCode: '4PLTN' }
-        ]
-      },
-      {
-        id: 'co-2-delta',
-        name: 'Delta Company',
-        shortCode: 'DELTA',
-        platoons: [
-          { id: 'pl-2-d-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN' },
-          { id: 'pl-2-d-3', name: '3rd Platoon', shortCode: '3PLTN' },
-          { id: 'pl-2-d-4', name: '4th Platoon', shortCode: '4PLTN' }
-        ]
-      }
-    ]
-  }
-];
+export { DEFAULT_UNIT_STRUCTURE, DEFAULT_HIERARCHY, STANDARD_BATTALIONS, STANDARD_COMPANIES, STANDARD_PLATOONS } from '../constants/defaultHierarchy.js';
+import { DEFAULT_UNIT_STRUCTURE } from '../constants/defaultHierarchy.js';
 
 // Helper: Normalize string for comparison
 const norm = (s) => String(s || '').trim().toLowerCase();
@@ -84,11 +26,16 @@ export function getUnitStructure() {
       const parsed = JSON.parse(saved);
       const struct = Array.isArray(parsed) ? parsed : (parsed.unitStructure || parsed.unit_structure);
       if (Array.isArray(struct) && struct.length > 0) {
-        return struct;
+        // Auto-upgrade if cached structure is the old legacy 2-battalion mock template
+        const isLegacyTwoBattalion = struct.length === 2 && !struct.some(b => norm(b.name).includes('headquarters') || norm(b.id).includes('hq'));
+        if (!isLegacyTwoBattalion) {
+          return struct;
+        }
+        console.info('[unitStructure] Auto-upgrading legacy 2-battalion structure to standard 4-battalion CSU ROTC layout');
       }
     }
   } catch (_) {}
-  // Persist default structure on initial run
+  // Persist default structure on initial run or upgrade
   saveUnitStructure(DEFAULT_UNIT_STRUCTURE, false);
   return DEFAULT_UNIT_STRUCTURE;
 }
@@ -135,9 +82,14 @@ export function getCompaniesForBattalion(battalionName, structure = getUnitStruc
   const bn = (structure || []).find(b => {
     const bName = norm(b.name);
     const bId = norm(b.id);
-    return bName === target || bId === target ||
-      (target.includes('1') && bName.includes('1')) ||
-      (target.includes('2') && bName.includes('2'));
+    if (bName === target || bId === target) return true;
+    if (target.includes('headquarters') || target.includes('hq')) {
+      return bName.includes('headquarters') || bId.includes('hq');
+    }
+    const targetDigit = target.match(/\d+/)?.[0];
+    const bDigit = bName.match(/\d+/)?.[0];
+    if (targetDigit && bDigit && targetDigit === bDigit) return true;
+    return false;
   });
 
   return bn && Array.isArray(bn.companies) ? bn.companies.map(c => c.name) : [];
@@ -150,15 +102,23 @@ export function getPlatoonsForCompany(battalionName, companyName, structure = ge
   if (!companyName) return [];
   const targetCoy = norm(companyName).replace(/company|coy|\s+/gi, '');
 
-  const companies = (structure || []).flatMap(b => {
-    if (!battalionName) return b.companies || [];
-    const bNorm = norm(b.name);
+  let candidateBattalions = structure || [];
+  if (battalionName) {
     const targetBn = norm(battalionName);
-    if (bNorm === targetBn || (targetBn.includes('1') && bNorm.includes('1')) || (targetBn.includes('2') && bNorm.includes('2'))) {
-      return b.companies || [];
-    }
-    return [];
-  });
+    const targetDigit = targetBn.match(/\d+/)?.[0];
+    const isHq = targetBn.includes('headquarters') || targetBn.includes('hq');
+
+    candidateBattalions = candidateBattalions.filter(b => {
+      const bNorm = norm(b.name);
+      const bId = norm(b.id);
+      if (bNorm === targetBn || bId === targetBn) return true;
+      if (isHq && (bNorm.includes('headquarters') || bId.includes('hq'))) return true;
+      const bDigit = bNorm.match(/\d+/)?.[0];
+      return Boolean(targetDigit && bDigit && targetDigit === bDigit);
+    });
+  }
+
+  const companies = candidateBattalions.flatMap(b => b.companies || []);
 
   const coy = companies.find(c => {
     const cNorm = norm(c.name).replace(/company|coy|\s+/gi, '');
@@ -169,21 +129,120 @@ export function getPlatoonsForCompany(battalionName, companyName, structure = ge
     return coy.platoons.map(p => (typeof p === 'string' ? p : p.name));
   }
 
-  return ['1st Platoon', '2nd Platoon', '3rd Platoon', '4th Platoon'];
+  return ['1st Platoon', '2nd Platoon'];
+}
+
+// Standard Military Phonetic Alphabet array for automatic Company naming
+export const MILITARY_ALPHABET = [
+  'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot',
+  'Golf', 'Hotel', 'India', 'Juliet', 'Kilo', 'Lima',
+  'Mike', 'November', 'Oscar', 'Papa', 'Quebec', 'Romeo',
+  'Sierra', 'Tango', 'Uniform', 'Victor', 'Whiskey', 'X-ray',
+  'Yankee', 'Zulu'
+];
+
+/**
+ * Returns ordinal suffix for numbers (1st, 2nd, 3rd, 4th, 11th, etc.)
+ */
+export function getOrdinalSuffix(n) {
+  const num = Math.abs(Number(n) || 1);
+  const tens = num % 100;
+  if (tens >= 11 && tens <= 13) return 'th';
+  const rem = num % 10;
+  if (rem === 1) return 'st';
+  if (rem === 2) return 'nd';
+  if (rem === 3) return 'rd';
+  return 'th';
+}
+
+/**
+ * Auto Battalions: Dynamically compute Nth Battalion where N = total battalions + 1.
+ */
+export function getAutoBattalionName(unitStructure = []) {
+  const totalBattalions = Array.isArray(unitStructure) ? unitStructure.length : 0;
+  const n = totalBattalions + 1;
+  const suffix = getOrdinalSuffix(n);
+  return {
+    name: `${n}${suffix} Battalion`,
+    shortCode: `${n}BN`
+  };
+}
+
+/**
+ * Auto Companies: Maintain a military alphabet array.
+ * Determine next available letter across all existing companies so letters never repeat.
+ * Sets up 2 platoons by default upon company creation.
+ */
+export function getAutoCompanyName(unitStructure = []) {
+  const usedLetters = new Set();
+
+  if (Array.isArray(unitStructure)) {
+    unitStructure.forEach(bn => {
+      if (Array.isArray(bn.companies)) {
+        bn.companies.forEach(co => {
+          const rawName = String(co.name || '').trim().toLowerCase();
+          const rawCode = String(co.shortCode || '').trim().toLowerCase();
+          MILITARY_ALPHABET.forEach(letter => {
+            const lLower = letter.toLowerCase();
+            if (rawName.includes(lLower) || rawCode === lLower) {
+              usedLetters.add(letter);
+            }
+          });
+        });
+      }
+    });
+  }
+
+  const nextLetter = MILITARY_ALPHABET.find(letter => !usedLetters.has(letter));
+  const chosenLetter = nextLetter || `Company ${usedLetters.size + 1}`;
+  const timestamp = Date.now().toString(36);
+
+  return {
+    name: `${chosenLetter} Company`,
+    shortCode: chosenLetter.toUpperCase(),
+    platoons: [
+      { id: `pl-${timestamp}-1`, name: '1st Platoon', shortCode: '1PLTN' },
+      { id: `pl-${timestamp}-2`, name: '2nd Platoon', shortCode: '2PLTN' }
+    ]
+  };
+}
+
+/**
+ * Auto Platoons: Compute Nth Platoon relative to the selected company.
+ */
+export function getAutoPlatoonName(selectedCompany) {
+  const existingPlatoons = (selectedCompany && Array.isArray(selectedCompany.platoons))
+    ? selectedCompany.platoons
+    : [];
+  const n = existingPlatoons.length + 1;
+  const suffix = getOrdinalSuffix(n);
+  return {
+    name: `${n}${suffix} Platoon`,
+    shortCode: `${n}PLTN`
+  };
 }
 
 // =========================================================================
-// OFFLINE CRUD OPERATIONS (MANUAL ADD / EDIT / REMOVE)
+// OFFLINE CRUD OPERATIONS (AUTO & MANUAL ADD / EDIT / REMOVE)
 // =========================================================================
 
 /**
- * Adds a new Battalion locally.
+ * Adds a new Battalion locally with automatic standard naming if name is omitted.
  */
-export function addBattalion(name, shortCode = '') {
-  if (!name || !name.trim()) return getUnitStructure();
+export function addBattalion(name = '', shortCode = '') {
   const current = getUnitStructure();
-  const cleanName = name.trim();
-  const cleanCode = (shortCode || cleanName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4)).toUpperCase();
+  let cleanName = (name || '').trim();
+  let cleanCode = (shortCode || '').trim();
+
+  if (!cleanName) {
+    const auto = getAutoBattalionName(current);
+    cleanName = auto.name;
+    cleanCode = auto.shortCode;
+  } else {
+    cleanCode = (cleanCode || cleanName.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4)).toUpperCase();
+  }
+
+  const autoCo = getAutoCompanyName(current);
 
   const newBattalion = {
     id: 'bn-' + Date.now().toString(36),
@@ -192,12 +251,9 @@ export function addBattalion(name, shortCode = '') {
     companies: [
       {
         id: 'co-' + Date.now().toString(36) + '-1',
-        name: 'Alpha Company',
-        shortCode: 'ALPHA',
-        platoons: [
-          { id: 'pl-' + Date.now().toString(36) + '-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-' + Date.now().toString(36) + '-2', name: '2nd Platoon', shortCode: '2PLTN' }
-        ]
+        name: autoCo.name,
+        shortCode: autoCo.shortCode,
+        platoons: autoCo.platoons
       }
     ]
   };
@@ -242,14 +298,31 @@ export function removeBattalion(bnNameOrId) {
 }
 
 /**
- * Adds a new Company to a specified Battalion locally.
+ * Adds a new Company to a specified Battalion locally with 2 default platoons.
+ * If companyName is omitted, automatically computes the next available military alphabet company.
  */
-export function addCompany(bnNameOrId, companyName, shortCode = '') {
-  if (!bnNameOrId || !companyName || !companyName.trim()) return getUnitStructure();
+export function addCompany(bnNameOrId, companyName = '', shortCode = '') {
+  if (!bnNameOrId) return getUnitStructure();
   const current = getUnitStructure();
   const targetBn = norm(bnNameOrId);
-  const cleanName = companyName.trim();
-  const cleanCode = (shortCode || cleanName.replace(/ company$/i, '')).toUpperCase();
+
+  let cleanName = (companyName || '').trim();
+  let cleanCode = (shortCode || '').trim();
+  let platoons = null;
+
+  if (!cleanName) {
+    const auto = getAutoCompanyName(current);
+    cleanName = auto.name;
+    cleanCode = auto.shortCode;
+    platoons = auto.platoons;
+  } else {
+    cleanCode = (cleanCode || cleanName.replace(/ company$/i, '')).toUpperCase();
+    const timestamp = Date.now().toString(36);
+    platoons = [
+      { id: 'pl-' + timestamp + '-1', name: '1st Platoon', shortCode: '1PLTN' },
+      { id: 'pl-' + timestamp + '-2', name: '2nd Platoon', shortCode: '2PLTN' }
+    ];
+  }
 
   const updated = current.map(b => {
     if (norm(b.id) === targetBn || norm(b.name) === targetBn) {
@@ -258,10 +331,7 @@ export function addCompany(bnNameOrId, companyName, shortCode = '') {
         id: 'co-' + Date.now().toString(36),
         name: cleanName,
         shortCode: cleanCode,
-        platoons: [
-          { id: 'pl-' + Date.now().toString(36) + '-1', name: '1st Platoon', shortCode: '1PLTN' },
-          { id: 'pl-' + Date.now().toString(36) + '-2', name: '2nd Platoon', shortCode: '2PLTN' }
-        ]
+        platoons
       };
       return { ...b, companies: [...companies, newCompany] };
     }
@@ -327,20 +397,30 @@ export function removeCompany(bnNameOrId, coNameOrId) {
 
 /**
  * Adds a new Platoon to a specified Company locally.
+ * If platoonName is omitted, automatically computes Nth Platoon relative to the selected company.
  */
-export function addPlatoon(bnNameOrId, coNameOrId, platoonName, shortCode = '') {
-  if (!bnNameOrId || !coNameOrId || !platoonName || !platoonName.trim()) return getUnitStructure();
+export function addPlatoon(bnNameOrId, coNameOrId, platoonName = '', shortCode = '') {
+  if (!bnNameOrId || !coNameOrId) return getUnitStructure();
   const current = getUnitStructure();
   const targetBn = norm(bnNameOrId);
   const targetCo = norm(coNameOrId);
-  const cleanName = platoonName.trim();
-  const cleanCode = (shortCode || cleanName.replace(/ platoon$/i, 'PL')).toUpperCase();
+
+  let cleanName = (platoonName || '').trim();
+  let cleanCode = (shortCode || '').trim();
 
   const updated = current.map(b => {
     if (norm(b.id) === targetBn || norm(b.name) === targetBn) {
       const companies = (b.companies || []).map(c => {
         if (norm(c.id) === targetCo || norm(c.name) === targetCo) {
           const platoons = c.platoons || [];
+          if (!cleanName) {
+            const auto = getAutoPlatoonName(c);
+            cleanName = auto.name;
+            cleanCode = auto.shortCode;
+          } else {
+            cleanCode = (cleanCode || cleanName.replace(/ platoon$/i, 'PL')).toUpperCase();
+          }
+
           const newPlatoon = {
             id: 'pl-' + Date.now().toString(36),
             name: cleanName,

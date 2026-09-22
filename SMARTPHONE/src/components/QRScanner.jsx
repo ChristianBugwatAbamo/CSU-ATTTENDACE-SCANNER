@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
 import { Camera, CheckCircle2, AlertTriangle, Shield, Users, UserPlus, Info, Settings, Lock, ShieldAlert } from 'lucide-react';
 import { formatCadetHeading } from '../services/cadetDirectory';
 import scannerAudio from '../services/scannerAudio';
+import { saveOfflineScan } from '../services/storage';
+import QrDecoderWorker from '../workers/qrDecoder.worker.js?worker';
 
 const PLATOON_QUOTA = 37;
 
@@ -50,12 +51,22 @@ export default function QRScanner({
   onScanSuccess,
   activeSessionScans = [],
   scanMode = 'Time-In',
+  onToggleScanMode,
   sessionSetup = {},
   facingMode = 'environment',
   isTorchOn = false,
   onOpenSettings
 }) {
-  const html5QrcodeScannerRef = useRef(null);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const rafIdRef = useRef(null);
+  const lastScanTimestampRef = useRef(0);
+  const isScanningRef = useRef(false);
+  const barcodeDetectorRef = useRef(null);
+  const offscreenCanvasRef = useRef(null);
+  const workerRef = useRef(null);
+  const isWorkerBusyRef = useRef(false);
+
   const [isScanning, setIsScanning] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [lastScanToast, setLastScanToast] = useState(null);
@@ -111,11 +122,11 @@ export default function QRScanner({
     scannerAudio.playMismatchWarning();
   };
 
-  // Invalid QR Warning Handler without Haptic Vibration
+  // Invalid QR Warning Handler
   const handleInvalidQrCode = (errorDetails) => {
     scannerAudio.playInvalidQrError();
+    scannerAudio.triggerHaptic([100, 50, 100]);
 
-    // 3. Set steady modal state
     setScanErrorModal({
       visible: true,
       title: 'UNAUTHORIZED QR CODE',
@@ -123,21 +134,17 @@ export default function QRScanner({
     });
   };
 
-  // Haptic Feedback - Strictly Disabled
+  // Safe Throttled Haptic Feedback (Optimization 8)
   const triggerHaptic = (pattern = [100, 50, 100]) => {
-    // DISABLE DEVICE VIBRATION ON ALL ALERTS
-    // if (navigator.vibrate) {
-    //   navigator.vibrate(pattern);
-    // }
+    scannerAudio.triggerHaptic(pattern);
   };
 
   // Flashlight / Torch Control using MediaStreamTrack API
   useEffect(() => {
     const applyTorch = async () => {
       try {
-        const videoElem = document.querySelector("#reader video");
-        if (videoElem && videoElem.srcObject) {
-          const track = videoElem.srcObject.getVideoTracks()[0];
+        if (streamRef.current) {
+          const track = streamRef.current.getVideoTracks()[0];
           if (track && typeof track.applyConstraints === 'function') {
             await track.applyConstraints({ advanced: [{ torch: isTorchOn }] });
           }
@@ -147,95 +154,200 @@ export default function QRScanner({
       }
     };
     applyTorch();
-  }, [isTorchOn, isScanning]);
+  }, [isTorchOn]);
 
-  // Start / Restart Camera with current facingMode (Front vs Back) and proper track lifecycle
+  // Start Camera with VGA constraints, 250ms RAF frame throttling, native BarcodeDetector first & Worker fallback
   useEffect(() => {
     let isMounted = true;
 
-    const stopVideoTracks = () => {
-      try {
-        const videoElem = document.querySelector("#reader video");
-        if (videoElem && videoElem.srcObject) {
-          const stream = videoElem.srcObject;
-          stream.getTracks().forEach(track => {
-            try { track.stop(); } catch (_) {}
-          });
-          videoElem.srcObject = null;
-        }
-      } catch (_) {}
+    // Helper: Stop active media tracks immediately to prevent memory leaks (Optimization 7)
+    const stopCameraTracks = () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (_) {}
+        });
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
     };
 
-    const initCameraScanner = async () => {
+    // Helper: Teardown canvas context to free GPU/memory (Optimization 7)
+    const clearOffscreenCanvas = () => {
+      if (offscreenCanvasRef.current) {
+        try {
+          const ctx = offscreenCanvasRef.current.getContext('2d');
+          ctx?.clearRect(0, 0, 320, 240);
+        } catch (_) {}
+        offscreenCanvasRef.current.width = 0;
+        offscreenCanvasRef.current.height = 0;
+        offscreenCanvasRef.current = null;
+      }
+    };
+
+    // Initialize Web Worker for JS Decoding Fallback (Optimization 4)
+    try {
+      if (!workerRef.current) {
+        workerRef.current = new QrDecoderWorker();
+        workerRef.current.onmessage = (e) => {
+          isWorkerBusyRef.current = false;
+          if (!isMounted) return;
+          if (e.data && e.data.success && e.data.data) {
+            handleScannedCode(e.data.data);
+          }
+        };
+        workerRef.current.onerror = (err) => {
+          console.warn("QR Decoder Worker error:", err);
+          isWorkerBusyRef.current = false;
+        };
+      }
+    } catch (workerErr) {
+      console.warn("Worker creation fallback:", workerErr);
+    }
+
+    // Initialize Hardware-Accelerated BarcodeDetector if supported (Optimization 3)
+    if ('BarcodeDetector' in window) {
       try {
-        // Stop any running scanner instance
-        if (html5QrcodeScannerRef.current) {
+        barcodeDetectorRef.current = new window.BarcodeDetector({ formats: ['qr_code'] });
+      } catch (e) {
+        console.warn("Native BarcodeDetector init error:", e);
+        barcodeDetectorRef.current = null;
+      }
+    }
+
+    // Process a single video frame for QR detection
+    const processVideoFrame = async () => {
+      if (!videoRef.current || videoRef.current.readyState < 2) return;
+
+      // 1. Native BarcodeDetector API First (Optimization 3: GPU Hardware Accelerated)
+      if (barcodeDetectorRef.current) {
+        try {
+          const barcodes = await barcodeDetectorRef.current.detect(videoRef.current);
+          if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
+            handleScannedCode(barcodes[0].rawValue);
+            return;
+          }
+        } catch (nativeErr) {
+          // If native detection fails, gracefully proceed to worker fallback
+        }
+      }
+
+      // 2. Offscreen Canvas Downsampled Parsing + Web Worker Fallback (Optimizations 4 & 5)
+      if (workerRef.current && !isWorkerBusyRef.current) {
+        try {
+          if (!offscreenCanvasRef.current) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 240;
+            offscreenCanvasRef.current = canvas;
+          }
+          const canvas = offscreenCanvasRef.current;
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          if (ctx) {
+            // Downsampled 320x240 scale (Optimization 5)
+            ctx.drawImage(videoRef.current, 0, 0, 320, 240);
+            const imageData = ctx.getImageData(0, 0, 320, 240);
+
+            // Transfer pixel buffer to worker (Optimization 4)
+            isWorkerBusyRef.current = true;
+            workerRef.current.postMessage(
+              { data: imageData.data, width: 320, height: 240 },
+              [imageData.data.buffer] // Zero-copy Transferable Object
+            );
+          }
+        } catch (canvasErr) {
+          isWorkerBusyRef.current = false;
+        }
+      }
+    };
+
+    // Frame Throttling Loop via requestAnimationFrame (Optimization 2: 250ms = 4 FPS)
+    const scanLoop = (timestamp) => {
+      if (!isMounted) return;
+      if (isScanningRef.current) {
+        if (timestamp - lastScanTimestampRef.current >= 250) {
+          lastScanTimestampRef.current = timestamp;
+          processVideoFrame();
+        }
+      }
+      rafIdRef.current = requestAnimationFrame(scanLoop);
+    };
+
+    // Optimization 1: Enforce Low Resolution Video Feed (VGA 640x480)
+    const startCamera = async () => {
+      stopCameraTracks();
+
+      // Camera constraints targeting 640x480 (VGA)
+      const vgaConstraints = {
+        audio: false,
+        video: {
+          facingMode: { ideal: facingMode || 'environment' },
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        }
+      };
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(vgaConstraints);
+        if (!isMounted) {
+          stream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.setAttribute('playsinline', 'true');
+          videoRef.current.muted = true;
           try {
-            if (html5QrcodeScannerRef.current.isScanning) {
-              await html5QrcodeScannerRef.current.stop();
-            }
-            await html5QrcodeScannerRef.current.clear();
+            await videoRef.current.play();
           } catch (_) {}
         }
-        stopVideoTracks();
 
-        const readerElem = document.getElementById("reader");
-        if (!readerElem) return;
-
-        const html5Qrcode = new Html5Qrcode("reader");
-        html5QrcodeScannerRef.current = html5Qrcode;
-
-        const cameraConfig = { facingMode: facingMode || "environment" };
-        const scanConfig = {
-          fps: 15,
-          qrbox: { width: 300, height: 300 },
-          aspectRatio: 1.0,
-          formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
-        };
-
-        await html5Qrcode.start(
-          cameraConfig,
-          scanConfig,
-          (decodedText) => {
-            if (isMounted) handleScannedCode(decodedText);
-          },
-          () => {} // Silent on non-detection frame ticks
-        );
-
-        if (isMounted) {
-          setIsScanning(true);
-          setCameraError('');
-        }
+        isScanningRef.current = true;
+        setIsScanning(true);
+        setCameraError('');
+        lastScanTimestampRef.current = performance.now();
+        rafIdRef.current = requestAnimationFrame(scanLoop);
       } catch (err) {
-        console.error("Camera start error, trying fallback facingMode:", err);
+        console.warn("Primary VGA camera constraints failed, attempting fallback:", err);
         if (!isMounted) return;
 
+        // Fallback constraint attempt
         try {
-          stopVideoTracks();
-          const fallbackFacing = facingMode === 'environment' ? 'user' : 'environment';
-          const fallbackScanner = new Html5Qrcode("reader");
-          html5QrcodeScannerRef.current = fallbackScanner;
-
-          await fallbackScanner.start(
-            { facingMode: fallbackFacing },
-            {
-              fps: 15,
-              qrbox: { width: 300, height: 300 },
-              aspectRatio: 1.0,
-              formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE]
-            },
-            (decodedText) => {
-              if (isMounted) handleScannedCode(decodedText);
-            },
-            () => {}
-          );
-
-          if (isMounted) {
-            setIsScanning(true);
-            setCameraError('');
+          const fallbackConstraints = {
+            audio: false,
+            video: {
+              width: { ideal: 640 },
+              height: { ideal: 480 }
+            }
+          };
+          const fallbackStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+          if (!isMounted) {
+            fallbackStream.getTracks().forEach(t => t.stop());
+            return;
           }
+
+          streamRef.current = fallbackStream;
+          if (videoRef.current) {
+            videoRef.current.srcObject = fallbackStream;
+            videoRef.current.setAttribute('playsinline', 'true');
+            videoRef.current.muted = true;
+            try {
+              await videoRef.current.play();
+            } catch (_) {}
+          }
+
+          isScanningRef.current = true;
+          setIsScanning(true);
+          setCameraError('');
+          lastScanTimestampRef.current = performance.now();
+          rafIdRef.current = requestAnimationFrame(scanLoop);
         } catch (fallbackErr) {
-          console.error("Camera fallback failed:", fallbackErr);
+          console.error("Camera access failed completely:", fallbackErr);
           if (isMounted) {
             setCameraError('Camera access required. Please check camera permissions in browser.');
             setIsScanning(false);
@@ -244,18 +356,24 @@ export default function QRScanner({
       }
     };
 
-    initCameraScanner();
+    startCamera();
 
+    // Optimization 7: Immediate Memory Cleanup on Unmount
     return () => {
       isMounted = false;
-      if (html5QrcodeScannerRef.current) {
-        try {
-          if (html5QrcodeScannerRef.current.isScanning) {
-            html5QrcodeScannerRef.current.stop().catch(e => console.warn(e));
-          }
-        } catch (_) {}
+      isScanningRef.current = false;
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
       }
-      stopVideoTracks();
+      stopCameraTracks();
+      clearOffscreenCanvas();
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      isWorkerBusyRef.current = false;
+      barcodeDetectorRef.current = null;
     };
   }, [facingMode]);
 
@@ -318,7 +436,7 @@ const companyNameMap = {
   4: 'DELTA COY'
 };
 
-  const handleScannedCode = (decodedText) => {
+  const handleScannedCode = async (decodedText) => {
     if (!decodedText) return;
 
     // 0. ENFORCE REQUIRED SETUP: Block QR scan execution if activeSession is incomplete
@@ -436,17 +554,39 @@ const companyNameMap = {
     // 5. UNDER CAPACITY: Process normal scan
     scannedIdsSetRef.current.add(cadetId);
 
-    // Play distinct single-play tone based on Time-In vs Time-Out mode
+    // Optimization 8: Sound & Haptic Feedback Throttling
     if (activeMode === 'Time-Out') {
       scannerAudio.playTimeOutSuccess();
     } else {
       scannerAudio.playTimeInSuccess();
     }
+    scannerAudio.triggerHaptic([60, 30, 60]);
 
     setAlertState({ active: false, type: '', message: '' });
     setScanErrorModal({ visible: false, title: '', message: '' });
 
-    onScanSuccess(scanRecord);
+    // Optimization 6: Offline Local Storage Queueing directly into IndexedDB / localStorage first
+    const enrichedRecord = {
+      ...scanRecord,
+      sessionName: `${sessionSetup?.battalion || '1st Battalion'} - ${sessionSetup?.company || 'Alpha Company'} (${sessionSetup?.platoon || '1st Platoon'})`,
+      sessionDate: sessionSetup?.sessionDate,
+      sessionTime: sessionSetup?.sessionTime,
+      dutyOfficer: sessionSetup?.dutyOfficer || 'Field Duty Officer',
+      battalion: sessionSetup?.battalion || decodedBattalion,
+      company: sessionSetup?.company || decodedCompany,
+      platoon: sessionSetup?.platoon || decodedPlatoon,
+      scanMode: activeMode
+    };
+
+    try {
+      await saveOfflineScan(enrichedRecord);
+    } catch (storageErr) {
+      console.warn("Immediate offline storage save fallback:", storageErr);
+    }
+
+    if (typeof onScanSuccess === 'function') {
+      onScanSuccess(enrichedRecord);
+    }
 
     setLastScanToast({
       type: 'success',
@@ -470,8 +610,22 @@ const companyNameMap = {
     <div className="scanner-edge-container">
       {/* Dynamic Camera Feed Container Card */}
       <div className={`camera-container-card ${scanFlash ? `flash-${scanFlash}` : ''}`}>
-        {/* HTML5 QR Camera Element */}
-        <div id="reader" className="camera-feed-viewport"></div>
+        {/* Direct VGA Camera Video Feed (Optimization 1) */}
+        <div id="reader" className="camera-feed-viewport" style={{ position: 'relative', width: '100%', height: '100%' }}>
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            autoPlay
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              borderRadius: '18px',
+              display: isScanning ? 'block' : 'none'
+            }}
+          />
+        </div>
 
         {/* Steady Invalid QR Overlay Modal */}
         {scanErrorModal.visible && (
@@ -660,8 +814,18 @@ const companyNameMap = {
               <span>{activeScannedCount}/{PLATOON_QUOTA}</span>
             </span>
 
-            <span className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : scanMode === 'Time-Out' ? 'mode-timeout' : 'mode-unselected'}`}>
-              {scanMode === 'Time-In' ? '🟢 TIME-IN' : scanMode === 'Time-Out' ? '🟡 TIME-OUT' : '⚪ MODE UNSET'}
+            <span
+              className={`scanner-mode-pill ${scanMode === 'Time-In' ? 'mode-timein' : scanMode === 'Time-Out' ? 'mode-timeout' : 'mode-unselected'}`}
+              onClick={() => {
+                if (onToggleScanMode) {
+                  const nextMode = scanMode === 'Time-Out' ? 'Time-In' : 'Time-Out';
+                  onToggleScanMode(nextMode);
+                }
+              }}
+              style={{ cursor: onToggleScanMode ? 'pointer' : 'default', userSelect: 'none' }}
+              title={onToggleScanMode ? `Active: ${scanMode}. Tap to switch to ${scanMode === 'Time-Out' ? 'Time-In' : 'Time-Out'}` : undefined}
+            >
+              {scanMode === 'Time-In' ? '🟢 TIME-IN ⇄' : scanMode === 'Time-Out' ? '🟡 TIME-OUT ⇄' : '⚪ MODE UNSET'}
             </span>
 
             <div className="scanner-live-pill">

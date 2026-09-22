@@ -9,7 +9,16 @@ import MobileBottomNav from './components/MobileBottomNav';
 import SyncControl from './components/SyncControl';
 import ConfirmModal from './components/ConfirmModal';
 import ScannerLandingView from './components/ScannerLandingView';
-import { getOfflineQueue, saveOfflineScan, removeOfflineScan, clearOfflineQueue, getAdminIp, setAdminIp, getLocalPhilippineDate } from './services/storage';
+import {
+  getDailyQueues,
+  saveOfflineScan,
+  removeOfflineScan,
+  clearDailyQueues,
+  purgeLegacyScanQueues,
+  getAdminIp,
+  setAdminIp,
+  getLocalPhilippineDate
+} from './services/storage';
 import { syncUnitStructureFromAdmin } from './utils/unitStructure';
 
 const SESSION_SETUP_KEY = 'csu_rotc_mobile_session_setup';
@@ -21,12 +30,13 @@ const DEFAULT_SESSION_SETUP = {
   battalion: '',
   company: '',
   platoon: '',
-  scanMode: '' // Completely blank unselected on load
+  scanMode: 'Time-In' // Defaults to Time-In
 };
 
 export default function App() {
   const [adminIpState, setAdminIpState] = useState(getAdminIp());
-  const [offlineQueue, setOfflineQueue] = useState([]);
+  // Split queues state: { timeInQueue: [], timeOutQueue: [] }
+  const [dailyQueues, setDailyQueues] = useState({ timeInQueue: [], timeOutQueue: [] });
   const [serverConnected, setServerConnected] = useState(false);
   const [showLanding, setShowLanding] = useState(true);
 
@@ -39,7 +49,7 @@ export default function App() {
   // Custom Modal State
   const [isResetModalOpen, setIsResetModalOpen] = useState(false);
 
-  // Session Setup parameters: loads saved configuration from localStorage or completely empty defaults
+  // Session Setup parameters: loads saved configuration from localStorage or defaults
   const [sessionSetup, setSessionSetup] = useState(() => {
     try {
       const saved = localStorage.getItem(SESSION_SETUP_KEY);
@@ -55,7 +65,8 @@ export default function App() {
           ...DEFAULT_SESSION_SETUP,
           ...parsed,
           sessionDate: parsed.sessionDate || getLocalPhilippineDate(),
-          sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          sessionTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          scanMode: parsed.scanMode || 'Time-In'
         };
       }
     } catch (_) {}
@@ -68,6 +79,10 @@ export default function App() {
       localStorage.setItem(SESSION_SETUP_KEY, JSON.stringify(sessionSetup));
     } catch (_) {}
   }, [sessionSetup]);
+
+  // Derived active mode and active queue
+  const activeMode = sessionSetup.scanMode === 'Time-Out' ? 'Time-Out' : 'Time-In';
+  const activeQueue = activeMode === 'Time-Out' ? (dailyQueues.timeOutQueue || []) : (dailyQueues.timeInQueue || []);
 
   // Track previous configuration key to safely close QR sync modal if echelon changes
   const prevConfigRef = useRef(null);
@@ -92,13 +107,53 @@ export default function App() {
     sessionSetup.sessionDate
   ]);
 
-  // Load Offline Queue on mount
+  // Load Today's Daily Queues on mount
   useEffect(() => {
-    async function loadQueue() {
-      const q = await getOfflineQueue();
-      setOfflineQueue(q);
+    async function loadQueues() {
+      const today = getLocalPhilippineDate();
+      purgeLegacyScanQueues(today);
+      const q = await getDailyQueues(today);
+      setDailyQueues(q);
     }
-    loadQueue();
+    loadQueues();
+  }, []);
+
+  // Daily Auto-Reset: Check for calendar midnight rollover
+  const todayDateRef = useRef(getLocalPhilippineDate());
+
+  useEffect(() => {
+    const checkDateRollover = async () => {
+      const currentToday = getLocalPhilippineDate();
+      if (currentToday !== todayDateRef.current) {
+        console.log(`[Auto-Reset] Calendar date changed: ${todayDateRef.current} -> ${currentToday}. Resetting daily scan queues.`);
+        todayDateRef.current = currentToday;
+        purgeLegacyScanQueues(currentToday);
+        const freshQueues = await getDailyQueues(currentToday);
+        setDailyQueues(freshQueues);
+        setSessionSetup(prev => ({
+          ...prev,
+          sessionDate: currentToday
+        }));
+      }
+    };
+
+    // Check periodically every 10 seconds
+    const interval = setInterval(checkDateRollover, 10000);
+
+    // Also check on visibilitychange (when phone unlocks or browser tab regains focus)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkDateRollover();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', checkDateRollover);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', checkDateRollover);
+    };
   }, []);
 
   const handleUpdateAdminIp = (newIp) => {
@@ -141,7 +196,8 @@ export default function App() {
 
   // Toggle Mode Handler (Time-In <-> Time-Out)
   const handleToggleScanMode = (newMode) => {
-    setSessionSetup(prev => ({ ...prev, scanMode: newMode }));
+    const targetMode = newMode || (activeMode === 'Time-Out' ? 'Time-In' : 'Time-Out');
+    setSessionSetup(prev => ({ ...prev, scanMode: targetMode }));
   };
 
   // Reset / Edit Session Setup
@@ -154,42 +210,42 @@ export default function App() {
     const enrichedRecord = {
       ...scanRecord,
       sessionName: `${sessionSetup.battalion || '1st Battalion'} - ${sessionSetup.company || 'Alpha Company'} (${sessionSetup.platoon || '1st Platoon'})`,
-      sessionDate: sessionSetup.sessionDate,
+      sessionDate: sessionSetup.sessionDate || getLocalPhilippineDate(),
       sessionTime: sessionSetup.sessionTime,
       dutyOfficer: sessionSetup.dutyOfficer || 'Field Duty Officer',
       battalion: sessionSetup.battalion || '1st Battalion',
       company: sessionSetup.company || 'Alpha Company',
       platoon: sessionSetup.platoon || '1st Platoon',
-      scanMode: sessionSetup.scanMode
+      scanMode: activeMode
     };
 
-    const updatedQueue = await saveOfflineScan(enrichedRecord);
-    setOfflineQueue(updatedQueue);
+    const updatedQueues = await saveOfflineScan(enrichedRecord);
+    setDailyQueues(updatedQueues);
   };
 
   // Delete Specific Scan from Offline Queue
   const handleDeleteScan = async (scanToDelete) => {
     if (!scanToDelete) return;
-    const updatedQueue = await removeOfflineScan(scanToDelete);
-    setOfflineQueue(updatedQueue);
+    const updatedQueues = await removeOfflineScan(scanToDelete);
+    setDailyQueues(updatedQueues);
   };
 
-  // Handle Sync Success
+  // Handle Sync Success (clears scanned records in active mode queue)
   const handleSyncSuccess = async () => {
-    await clearOfflineQueue();
-    setOfflineQueue([]);
+    const updatedQueues = await clearDailyQueues(activeMode);
+    setDailyQueues(updatedQueues);
     setIsBatchSyncOpen(false);
   };
 
   // Trigger Custom Reset Modal
   const handleOpenResetModal = () => {
-    if (offlineQueue.length === 0) return;
+    if (activeQueue.length === 0) return;
     setIsResetModalOpen(true);
   };
 
   const handleConfirmReset = async () => {
-    await clearOfflineQueue();
-    setOfflineQueue([]);
+    const updatedQueues = await clearDailyQueues(activeMode);
+    setDailyQueues(updatedQueues);
     setIsResetModalOpen(false);
   };
 
@@ -226,13 +282,13 @@ export default function App() {
       <HeaderBar
         adminIp={adminIpState}
         setAdminIp={handleUpdateAdminIp}
-        sessionSetup={sessionSetup}
+        sessionSetup={{ ...sessionSetup, scanMode: activeMode }}
         isSessionActive={true}
         onToggleScanMode={handleToggleScanMode}
         onEditSetup={handleEditSetup}
         onOpenLanding={() => setShowLanding(true)}
         serverConnected={serverConnected}
-        queueCount={offlineQueue.length}
+        queueCount={activeQueue.length}
         onOpenBatchSync={() => setIsBatchSyncOpen(true)}
         isTorchOn={isTorchOn}
         onToggleTorch={handleToggleTorch}
@@ -257,9 +313,10 @@ export default function App() {
         {activeTab === 'scanner' && (
           <QRScanner
             onScanSuccess={handleScanSuccess}
-            activeSessionScans={offlineQueue}
-            scanMode={sessionSetup.scanMode}
-            sessionSetup={sessionSetup}
+            activeSessionScans={activeQueue}
+            scanMode={activeMode}
+            onToggleScanMode={handleToggleScanMode}
+            sessionSetup={{ ...sessionSetup, scanMode: activeMode }}
             facingMode={cameraFacingMode}
             isTorchOn={isTorchOn}
             onOpenSettings={() => setActiveTab('settings')}
@@ -268,8 +325,8 @@ export default function App() {
 
         {activeTab === 'dashboard' && (
           <MobileAnalytics
-            scanLogs={offlineQueue}
-            sessionSetup={sessionSetup}
+            scanLogs={activeQueue}
+            sessionSetup={{ ...sessionSetup, scanMode: activeMode }}
             onResetQueue={handleOpenResetModal}
             onDeleteScan={handleDeleteScan}
           />
@@ -281,7 +338,7 @@ export default function App() {
 
         {activeTab === 'settings' && (
           <SessionSetup
-            initialSetup={sessionSetup}
+            initialSetup={{ ...sessionSetup, scanMode: activeMode }}
             onStartSession={handleStartSession}
             isEditing={true}
           />
@@ -293,16 +350,16 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onPresentBatchSync={() => setIsBatchSyncOpen(true)}
-        queueCount={offlineQueue.length}
+        queueCount={activeQueue.length}
       />
 
       {/* Duty Officer Batch Sync QR Presentation Modal */}
       <SyncControl
         isOpen={isBatchSyncOpen}
         onClose={() => setIsBatchSyncOpen(false)}
-        offlineQueue={offlineQueue}
+        offlineQueue={activeQueue}
         adminIp={adminIpState}
-        sessionSetup={sessionSetup}
+        sessionSetup={{ ...sessionSetup, scanMode: activeMode }}
         dutyOfficer={sessionSetup.dutyOfficer}
         sessionName={`${sessionSetup.battalion} - ${sessionSetup.company} (${sessionSetup.platoon})`}
         onSyncSuccess={handleSyncSuccess}
@@ -313,8 +370,8 @@ export default function App() {
       {/* Custom UI Confirmation Modal */}
       <ConfirmModal
         isOpen={isResetModalOpen}
-        title="⚠️ Reset Scanning Session?"
-        message={`Are you sure you want to clear all ${offlineQueue.length} scanned records from this device? This action cannot be undone.`}
+        title={`⚠️ Reset ${activeMode} Session?`}
+        message={`Are you sure you want to clear all ${activeQueue.length} ${activeMode} scanned records from this device? This action cannot be undone.`}
         confirmLabel="Clear Queue"
         cancelLabel="Cancel"
         onConfirm={handleConfirmReset}

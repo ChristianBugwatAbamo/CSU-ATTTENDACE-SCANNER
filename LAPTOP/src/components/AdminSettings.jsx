@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useUnitStructure } from '../context/UnitContext';
+import { getAutoBattalionName, getAutoCompanyName, getAutoPlatoonName } from './UnitManagement';
 import {
   Settings,
   Shield,
@@ -47,65 +48,8 @@ import {
   reassignCadetsCompany
 } from '../utils/supabaseClient';
 
-// Standard CSU ROTC Unit Structure Template (4 Companies, 2 Platoons each)
-export const DEFAULT_UNIT_STRUCTURE = [
-  {
-    id: 'bn-1',
-    name: '1st Battalion',
-    shortCode: '1BN',
-    targetQuota: 148,
-    companies: [
-      {
-        id: 'co-1-alpha',
-        name: 'Alpha Company',
-        shortCode: 'ALPHA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-a-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-a-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-1-bravo',
-        name: 'Bravo Company',
-        shortCode: 'BRAVO',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-1-b-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-1-b-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'bn-2',
-    name: '2nd Battalion',
-    shortCode: '2BN',
-    targetQuota: 148,
-    companies: [
-      {
-        id: 'co-2-charlie',
-        name: 'Charlie Company',
-        shortCode: 'CHARLIE',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-c-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-c-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      },
-      {
-        id: 'co-2-delta',
-        name: 'Delta Company',
-        shortCode: 'DELTA',
-        targetQuota: 74,
-        platoons: [
-          { id: 'pl-2-d-1', name: '1st Platoon', shortCode: '1PLTN', targetQuota: 37 },
-          { id: 'pl-2-d-2', name: '2nd Platoon', shortCode: '2PLTN', targetQuota: 37 }
-        ]
-      }
-    ]
-  }
-];
+export { DEFAULT_UNIT_STRUCTURE, DEFAULT_HIERARCHY, STANDARD_BATTALIONS, STANDARD_COMPANIES, STANDARD_PLATOONS } from '../constants/defaultHierarchy.js';
+import { DEFAULT_UNIT_STRUCTURE } from '../constants/defaultHierarchy.js';
 
 export const DEFAULT_OFFICER_RANKS = [
   'Cadet 2LT (ROTC) 4CL',
@@ -753,47 +697,113 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   }, 0);
   const totalBasicQuota = currentStructure.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
 
-  // Open Modal to Add Echelon
-  const handleOpenAddEchelon = (level, parentId = null) => {
-    let defaultName = '';
-    let defaultCode = '';
-    let defaultQuota = 37;
+  // Automatic Standard Echelon Creation (Replaces manual text input prompts)
+  const handleAutoAddEchelon = (level, parentId = null) => {
+    let updatedStructure = JSON.parse(JSON.stringify(currentStructure));
 
     if (level === 'battalion') {
-      const nextNum = currentStructure.length + 1;
-      const suffix = nextNum === 1 ? 'st' : nextNum === 2 ? 'nd' : nextNum === 3 ? 'rd' : 'th';
-      defaultName = `${nextNum}${suffix} Battalion`;
-      defaultCode = `${nextNum}BN`;
-      defaultQuota = 592;
-    } else if (level === 'company') {
-      const existingCoys = activeBattalion ? activeBattalion.companies.length : 0;
-      const coyNames = ['Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel'];
-      const pickName = coyNames[existingCoys] || `Company ${existingCoys + 1}`;
-      defaultName = `${pickName} Company`;
-      defaultCode = pickName.toUpperCase();
-      defaultQuota = 148;
-    } else if (level === 'platoon') {
-      const existingPltns = activeCompany ? activeCompany.platoons.length : 0;
-      const nextNum = existingPltns + 1;
-      const suffix = nextNum === 1 ? 'st' : nextNum === 2 ? 'nd' : nextNum === 3 ? 'rd' : 'th';
-      defaultName = `${nextNum}${suffix} Platoon`;
-      defaultCode = `${nextNum}PLTN`;
-      defaultQuota = 37;
-    }
+      const autoBn = getAutoBattalionName(currentStructure);
+      const autoCo = getAutoCompanyName(currentStructure);
 
-    setEchelonModalConfig({
-      level,
-      mode: 'add',
-      parentId,
-      item: {
-        id: `echelon-${Date.now()}`,
-        name: defaultName,
-        shortCode: defaultCode,
-        targetQuota: defaultQuota
+      const newBn = {
+        id: `bn-${Date.now()}`,
+        name: autoBn.name,
+        shortCode: autoBn.shortCode,
+        targetQuota: autoBn.targetQuota,
+        companies: [
+          {
+            id: `co-${Date.now()}-1`,
+            name: autoCo.name,
+            shortCode: autoCo.shortCode,
+            targetQuota: autoCo.targetQuota,
+            platoons: autoCo.platoons // Sets up 2 platoons by default: 1st Platoon & 2nd Platoon
+          }
+        ]
+      };
+
+      updatedStructure.push(newBn);
+      setSettings(prev => ({
+        ...prev,
+        unitStructure: updatedStructure,
+        unit_structure: updatedStructure
+      }));
+      updateUnitStructure(updatedStructure);
+      setSelectedBnId(newBn.id);
+      setSelectedCoId(newBn.companies[0].id);
+
+      setSaveSuccessToast(`✅ Auto-Created ${autoBn.name} with ${autoCo.name} (2 Platoons default)`);
+      setTimeout(() => setSaveSuccessToast(null), 3500);
+    } else if (level === 'company') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === (parentId || selectedBnId));
+      if (bnIdx === -1) {
+        alert('Please select a Battalion first.');
+        return;
       }
-    });
-    setIsEchelonModalOpen(true);
+
+      const autoCo = getAutoCompanyName(currentStructure);
+      const newCo = {
+        id: `co-${Date.now()}`,
+        name: autoCo.name,
+        shortCode: autoCo.shortCode,
+        targetQuota: autoCo.targetQuota,
+        platoons: autoCo.platoons // Sets up 2 platoons by default: 1st Platoon & 2nd Platoon
+      };
+
+      updatedStructure[bnIdx].companies.push(newCo);
+
+      // Auto-sync Battalion Quota to sum of companies
+      const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+      if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+
+      setSettings(prev => ({
+        ...prev,
+        unitStructure: updatedStructure,
+        unit_structure: updatedStructure
+      }));
+      updateUnitStructure(updatedStructure);
+      setSelectedCoId(newCo.id);
+
+      setSaveSuccessToast(`✅ Auto-Created ${autoCo.name} (2 Platoons default) in ${updatedStructure[bnIdx].name}`);
+      setTimeout(() => setSaveSuccessToast(null), 3500);
+    } else if (level === 'platoon') {
+      const bnIdx = updatedStructure.findIndex(b => b.id === selectedBnId);
+      if (bnIdx === -1) return;
+      const coIdx = updatedStructure[bnIdx].companies.findIndex(c => c.id === (parentId || selectedCoId));
+      if (coIdx === -1) {
+        alert('Please select a Company first.');
+        return;
+      }
+
+      const autoPl = getAutoPlatoonName(updatedStructure[bnIdx].companies[coIdx]);
+      const newPl = {
+        id: `pl-${Date.now()}`,
+        name: autoPl.name,
+        shortCode: autoPl.shortCode,
+        targetQuota: autoPl.targetQuota
+      };
+
+      updatedStructure[bnIdx].companies[coIdx].platoons.push(newPl);
+
+      // Auto-sync Company and Battalion Quotas
+      const plSum = updatedStructure[bnIdx].companies[coIdx].platoons.reduce((acc, p) => acc + Number(p.targetQuota || 0), 0);
+      if (plSum > 0) updatedStructure[bnIdx].companies[coIdx].targetQuota = plSum;
+
+      const coSum = updatedStructure[bnIdx].companies.reduce((acc, c) => acc + Number(c.targetQuota || 0), 0);
+      if (coSum > 0) updatedStructure[bnIdx].targetQuota = coSum;
+
+      setSettings(prev => ({
+        ...prev,
+        unitStructure: updatedStructure,
+        unit_structure: updatedStructure
+      }));
+      updateUnitStructure(updatedStructure);
+
+      setSaveSuccessToast(`✅ Auto-Created ${autoPl.name} under ${updatedStructure[bnIdx].companies[coIdx].name}`);
+      setTimeout(() => setSaveSuccessToast(null), 3500);
+    }
   };
+
+  const handleOpenAddEchelon = handleAutoAddEchelon;
 
   // Open Modal to Edit Echelon
   const handleOpenEditEchelon = (level, item, parentId = null) => {
@@ -1028,9 +1038,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Restore Default 1,184 Echelon Structure
+  // Restore Default CSU ROTC Hierarchy Structure (1st - 3rd Bn + HQ, 8 Coys, 16 Platoons)
   const handleRestoreDefaultStructure = () => {
-    if (window.confirm('Reset the organizational structure back to standard CSU ROTC 1,184 template (2 Battalions × 4 Companies × 4 Platoons × 37 Cadets)? (Click "SAVE ALL SETTINGS" to commit)')) {
+    if (window.confirm('Reset the organizational structure back to standard CSU ROTC Defaults (4 Battalions: 1st, 2nd, 3rd, Headquarters • 8 Companies • 16 Platoons)? (Click "SAVE ALL SETTINGS" to commit)')) {
       const newSettings = { ...settings, unitStructure: DEFAULT_UNIT_STRUCTURE, unit_structure: DEFAULT_UNIT_STRUCTURE };
       setSettings(newSettings);
       if (updateUnitStructure) updateUnitStructure(DEFAULT_UNIT_STRUCTURE);
@@ -1365,9 +1375,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   className="btn btn-secondary btn-sm"
                   onClick={handleRestoreDefaultStructure}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
-                  title="Reset to standard 1,184 structure (2 Battalions x 4 Coys x 4 Platoons)"
+                  title="Reset to standard CSU ROTC hierarchy (4 Battalions, 8 Companies, 16 Platoons)"
                 >
-                  <RefreshCw size={14} /> Restore 1,184 Standard Template
+                  <RefreshCw size={14} /> Reset Hierarchy to CSU Defaults
                 </button>
               </div>
             </div>

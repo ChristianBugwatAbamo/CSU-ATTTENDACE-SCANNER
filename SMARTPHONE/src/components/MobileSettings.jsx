@@ -38,6 +38,9 @@ import {
   removePlatoon,
   resetDefaultStructure,
   syncUnitStructureFromAdmin,
+  getAutoBattalionName,
+  getAutoCompanyName,
+  getAutoPlatoonName,
   UNIT_UPDATE_EVENT
 } from '../utils/unitStructure';
 
@@ -124,6 +127,32 @@ export default function MobileSettings({
     }
   }, [availablePlatoons, platoon, company]);
 
+  // Switch / select active units when clicking inactive unit card containers
+  const setSelectedBattalion = (bn) => {
+    const targetBn = typeof bn === 'object' && bn !== null ? (bn.name || bn.id) : bn;
+    if (!targetBn) return;
+    setBattalion(targetBn);
+    const validCoys = getCompaniesForBattalion(targetBn, rawStructure);
+    const firstCoy = validCoys[0] || '';
+    setCompany(firstCoy);
+    const validPlat = getPlatoonsForCompany(targetBn, firstCoy, rawStructure);
+    setPlatoon(validPlat[0] || '');
+  };
+
+  const setSelectedCompany = (coy) => {
+    const targetCoy = typeof coy === 'object' && coy !== null ? (coy.name || coy.id) : coy;
+    if (!targetCoy) return;
+    setCompany(targetCoy);
+    const validPlat = getPlatoonsForCompany(battalion, targetCoy, rawStructure);
+    setPlatoon(validPlat[0] || '');
+  };
+
+  const setSelectedPlatoon = (pl) => {
+    const targetPl = typeof pl === 'object' && pl !== null ? (pl.name || pl.id) : pl;
+    if (!targetPl) return;
+    setPlatoon(targetPl);
+  };
+
   const showToast = (message, type = 'success') => {
     setStatusNotice({ message, type });
     setTimeout(() => setStatusNotice(null), 3500);
@@ -170,15 +199,40 @@ export default function MobileSettings({
 
   // --- Modal Open Handlers for CRUD inside Drawer ---
   const handleOpenAdd = (level) => {
-    setModalConfig({
-      isOpen: true,
-      level,
-      mode: 'add',
-      targetId: '',
-      name: '',
-      shortCode: '',
-      error: ''
-    });
+    try {
+      if (level === 'battalion') {
+        const autoBn = getAutoBattalionName(getUnitStructure());
+        addBattalion(autoBn.name, autoBn.shortCode);
+        setBattalion(autoBn.name);
+        setUnitVersion(v => v + 1);
+        showToast(`Added Battalion: ${autoBn.name}`);
+      } else if (level === 'company') {
+        if (!battalion) {
+          showToast('Select a Battalion first.', 'error');
+          return;
+        }
+        const autoCo = getAutoCompanyName(getUnitStructure());
+        addCompany(battalion, autoCo.name, autoCo.shortCode);
+        setCompany(autoCo.name);
+        setUnitVersion(v => v + 1);
+        showToast(`Added ${autoCo.name} (2 Platoons default)`);
+      } else if (level === 'platoon') {
+        if (!battalion || !company) {
+          showToast('Select a Company first.', 'error');
+          return;
+        }
+        const currentStructure = getUnitStructure();
+        const targetBn = currentStructure.find(b => b.name === battalion || b.id === battalion);
+        const targetCo = targetBn?.companies?.find(c => c.name === company || c.id === company);
+        const autoPl = getAutoPlatoonName(targetCo);
+        addPlatoon(battalion, company, autoPl.name, autoPl.shortCode);
+        setPlatoon(autoPl.name);
+        setUnitVersion(v => v + 1);
+        showToast(`Added Platoon: ${autoPl.name}`);
+      }
+    } catch (err) {
+      showToast(err.message || 'Operation failed', 'error');
+    }
   };
 
   const handleOpenEdit = (level, currentName) => {
@@ -287,7 +341,7 @@ export default function MobileSettings({
   };
 
   const handleResetDefaults = () => {
-    const confirmed = window.confirm('Reset unit structure back to CSU ROTC standard default (1st & 2nd Battalion, 4 Platoons)?');
+    const confirmed = window.confirm('Reset unit structure back to CSU ROTC standard defaults (4 Battalions: 1st, 2nd, 3rd, Headquarters • 8 Companies • 16 Platoons)?');
     if (!confirmed) return;
     resetDefaultStructure();
     setUnitVersion(v => v + 1);
@@ -683,43 +737,57 @@ export default function MobileSettings({
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {availableBattalions.map(bn => (
-                    <div
-                      key={bn}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '0.6rem 0.8rem',
-                        background: bn === battalion ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
-                        border: bn === battalion ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
-                        borderRadius: '10px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{bn}</span>
-                        {bn === battalion && (
-                          <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
-                        )}
+                  {availableBattalions.map(bn => {
+                    const bnName = typeof bn === 'object' && bn !== null ? (bn.name || bn.id) : bn;
+                    const isActive = bnName === battalion;
+                    return (
+                      <div
+                        key={bnName}
+                        onClick={() => setSelectedBattalion(bn)}
+                        title={`Click to switch active Battalion to ${bnName}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.6rem 0.8rem',
+                          background: isActive ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
+                          border: isActive ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{bnName}</span>
+                          {isActive && (
+                            <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit('battalion', bnName);
+                            }}
+                            style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Edit2 size={11} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteEchelon('battalion', bnName);
+                            }}
+                            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Trash2 size={11} /> Del
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit('battalion', bn)}
-                          style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Edit2 size={11} /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEchelon('battalion', bn)}
-                          style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Trash2 size={11} /> Del
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -739,43 +807,57 @@ export default function MobileSettings({
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {availableCompanies.map(coy => (
-                    <div
-                      key={coy}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '0.6rem 0.8rem',
-                        background: coy === company ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
-                        border: coy === company ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
-                        borderRadius: '10px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{coy}</span>
-                        {coy === company && (
-                          <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
-                        )}
+                  {availableCompanies.map(coy => {
+                    const coyName = typeof coy === 'object' && coy !== null ? (coy.name || coy.id) : coy;
+                    const isActive = coyName === company;
+                    return (
+                      <div
+                        key={coyName}
+                        onClick={() => setSelectedCompany(coy)}
+                        title={`Click to switch active Company to ${coyName}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.6rem 0.8rem',
+                          background: isActive ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
+                          border: isActive ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{coyName}</span>
+                          {isActive && (
+                            <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit('company', coyName);
+                            }}
+                            style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Edit2 size={11} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteEchelon('company', coyName);
+                            }}
+                            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Trash2 size={11} /> Del
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit('company', coy)}
-                          style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Edit2 size={11} /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEchelon('company', coy)}
-                          style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Trash2 size={11} /> Del
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -795,43 +877,57 @@ export default function MobileSettings({
                   </button>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  {availablePlatoons.map(pl => (
-                    <div
-                      key={pl}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '0.6rem 0.8rem',
-                        background: pl === platoon ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
-                        border: pl === platoon ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
-                        borderRadius: '10px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{pl}</span>
-                        {pl === platoon && (
-                          <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
-                        )}
+                  {availablePlatoons.map(pl => {
+                    const plName = typeof pl === 'object' && pl !== null ? (pl.name || pl.id) : pl;
+                    const isActive = plName === platoon;
+                    return (
+                      <div
+                        key={plName}
+                        onClick={() => setSelectedPlatoon(pl)}
+                        title={`Click to switch active Platoon to ${plName}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.6rem 0.8rem',
+                          background: isActive ? 'rgba(245, 158, 11, 0.12)' : 'var(--bg-dark-input)',
+                          border: isActive ? '1px solid var(--rotc-gold-bright)' : '1px solid var(--border-dark)',
+                          borderRadius: '10px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#f8fafc' }}>{plName}</span>
+                          {isActive && (
+                            <span style={{ fontSize: '0.65rem', background: 'var(--rotc-gold-bright)', color: '#0b0f19', padding: '1px 6px', borderRadius: '9999px', fontWeight: 800 }}>Active</span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenEdit('platoon', plName);
+                            }}
+                            style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Edit2 size={11} /> Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteEchelon('platoon', plName);
+                            }}
+                            style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <Trash2 size={11} /> Del
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: '4px' }}>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEdit('platoon', pl)}
-                          style={{ background: 'rgba(2, 132, 199, 0.15)', color: '#38bdf8', border: '1px solid #0284c7', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Edit2 size={11} /> Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteEchelon('platoon', pl)}
-                          style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid #ef4444', borderRadius: '6px', padding: '3px 7px', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '2px' }}
-                        >
-                          <Trash2 size={11} /> Del
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 

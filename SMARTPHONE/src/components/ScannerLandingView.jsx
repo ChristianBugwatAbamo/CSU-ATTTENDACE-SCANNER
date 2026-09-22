@@ -1,18 +1,18 @@
 import React from 'react';
-import { 
-  QrCode, 
-  ShieldCheck, 
-  ArrowRight, 
-  Wifi, 
-  WifiOff 
+import {
+  QrCode,
+  ShieldCheck,
+  ArrowRight,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 
-export default function ScannerLandingView({ 
-  onStartScanning, 
+export default function ScannerLandingView({
+  onStartScanning,
   isOffline = true
 }) {
   return (
-    <div 
+    <div
       className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 max-w-md mx-auto relative overflow-hidden font-sans"
       style={{
         minHeight: '100vh',
@@ -30,8 +30,8 @@ export default function ScannerLandingView({
       }}
     >
       {/* Background Subtle Glowing Gradients */}
-      <div 
-        className="absolute -top-20 -left-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" 
+      <div
+        className="absolute -top-20 -left-20 w-60 h-60 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"
         style={{
           position: 'absolute',
           top: '-80px',
@@ -45,8 +45,8 @@ export default function ScannerLandingView({
           zIndex: 0
         }}
       />
-      <div 
-        className="absolute -bottom-20 -right-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" 
+      <div
+        className="absolute -bottom-20 -right-20 w-60 h-60 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"
         style={{
           position: 'absolute',
           bottom: '-80px',
@@ -62,7 +62,7 @@ export default function ScannerLandingView({
       />
 
       {/* TOP BAR / SYSTEM STATUS */}
-      <div 
+      <div
         className="flex items-center justify-between pt-2 pb-4 z-10"
         style={{
           display: 'flex',
@@ -75,7 +75,7 @@ export default function ScannerLandingView({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-          <div 
+          <div
             style={{
               width: '36px',
               height: '36px',
@@ -91,7 +91,7 @@ export default function ScannerLandingView({
             <ShieldCheck size={20} />
           </div>
           <div>
-            <h1 
+            <h1
               style={{
                 fontSize: '0.8rem',
                 fontWeight: 900,
@@ -104,7 +104,7 @@ export default function ScannerLandingView({
             >
               CSU ROTCU
             </h1>
-            <p 
+            <p
               style={{
                 fontSize: '0.625rem',
                 color: '#94a3b8',
@@ -120,7 +120,7 @@ export default function ScannerLandingView({
         </div>
 
         {/* Network / Storage Status Badge */}
-        <div 
+        <div
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -141,7 +141,7 @@ export default function ScannerLandingView({
       </div>
 
       {/* HERO / CENTER SECTION */}
-      <div 
+      <div
         style={{
           margin: 'auto 0',
           display: 'flex',
@@ -154,7 +154,7 @@ export default function ScannerLandingView({
         }}
       >
         {/* Enlarged CSU ROTC Unit Logo */}
-        <div 
+        <div
           style={{
             position: 'relative',
             display: 'flex',
@@ -162,7 +162,7 @@ export default function ScannerLandingView({
             justifyContent: 'center'
           }}
         >
-          <div 
+          <div
             style={{
               position: 'absolute',
               width: '200px',
@@ -192,7 +192,7 @@ export default function ScannerLandingView({
 
         {/* Main Branding Headings */}
         <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-          <h2 
+          <h2
             style={{
               fontSize: '1.75rem',
               fontWeight: 900,
@@ -206,8 +206,8 @@ export default function ScannerLandingView({
             Rapid Cadet <br />
             <span style={{ color: '#fbbf24' }}>Attendance Sync</span>
           </h2>
-          
-          <p 
+
+          <p
             style={{
               fontSize: '0.82rem',
               color: '#94a3b8',
@@ -217,7 +217,7 @@ export default function ScannerLandingView({
               fontWeight: 500
             }}
           >
-            Scan cadet ID QR codes offline during field formation and sync directly to HQ via Webcam Batch QR.
+            Scan cadet ID QR codes offline during field formation and sync directly to Admin via Webcam Batch QR.
           </p>
         </div>
 
@@ -254,7 +254,7 @@ export default function ScannerLandingView({
       </div>
 
       {/* FOOTER METADATA */}
-      <div 
+      <div
         style={{
           textAlign: 'center',
           paddingTop: '0.85rem',
@@ -271,7 +271,7 @@ export default function ScannerLandingView({
         }}
       >
         <span>CSU ROTCU v2.4 (Offline Engine)</span>
-        <span style={{ color: '#94a3b8' }}>HQ Sync Compatible</span>
+        <span style={{ color: '#94a3b8' }}>Admin Sync Compatible</span>
       </div>
 
     </div>

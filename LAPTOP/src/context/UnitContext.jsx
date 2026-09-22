@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import { DEFAULT_UNIT_STRUCTURE } from '../components/AdminSettings';
+import { DEFAULT_UNIT_STRUCTURE } from '../constants/defaultHierarchy.js';
 import { fetchSettingsFromSupabase, saveSettingsToSupabase } from '../utils/supabaseClient';
 
 const UnitContext = createContext(null);

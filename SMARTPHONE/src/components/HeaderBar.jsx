@@ -48,6 +48,29 @@ export default function HeaderBar({
         <div className="header-right-controls">
           {isScannerTab && (
             <>
+              {/* Scan Mode Toggle Button (Time-In <-> Time-Out) */}
+              {onToggleScanMode && (
+                <button
+                  type="button"
+                  className={`header-tool-btn ${sessionSetup?.scanMode === 'Time-Out' ? 'tool-active' : ''}`}
+                  style={{
+                    width: 'auto',
+                    padding: '0 8px',
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    gap: '4px',
+                    background: sessionSetup?.scanMode === 'Time-Out' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.2)',
+                    borderColor: sessionSetup?.scanMode === 'Time-Out' ? '#fbbf24' : '#34d399',
+                    color: sessionSetup?.scanMode === 'Time-Out' ? '#fbbf24' : '#34d399'
+                  }}
+                  onClick={() => onToggleScanMode(sessionSetup?.scanMode === 'Time-Out' ? 'Time-In' : 'Time-Out')}
+                  title={`Current: ${sessionSetup?.scanMode || 'Time-In'}. Tap to switch to ${sessionSetup?.scanMode === 'Time-Out' ? 'Time-In' : 'Time-Out'}`}
+                  aria-label="Toggle Scan Mode"
+                >
+                  <span>{sessionSetup?.scanMode === 'Time-Out' ? '🟡 TIME-OUT' : '🟢 TIME-IN'}</span>
+                </button>
+              )}
+
               {/* Flashlight / Torch Toggle */}
               {onToggleTorch && (
                 <button
@@ -73,8 +96,6 @@ export default function HeaderBar({
                   <RefreshCw size={15} />
                 </button>
               )}
-
-
             </>
           )}
         </div>
@@ -92,7 +113,9 @@ export default function HeaderBar({
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
               <span className="sync-pulse-dot"></span>
               <span className="sync-count-number">{queueCount}</span>
-              <span style={{ fontWeight: 700 }}>Unsynced Record{queueCount !== 1 ? 's' : ''} Pending Sync</span>
+              <span style={{ fontWeight: 700 }}>
+                {sessionSetup?.scanMode === 'Time-Out' ? 'Time-Out' : 'Time-In'} Record{queueCount !== 1 ? 's' : ''} Pending Sync
+              </span>
             </div>
             <span className="sync-export-arrow">Export QR ⚡</span>
           </button>

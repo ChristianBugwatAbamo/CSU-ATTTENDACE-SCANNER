@@ -27,101 +27,244 @@ export function getLocalPhilippineDate(d = new Date()) {
   }
 }
 
-// Get unsynced scans queue
-export async function getOfflineQueue() {
+// Dynamic Storage Key generator based on Philippine date YYYY-MM-DD
+export function getDailyScansStorageKey(dateStr = getLocalPhilippineDate()) {
+  const cleanDate = dateStr || getLocalPhilippineDate();
+  return `rotc_scans_${cleanDate}`;
+}
+
+/**
+ * Purges legacy scan queues from previous days.
+ * Ensures that when the calendar date rolls over, old day queues are cleared
+ * and only today's key rotc_scans_${todayDate} remains.
+ */
+export function purgeLegacyScanQueues(todayDate = getLocalPhilippineDate()) {
   try {
-    const queue = await get(QUEUE_KEY);
-    return queue || [];
+    const todayKey = getDailyScansStorageKey(todayDate);
+    const keysToRemove = [];
+
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      // Purge any rotc_scans_* key that doesn't match today's date
+      if (key.startsWith('rotc_scans_') && key !== todayKey) {
+        keysToRemove.push(key);
+      }
+      // Purge legacy non-date-keyed offline queues
+      if (key === 'csu_rotc_offline_scans_queue' || key === 'csu_mobile_local_scans' || key === 'csu_rotc_offline_queue') {
+        keysToRemove.push(key);
+      }
+    }
+
+    keysToRemove.forEach(k => {
+      try {
+        localStorage.removeItem(k);
+        del(k).catch(() => {});
+      } catch (_) {}
+    });
   } catch (err) {
-    const fallback = localStorage.getItem(QUEUE_KEY);
-    return fallback ? JSON.parse(fallback) : [];
+    console.warn("Purge legacy scan queues warning:", err);
   }
 }
 
-// Save scan to offline queue (updates existing entry on re-scan, or prepends new)
-export async function saveOfflineScan(scanRecord) {
-  const currentQueue = await getOfflineQueue();
-  const normalizedId = String(scanRecord.cadetId || '').trim().toUpperCase();
-  const scanMode = scanRecord.scanMode || 'Time-In';
+/**
+ * Loads today's split scan queues from localStorage / IDB.
+ * Returns { timeInQueue: [], timeOutQueue: [] }.
+ */
+export async function getDailyQueues(dateStr = getLocalPhilippineDate()) {
+  const targetDate = dateStr || getLocalPhilippineDate();
+  purgeLegacyScanQueues(targetDate);
+
+  const storageKey = getDailyScansStorageKey(targetDate);
+  let parsed = null;
+
+  // 1. Check localStorage first (synchronous & reliable on mobile)
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      parsed = JSON.parse(raw);
+    }
+  } catch (err) {
+    console.warn("localStorage parse error for daily scans:", err);
+  }
+
+  // 2. IDB fallback
+  if (!parsed) {
+    try {
+      parsed = await get(storageKey);
+    } catch (_) {}
+  }
+
+  // 3. Normalize into strict { timeInQueue: [], timeOutQueue: [] } shape
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return {
+      timeInQueue: Array.isArray(parsed.timeInQueue) ? parsed.timeInQueue : [],
+      timeOutQueue: Array.isArray(parsed.timeOutQueue) ? parsed.timeOutQueue : []
+    };
+  } else if (Array.isArray(parsed)) {
+    // In case an array was stored, split into Time-In and Time-Out
+    const timeInQueue = parsed.filter(item => (item.scanMode || 'Time-In') !== 'Time-Out');
+    const timeOutQueue = parsed.filter(item => item.scanMode === 'Time-Out');
+    return { timeInQueue, timeOutQueue };
+  }
+
+  return { timeInQueue: [], timeOutQueue: [] };
+}
+
+/**
+ * Saves both timeInQueue and timeOutQueue under rotc_scans_${todayDate}.
+ */
+export async function saveDailyQueues(queues, dateStr = getLocalPhilippineDate()) {
+  const targetDate = dateStr || getLocalPhilippineDate();
+  const storageKey = getDailyScansStorageKey(targetDate);
+
+  const payload = {
+    timeInQueue: Array.isArray(queues?.timeInQueue) ? queues.timeInQueue : [],
+    timeOutQueue: Array.isArray(queues?.timeOutQueue) ? queues.timeOutQueue : []
+  };
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("Failed to write daily queues to localStorage:", err);
+  }
+
+  try {
+    await set(storageKey, payload);
+  } catch (_) {}
+
+  return payload;
+}
+
+/**
+ * Get unsynced scans queue.
+ * If mode is specified ('Time-In' or 'Time-Out'), returns only that queue.
+ * If mode is omitted, returns combined array.
+ */
+export async function getOfflineQueue(mode = null, dateStr = getLocalPhilippineDate()) {
+  const queues = await getDailyQueues(dateStr);
+  if (mode === 'Time-Out') return queues.timeOutQueue;
+  if (mode === 'Time-In') return queues.timeInQueue;
+  return [...queues.timeInQueue, ...queues.timeOutQueue];
+}
+
+/**
+ * Save scan to offline queue routed strictly to timeInQueue or timeOutQueue.
+ * Stored in localStorage keyed with rotc_scans_${todayDate}.
+ * Returns the updated { timeInQueue, timeOutQueue } object.
+ */
+export async function saveOfflineScan(scanRecord, dateStr = getLocalPhilippineDate()) {
+  const targetDate = dateStr || getLocalPhilippineDate();
+  const queues = await getDailyQueues(targetDate);
+
+  const scanMode = (scanRecord.scanMode || 'Time-In') === 'Time-Out' ? 'Time-Out' : 'Time-In';
+  const targetQueueKey = scanMode === 'Time-Out' ? 'timeOutQueue' : 'timeInQueue';
+  const targetQueue = [...queues[targetQueueKey]];
+
+  const normalizedId = String(scanRecord.cadetId || scanRecord.id || '').trim().toUpperCase();
   const scanDate = scanRecord.timestamp ? new Date(scanRecord.timestamp).toDateString() : new Date().toDateString();
 
-  let updatedQueue = [...currentQueue];
-  const existingIndex = updatedQueue.findIndex(item => {
+  const existingIndex = targetQueue.findIndex(item => {
     const itemDate = item.timestamp ? new Date(item.timestamp).toDateString() : new Date().toDateString();
-    return String(item.cadetId || '').trim().toUpperCase() === normalizedId &&
-      (item.scanMode || 'Time-In') === scanMode &&
-      itemDate === scanDate;
+    const itemId = String(item.cadetId || item.id || '').trim().toUpperCase();
+    return itemId === normalizedId && itemDate === scanDate;
   });
+
+  const enriched = {
+    ...scanRecord,
+    scanMode,
+    timestamp: scanRecord.timestamp || new Date().toISOString()
+  };
 
   if (existingIndex !== -1) {
     // OVERWRITE: Update with latest Duty Officer, timestamp, and details
-    updatedQueue[existingIndex] = {
-      ...updatedQueue[existingIndex],
-      ...scanRecord,
-      dutyOfficer: scanRecord.dutyOfficer || updatedQueue[existingIndex].dutyOfficer,
-      timestamp: scanRecord.timestamp,
-      sessionName: scanRecord.sessionName || updatedQueue[existingIndex].sessionName
+    targetQueue[existingIndex] = {
+      ...targetQueue[existingIndex],
+      ...enriched,
+      dutyOfficer: enriched.dutyOfficer || targetQueue[existingIndex].dutyOfficer,
+      sessionName: enriched.sessionName || targetQueue[existingIndex].sessionName
     };
   } else {
     // NEW RECORD: Prepend
-    updatedQueue.unshift(scanRecord);
+    targetQueue.unshift(enriched);
   }
 
-  try {
-    await set(QUEUE_KEY, updatedQueue);
-  } catch (err) {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(updatedQueue));
-  }
-  return updatedQueue;
+  const updatedQueues = {
+    ...queues,
+    [targetQueueKey]: targetQueue
+  };
+
+  await saveDailyQueues(updatedQueues, targetDate);
+  return updatedQueues;
 }
 
-// Remove a single scan from offline queue
-export async function removeOfflineScan(scanRecord) {
-  const currentQueue = await getOfflineQueue();
-  const targetId = String(scanRecord.cadetId || scanRecord.id || '').trim().toUpperCase();
-  const targetMode = scanRecord.scanMode || 'Time-In';
-  const targetTimestamp = scanRecord.timestamp;
+/**
+ * Remove a single scan from the appropriate daily queue.
+ * Returns the updated { timeInQueue, timeOutQueue } object.
+ */
+export async function removeOfflineScan(scanRecord, dateStr = getLocalPhilippineDate()) {
+  const targetDate = dateStr || getLocalPhilippineDate();
+  const queues = await getDailyQueues(targetDate);
+
+  const scanMode = (scanRecord?.scanMode || 'Time-In') === 'Time-Out' ? 'Time-Out' : 'Time-In';
+  const targetQueueKey = scanMode === 'Time-Out' ? 'timeOutQueue' : 'timeInQueue';
+  const targetQueue = [...queues[targetQueueKey]];
+
+  const targetId = String(scanRecord?.cadetId || scanRecord?.id || '').trim().toUpperCase();
+  const targetTimestamp = scanRecord?.timestamp;
 
   let removed = false;
-  const updatedQueue = currentQueue.filter(item => {
+  const filteredQueue = targetQueue.filter(item => {
     if (removed) return true;
     const itemId = String(item.cadetId || item.id || '').trim().toUpperCase();
-    const itemMode = item.scanMode || 'Time-In';
     if (targetTimestamp && item.timestamp) {
-      if (itemId === targetId && itemMode === targetMode && item.timestamp === targetTimestamp) {
+      if (itemId === targetId && item.timestamp === targetTimestamp) {
         removed = true;
         return false;
       }
-    } else if (itemId === targetId && itemMode === targetMode) {
+    } else if (itemId === targetId) {
       removed = true;
       return false;
     }
     return true;
   });
 
-  try {
-    await set(QUEUE_KEY, updatedQueue);
-  } catch (err) {
-    localStorage.setItem(QUEUE_KEY, JSON.stringify(updatedQueue));
-  }
-  return updatedQueue;
+  const updatedQueues = {
+    ...queues,
+    [targetQueueKey]: filteredQueue
+  };
+
+  await saveDailyQueues(updatedQueues, targetDate);
+  return updatedQueues;
 }
 
 export const deleteOfflineScan = removeOfflineScan;
 
-// Clear offline queue after successful sync
-export async function clearOfflineQueue() {
-  try {
-    await del(QUEUE_KEY);
-  } catch (err) {
-    console.warn("IDB clear failed:", err);
+/**
+ * Clear daily queues after sync or reset.
+ * If mode is 'Time-In', clears only timeInQueue.
+ * If mode is 'Time-Out', clears only timeOutQueue.
+ * If mode is null or 'ALL', clears both queues.
+ * Returns updated { timeInQueue, timeOutQueue }.
+ */
+export async function clearDailyQueues(mode = null, dateStr = getLocalPhilippineDate()) {
+  const targetDate = dateStr || getLocalPhilippineDate();
+  const queues = await getDailyQueues(targetDate);
+
+  let updatedQueues;
+  if (mode === 'Time-In') {
+    updatedQueues = { ...queues, timeInQueue: [] };
+  } else if (mode === 'Time-Out') {
+    updatedQueues = { ...queues, timeOutQueue: [] };
+  } else {
+    updatedQueues = { timeInQueue: [], timeOutQueue: [] };
   }
-  try {
-    localStorage.removeItem(QUEUE_KEY);
-    localStorage.removeItem('csu_mobile_local_scans');
-    localStorage.removeItem('csu_rotc_offline_queue');
-  } catch (_) {}
+
+  await saveDailyQueues(updatedQueues, targetDate);
+  return updatedQueues;
 }
+
+export const clearOfflineQueue = clearDailyQueues;
 
 // Admin Laptop IP Settings
 export function getAdminIp() {

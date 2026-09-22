@@ -118,6 +118,11 @@ export default function SyncControl({
     const rawMode = sessionSetup?.scanMode || slice[0]?.scanMode || 'Time-In';
     const modeKey = String(rawMode).toLowerCase().includes('out') ? 'OUT' : 'IN';
 
+    // Live device system clock at the instant a batch QR code is generated
+    const liveNow = new Date();
+    const liveTimestampSec = Math.floor(liveNow.getTime() / 1000);
+    const liveIso = liveNow.toISOString();
+
     return JSON.stringify({
       T: 'RBS',                      // ROTC Batch Sync
       b: activeBatchId || ('b_' + totalChunks + '_' + effectiveQueue.length), // Unique Batch Session ID to prevent multi-page QR stitching collision
@@ -128,11 +133,13 @@ export default function SyncControl({
       pl: pl,                        // Platoon
       p: chunkIndex + 1,             // Current Page (1-indexed)
       n: totalChunks,                // Total Pages
+      t: liveTimestampSec,           // Live device timestamp at generation instant
+      ts: liveIso,                   // Live device ISO timestamp
       r: slice.map(item => {
         const cid = String(item.cadetId || item.id || item.i || '').trim();
-        // Preserve exact scanning timestamp as epoch seconds (compact 10 digits)
+        // Preserve exact scanning timestamp as epoch seconds (compact 10 digits), falling back to live device clock
         const rawTime = item.timestamp || item.scanned_at || item.scannedAt;
-        const epochSec = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : Math.floor(Date.now() / 1000);
+        const epochSec = rawTime ? Math.floor(new Date(rawTime).getTime() / 1000) : liveTimestampSec;
         return [cid, epochSec];
       })
     });
