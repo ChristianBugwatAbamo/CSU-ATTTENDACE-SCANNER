@@ -126,12 +126,15 @@ export default function CadetPortal({ cadet, onLogout }) {
     }
   });
 
+  const cadetTermId = cadet?.academic_term_id || cadetProfile?.academic_term_id;
+
   const [formationDates, setFormationDates] = useState(() => {
     try {
-      const cached = localStorage.getItem('csu_rotc_formation_dates');
+      const cacheKey = cadetTermId ? `csu_rotc_formation_dates_${cadetTermId}` : 'csu_rotc_formation_dates';
+      const cached = localStorage.getItem(cacheKey);
       const parsed = cached ? JSON.parse(cached) : [];
       if (Array.isArray(parsed) && parsed.length >= 6 && parsed.includes('2026-08-22')) {
-        localStorage.removeItem('csu_rotc_formation_dates');
+        localStorage.removeItem(cacheKey);
         return [];
       }
       return Array.isArray(parsed) ? parsed : [];
@@ -142,7 +145,8 @@ export default function CadetPortal({ cadet, onLogout }) {
 
   const [dbSessions, setDbSessions] = useState(() => {
     try {
-      const cached = localStorage.getItem('csu_rotc_db_sessions');
+      const cacheKey = cadetTermId ? `csu_rotc_db_sessions_${cadetTermId}` : 'csu_rotc_db_sessions';
+      const cached = localStorage.getItem(cacheKey);
       return cached ? JSON.parse(cached) : [];
     } catch (_) {
       return [];
@@ -246,12 +250,24 @@ export default function CadetPortal({ cadet, onLogout }) {
     }
 
     try {
-      const [historyLogs, sbSettings, mDates, sessionsRes, liveCadetRes] = await Promise.allSettled([
+      // Fetch live cadet record first to ensure authoritative academic_term_id is respected
+      let liveCadet = null;
+      try {
+        liveCadet = await fetchCadetByCadetId(activeCid);
+        if (liveCadet) {
+          setCadetProfile(prev => ({ ...prev, ...liveCadet }));
+        }
+      } catch (cErr) {
+        console.warn('Could not fetch live cadet record:', cErr);
+      }
+
+      const effectiveTermId = liveCadet?.academic_term_id || cadetProfile?.academic_term_id || cadet?.academic_term_id;
+
+      const [historyLogs, sbSettings, mDates, sessionsRes] = await Promise.allSettled([
         fetchCadetAttendanceHistory(activeCid, true), // Always fetch fresh attendance & excuse status from cloud
         fetchSettingsFromSupabase(true), // Always fetch fresh settings from cloud to immediately adopt admin changes
-        fetchMandatoryFormationDates(isManual),
-        fetchAttendanceSessionsFromSupabase(true), // Always fetch fresh sessions from cloud
-        fetchCadetByCadetId(activeCid)
+        fetchMandatoryFormationDates(isManual, effectiveTermId),
+        fetchAttendanceSessionsFromSupabase(true, effectiveTermId) // Fresh sessions filtered by cadet's academic_term_id
       ]);
 
       if (historyLogs.status === 'fulfilled' && Array.isArray(historyLogs.value)) {
@@ -268,9 +284,6 @@ export default function CadetPortal({ cadet, onLogout }) {
       }
       if (sessionsRes.status === 'fulfilled' && Array.isArray(sessionsRes.value)) {
         setDbSessions(sessionsRes.value);
-      }
-      if (liveCadetRes.status === 'fulfilled' && liveCadetRes.value) {
-        setCadetProfile(prev => ({ ...prev, ...liveCadetRes.value }));
       }
     } catch (err) {
       console.warn('Error loading cadet portal data:', err);
@@ -360,8 +373,11 @@ export default function CadetPortal({ cadet, onLogout }) {
   // Map each formation date to its actual dynamic session cut-off time configured in the database
   const sessionCutoffsByDate = useMemo(() => {
     const map = new Map();
+    const effectiveTermId = cadetProfile?.academic_term_id || cadet?.academic_term_id;
     // 1. From database attendance_sessions (primary source matching Admin )
     (dbSessions || []).forEach(s => {
+      const tid = s.academic_term_id || s.academicTermId;
+      if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
       const dk = s.dateKey || s.session_date || s.sessionDate;
       const cutoff = s.cutoffTime || s.cutoff_time;
       if (dk && cutoff) {
@@ -370,6 +386,8 @@ export default function CadetPortal({ cadet, onLogout }) {
     });
     // 2. From logs if individual scan payload recorded cutoff_time
     (logs || []).forEach(l => {
+      const tid = l.academic_term_id || l.academicTermId;
+      if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
       const rawD = l.date || l.session_date || l.timestamp;
       const dk = toDateKey ? toDateKey(rawD) : rawD;
       const cutoff = l.cutoff_time || l.cutoffTime;
@@ -378,7 +396,7 @@ export default function CadetPortal({ cadet, onLogout }) {
       }
     });
     return map;
-  }, [dbSessions, logs]);
+  }, [dbSessions, logs, cadetProfile?.academic_term_id, cadet?.academic_term_id]);
 
   // Reconcile logs with dynamic sessionCutoffsByDate so updating the cutoff time immediately re-evaluates Present vs Late
   const reconciledLogs = useMemo(() => {
@@ -795,8 +813,11 @@ export default function CadetPortal({ cadet, onLogout }) {
   // Official Formation Dates Set: Strictly from Supabase attendance_sessions (primary), formationDates, dailyBreakdown, or logs
   const officialFormationDatesSet = useMemo(() => {
     const s = new Set();
+    const effectiveTermId = cadetProfile?.academic_term_id || cadet?.academic_term_id;
     if (Array.isArray(dbSessions) && dbSessions.length > 0) {
       dbSessions.forEach(sess => {
+        const tid = sess.academic_term_id || sess.academicTermId;
+        if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
         const dk = sess.dateKey || sess.session_date || sess.sessionDate;
         const cleanKey = toDateKey ? toDateKey(dk) : (dk ? String(dk).slice(0, 10) : '');
         if (cleanKey) s.add(cleanKey);
@@ -816,13 +837,15 @@ export default function CadetPortal({ cadet, onLogout }) {
     }
     if (Array.isArray(logs) && logs.length > 0) {
       logs.forEach(l => {
+        const tid = l.academic_term_id || l.academicTermId;
+        if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
         const rawD = l.date || l.session_date || l.timestamp;
         const cleanKey = toDateKey ? toDateKey(rawD) : (rawD ? String(rawD).slice(0, 10) : '');
         if (cleanKey) s.add(cleanKey);
       });
     }
     return s;
-  }, [dbSessions, formationDates, evaluated?.dailyBreakdown, logs, toDateKey]);
+  }, [dbSessions, formationDates, evaluated?.dailyBreakdown, logs, toDateKey, cadetProfile?.academic_term_id, cadet?.academic_term_id]);
 
   // Filter Eligible Dates: Only dates where cadet is ABSENT, within grace period filing window,
   // EXCLUDING drill dates if cadet already has an existing excuse request with status of EXCUSE_PENDING, APPROVED, or EXCUSED,
@@ -1240,11 +1263,14 @@ export default function CadetPortal({ cadet, onLogout }) {
   // Combined recorded formation dates for the Formation Calendar Selector
   const allRecordedFormationDates = useMemo(() => {
     const datesSet = new Set();
+    const effectiveTermId = cadetProfile?.academic_term_id || cadet?.academic_term_id;
     (formationDates || []).forEach(d => {
       const k = toDateKey(d);
       if (k) datesSet.add(k);
     });
     (dbSessions || []).forEach(s => {
+      const tid = s.academic_term_id || s.academicTermId;
+      if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
       const k = toDateKey(s.date || s.session_date || s.dateKey);
       if (k) datesSet.add(k);
     });
@@ -1253,11 +1279,13 @@ export default function CadetPortal({ cadet, onLogout }) {
       if (k) datesSet.add(k);
     });
     (logs || []).forEach(l => {
+      const tid = l.academic_term_id || l.academicTermId;
+      if (effectiveTermId && tid && String(tid) !== String(effectiveTermId)) return;
       const k = toDateKey(l.date || l.dateKey || l.created_at);
       if (k) datesSet.add(k);
     });
     return Array.from(datesSet).sort((a, b) => b.localeCompare(a));
-  }, [formationDates, dbSessions, evaluated?.dailyBreakdown, logs]);
+  }, [formationDates, dbSessions, evaluated?.dailyBreakdown, logs, cadetProfile?.academic_term_id, cadet?.academic_term_id]);
 
   // 3. Filtered Formation Schedule
   const displaySchedule = useMemo(() => {

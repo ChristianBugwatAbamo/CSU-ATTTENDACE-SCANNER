@@ -92,33 +92,37 @@ function toDateKey(dateInput) {
 // 1. SESSIONS & CALENDAR
 // ==============================================================================
 
-let _cachedSessions = null;
-let _cachedSessionsTime = 0;
+const _cachedSessionsMap = {};
+const _cachedSessionsTimeMap = {};
 const SESSIONS_CACHE_TTL = 5 * 1000; // 5 seconds
 
 /**
- * Fetches attendance sessions from Supabase attendance_sessions table.
+ * Fetches attendance sessions from Supabase attendance_sessions table,
+ * optionally filtered strictly by academic_term_id.
  */
-export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) {
+export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false, academicTermId = null) {
+  const mapKey = academicTermId || '__all__';
+  const cacheKey = academicTermId ? `csu_rotc_db_sessions_${academicTermId}` : 'csu_rotc_db_sessions';
   const now = Date.now();
+
   if (forceRefresh) {
-    _cachedSessions = null;
-    _cachedSessionsTime = 0;
-  } else if (_cachedSessions && (now - _cachedSessionsTime < SESSIONS_CACHE_TTL)) {
-    return _cachedSessions;
+    delete _cachedSessionsMap[mapKey];
+    delete _cachedSessionsTimeMap[mapKey];
+  } else if (_cachedSessionsMap[mapKey] && (now - (_cachedSessionsTimeMap[mapKey] || 0) < SESSIONS_CACHE_TTL)) {
+    return _cachedSessionsMap[mapKey];
   }
 
   // Check localStorage first for instant load only if NOT forcing refresh
   if (!forceRefresh) {
     try {
-      const saved = localStorage.getItem('csu_rotc_db_sessions');
+      const saved = localStorage.getItem(cacheKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          _cachedSessions = parsed;
-          _cachedSessionsTime = now;
+          _cachedSessionsMap[mapKey] = parsed;
+          _cachedSessionsTimeMap[mapKey] = now;
           // Trigger background update silently
-          setTimeout(() => fetchAttendanceSessionsFromSupabase(true), 100);
+          setTimeout(() => fetchAttendanceSessionsFromSupabase(true, academicTermId), 100);
           return parsed;
         }
       }
@@ -127,18 +131,25 @@ export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) 
 
   const client = getSupabaseClient();
   if (!client) {
-    return _cachedSessions || [];
+    return _cachedSessionsMap[mapKey] || [];
   }
 
   try {
-    const { data, error } = await client
+    let query = client
       .from('attendance_sessions')
-      .select('session_date, session_name, duty_officer, cutoff_time, total_scanned')
+      .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, academic_term_id')
       .order('session_date', { ascending: false })
       .limit(500);
 
+    if (academicTermId) {
+      query = query.eq('academic_term_id', academicTermId);
+    }
+
+    const { data, error } = await query;
+
     if (error) throw error;
     const formatted = (data || []).map(s => ({
+      id: s.id,
       dateKey: s.session_date,
       sessionDate: s.session_date,
       session_date: s.session_date,
@@ -148,32 +159,40 @@ export async function fetchAttendanceSessionsFromSupabase(forceRefresh = false) 
       duty_officer: s.duty_officer,
       cutoffTime: s.cutoff_time,
       cutoff_time: s.cutoff_time,
-      totalScanned: s.total_scanned || 0
+      totalScanned: s.total_scanned || 0,
+      academic_term_id: s.academic_term_id,
+      academicTermId: s.academic_term_id
     }));
 
-    _cachedSessions = formatted;
-    _cachedSessionsTime = Date.now();
+    _cachedSessionsMap[mapKey] = formatted;
+    _cachedSessionsTimeMap[mapKey] = Date.now();
     try {
-      localStorage.setItem('csu_rotc_db_sessions', JSON.stringify(formatted));
+      localStorage.setItem(cacheKey, JSON.stringify(formatted));
     } catch (_) { }
     return formatted;
   } catch (err) {
     console.error('[Supabase] fetchAttendanceSessionsFromSupabase error:', err);
-    return _cachedSessions || [];
+    return _cachedSessionsMap[mapKey] || [];
   }
 }
 
-let _cachedDates = null;
-let _cachedDatesTime = 0;
+const _cachedDatesMap = {};
+const _cachedDatesTimeMap = {};
 const DATES_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Fetches all scheduled/recorded mandatory formation dates with caching.
+ * Fetches all scheduled/recorded mandatory formation dates strictly filtered by academic_term_id if provided.
  */
-export async function fetchMandatoryFormationDates(forceRefresh = false) {
+export async function fetchMandatoryFormationDates(forceRefresh = false, academicTermId = null) {
+  const mapKey = academicTermId || '__all__';
+  const cacheKey = academicTermId ? `csu_rotc_formation_dates_${academicTermId}` : 'csu_rotc_formation_dates';
   const now = Date.now();
-  if (!forceRefresh && _cachedDates && (now - _cachedDatesTime < DATES_CACHE_TTL)) {
-    return _cachedDates;
+
+  if (forceRefresh) {
+    delete _cachedDatesMap[mapKey];
+    delete _cachedDatesTimeMap[mapKey];
+  } else if (_cachedDatesMap[mapKey] && (now - (_cachedDatesTimeMap[mapKey] || 0) < DATES_CACHE_TTL)) {
+    return _cachedDatesMap[mapKey];
   }
 
   const datesSet = new Set();
@@ -181,13 +200,13 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
   // Check local cache first
   if (!forceRefresh) {
     try {
-      const saved = localStorage.getItem('csu_rotc_formation_dates');
+      const saved = localStorage.getItem(cacheKey);
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          _cachedDates = parsed;
-          _cachedDatesTime = now;
-          setTimeout(() => fetchMandatoryFormationDates(true), 300);
+          _cachedDatesMap[mapKey] = parsed;
+          _cachedDatesTimeMap[mapKey] = now;
+          setTimeout(() => fetchMandatoryFormationDates(true, academicTermId), 300);
           return parsed;
         }
       }
@@ -198,10 +217,16 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data, error } = await supabase
+      let query = supabase
         .from('attendance_sessions')
-        .select('session_date')
+        .select('session_date, academic_term_id')
         .limit(200);
+
+      if (academicTermId) {
+        query = query.eq('academic_term_id', academicTermId);
+      }
+
+      const { data, error } = await query;
 
       if (!error && Array.isArray(data)) {
         data.forEach(s => {
@@ -222,6 +247,7 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
         const parsed = JSON.parse(localLogs);
         if (Array.isArray(parsed)) {
           parsed.forEach(l => {
+            if (academicTermId && l.academic_term_id && l.academic_term_id !== academicTermId) return;
             const dk = toDateKey(l.session_date || l.date || l.timestamp);
             if (dk) datesSet.add(dk);
           });
@@ -230,19 +256,40 @@ export async function fetchMandatoryFormationDates(forceRefresh = false) {
     } catch (_) { }
   }
 
-  // Fall back to sample schedule ONLY if offline with no Supabase client and no dates exist
-  if (datesSet.size === 0 && !getSupabaseClient()) {
+  // Fall back to sample schedule ONLY if offline with no Supabase client and no dates exist and no academicTermId is specified
+  if (datesSet.size === 0 && !getSupabaseClient() && !academicTermId) {
     ACTIVE_FORMATION_DATES.forEach(d => datesSet.add(d));
   }
 
   const result = Array.from(datesSet).sort();
-  _cachedDates = result;
-  _cachedDatesTime = Date.now();
+  _cachedDatesMap[mapKey] = result;
+  _cachedDatesTimeMap[mapKey] = Date.now();
   try {
-    localStorage.setItem('csu_rotc_formation_dates', JSON.stringify(result));
+    localStorage.setItem(cacheKey, JSON.stringify(result));
   } catch (_) { }
 
   return result;
+}
+
+/**
+ * Fetches academic term details (e.g. AY 2025-2026 2nd Semester) by term UUID.
+ */
+export async function fetchAcademicTermById(termId) {
+  if (!termId) return null;
+  const client = getSupabaseClient();
+  if (!client) return null;
+  try {
+    const { data, error } = await client
+      .from('academic_terms')
+      .select('*')
+      .eq('id', termId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  } catch (err) {
+    console.warn('fetchAcademicTermById error:', err);
+    return null;
+  }
 }
 
 // ==============================================================================

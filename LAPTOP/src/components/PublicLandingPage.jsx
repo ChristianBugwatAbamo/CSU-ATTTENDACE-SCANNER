@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Shield,
   LogIn,
@@ -89,6 +89,29 @@ export default function PublicLandingPage({
     return 1194;
   });
 
+  // Dynamic Hero Emblems List (JSONB from system_settings)
+  const [heroEmblems, setHeroEmblems] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed.hero_emblems) && parsed.hero_emblems.length > 0) {
+          return parsed.hero_emblems;
+        }
+      }
+    } catch (_) { }
+    return [
+      { id: '1', label: '15th Regional Community Defense Group (15RCDG)', url: '/rcdg-logo.png', is_center: false, active: true },
+      { id: '2', label: '1501st Community Defense Center (1501st CDC)', url: '/cdc-logo.png', is_center: false, active: true },
+      { id: '3', label: 'Official ROTC Unit Seal (Center)', url: '/rotc-seal-transparent.png', is_center: true, active: true },
+      { id: '4', label: 'National Service Training Program (NSTP CSU)', url: '/nstp-logo.png', is_center: false, active: true },
+      { id: '5', label: 'Caraga State University (CSU Main)', url: '/csu-logo.png', is_center: false, active: true }
+    ];
+  });
+
+  const centerEmblem = heroEmblems.find(e => e.is_center) || heroEmblems[Math.floor(heroEmblems.length / 2)] || { url: '/rotc-seal-transparent.png' };
+  const visibleEmblems = heroEmblems.filter(e => e.active !== false);
+
   useEffect(() => {
     let isMounted = true;
 
@@ -96,9 +119,28 @@ export default function PublicLandingPage({
       try {
         const data = await fetchSettingsFromSupabase();
         if (isMounted && data) {
-          if (data.commanding_officer) setCommandant(data.commanding_officer);
-          if (data.host_institution) setHostInstitution(data.host_institution);
+          if (data.commandant || data.commanding_officer) setCommandant(data.commandant || data.commanding_officer);
+          if (data.school_name || data.host_institution) setHostInstitution(data.school_name || data.host_institution);
           if (data.unit_name) setUnitName(data.unit_name);
+
+          let loadedEmblems = null;
+          if (Array.isArray(data.hero_emblems) && data.hero_emblems.length > 0) {
+            loadedEmblems = data.hero_emblems;
+          } else if (typeof data.hero_emblems === 'string') {
+            try {
+              const parsed = JSON.parse(data.hero_emblems);
+              if (Array.isArray(parsed) && parsed.length > 0) loadedEmblems = parsed;
+            } catch (_) { }
+          } else if (data.rcdg_seal_url || data.cdc_seal_url || data.rotc_seal_url) {
+            loadedEmblems = [
+              { id: '1', label: '15th Regional Community Defense Group (15RCDG)', url: data.rcdg_seal_url || '/rcdg-logo.png', is_center: false, active: true },
+              { id: '2', label: '1501st Community Defense Center (1501st CDC)', url: data.cdc_seal_url || '/cdc-logo.png', is_center: false, active: true },
+              { id: '3', label: 'Official ROTC Unit Seal (Center)', url: data.rotc_seal_url || '/rotc-seal-transparent.png', is_center: true, active: true },
+              { id: '4', label: 'National Service Training Program (NSTP CSU)', url: data.nstp_logo_url || '/nstp-logo.png', is_center: false, active: true },
+              { id: '5', label: 'Caraga State University (CSU Main)', url: data.university_logo_url || '/csu-logo.png', is_center: false, active: true }
+            ];
+          }
+          if (loadedEmblems) setHeroEmblems(loadedEmblems);
         }
 
         const count = await fetchCadetCountFromSupabase();
@@ -112,8 +154,30 @@ export default function PublicLandingPage({
 
     loadBrandingSettings();
 
+    const handleSettingsUpdate = (e) => {
+      if (!isMounted) return;
+      if (e?.detail) {
+        const d = e.detail;
+        if (d.commandant || d.commanding_officer || d.commandingOfficer) setCommandant(d.commandant || d.commanding_officer || d.commandingOfficer);
+        if (d.school_name || d.host_institution || d.hostInstitution) setHostInstitution(d.school_name || d.host_institution || d.hostInstitution);
+        if (d.unit_name || d.unitName) setUnitName(d.unit_name || d.unitName);
+        if (Array.isArray(d.hero_emblems) && d.hero_emblems.length > 0) {
+          setHeroEmblems(d.hero_emblems);
+        } else if (Array.isArray(d.heroEmblems) && d.heroEmblems.length > 0) {
+          setHeroEmblems(d.heroEmblems);
+        }
+      } else {
+        loadBrandingSettings();
+      }
+    };
+
+    window.addEventListener('csu_settings_updated', handleSettingsUpdate);
+    window.addEventListener('storage', handleSettingsUpdate);
+
     return () => {
       isMounted = false;
+      window.removeEventListener('csu_settings_updated', handleSettingsUpdate);
+      window.removeEventListener('storage', handleSettingsUpdate);
     };
   }, []);
 
@@ -121,7 +185,7 @@ export default function PublicLandingPage({
     {
       icon: Users,
       title: 'Master Cadet Roster',
-      desc: 'Complete 1,194 cadet ledger organized into Battalions, Companies, and Platoons with real-time echelon tracking.'
+      desc: 'Complete corps strength organized into Battalions, Companies, and Platoons with real-time echelon tracking.'
     },
     {
       icon: Camera,
@@ -207,11 +271,15 @@ export default function PublicLandingPage({
               }}
             >
               <img
-                src="/rotc-seal-transparent.png"
+                src={centerEmblem.url || "/rotc-seal-transparent.png"}
                 alt="CSU ROTC Unit Seal"
                 style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 onError={(e) => {
-                  e.target.style.display = 'none';
+                  if (e.target.src !== window.location.origin + '/rotc-seal-transparent.png') {
+                    e.target.src = '/rotc-seal-transparent.png';
+                  } else {
+                    e.target.style.display = 'none';
+                  }
                 }}
               />
             </div>
@@ -227,7 +295,7 @@ export default function PublicLandingPage({
                     lineHeight: 1.2
                   }}
                 >
-                  CSU MAIN ROTC UNIT
+                  {unitName || "CSU MAIN ROTC UNIT"}
                 </span>
                 <span
                   style={{
@@ -373,9 +441,9 @@ export default function PublicLandingPage({
           />
 
           <div className="flex-1 flex flex-col items-center justify-between" style={{ maxWidth: '840px', margin: 'auto', position: 'relative', zIndex: 1, width: '100%' }}>
-            {/* 5-Logo Row Banner: RCDG → CDC → ROTC (Featured Center) → NSTP → CSU */}
+            {/* Dynamic Connected Military & Academic Seals / Badges Banner */}
             <div
-              className="admin-seals-row my-6"
+              className="admin-seals-cluster mb-6 md:mb-8"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -388,171 +456,70 @@ export default function PublicLandingPage({
                 boxSizing: 'border-box'
               }}
             >
-              {/* 1. Far Left: RCDG Logo */}
-              <div
-                title="15th Regional Community Defense Group (15RCDG)"
-                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
-                style={{
-                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                  border: '2.5px solid rgba(229, 169, 0, 0.6)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '6px',
-                  flexShrink: 0,
-                  transition: 'transform 0.3s ease, box-shadow 0.3s ease'
-                }}
-              >
-                <img
-                  src="/rcdg-logo.png"
-                  alt="15th RCDG Logo"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    borderRadius: '50%',
-                    filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
-                  }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
-
-              {/* 2. Left Center: CDC Logo */}
-              <div
-                title="1501st Community Defense Center (1501st CDC)"
-                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
-                style={{
-                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                  border: '2.5px solid rgba(229, 169, 0, 0.7)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '7px',
-                  flexShrink: 0,
-                  transition: 'transform 0.3s ease, box-shadow 0.3s ease'
-                }}
-              >
-                <img
-                  src="/cdc-logo.png"
-                  alt="1501st CDC Logo"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    borderRadius: '50%',
-                    filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
-                  }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
-
-              {/* 3. Center: Featured Main ROTC Emblem (w-32 h-32 md:w-44 md:h-44) */}
-              <div
-                title="Caraga State University ROTC Unit"
-                className="admin-seal-center w-32 h-32 md:w-44 md:h-44"
-                style={{
-                  width: 'clamp(8rem, 15vw, 11rem)',
-                  height: 'clamp(8rem, 15vw, 11rem)',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
-                  border: '4.5px solid #e5a900',
-                  boxShadow: '0 18px 52px rgba(0, 0, 0, 0.7), 0 0 48px rgba(229, 169, 0, 0.6), 0 0 90px rgba(250, 204, 21, 0.35)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '12px',
-                  flexShrink: 0,
-                  zIndex: 2,
-                  overflow: 'visible',
-                  transition: 'transform 0.3s ease, box-shadow 0.3s ease'
-                }}
-              >
-                <img
-                  src="/rotc-seal-transparent.png"
-                  alt="CSU ROTC Official Seal"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    filter: 'drop-shadow(0 0 24px rgba(229, 169, 0, 0.65)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5))'
-                  }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
-
-              {/* 4. Right Center: NSTP Logo */}
-              <div
-                title="National Service Training Program (NSTP CSU)"
-                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
-                style={{
-                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                  border: '2.5px solid rgba(229, 169, 0, 0.7)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 18px rgba(229, 169, 0, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '7px',
-                  flexShrink: 0,
-                  transition: 'transform 0.3s ease, box-shadow 0.3s ease'
-                }}
-              >
-                <img
-                  src="/nstp-logo.png"
-                  alt=""
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    borderRadius: '50%',
-                    filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
-                  }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
-
-              {/* 5. Far Right: CSU Logo */}
-              <div
-                title="Caraga State University (CSU Main)"
-                className="admin-seal-side w-14 h-14 md:w-20 md:h-20"
-                style={{
-                  width: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  height: 'clamp(3.5rem, 6.5vw, 5rem)',
-                  borderRadius: '50%',
-                  background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
-                  border: '2.5px solid rgba(229, 169, 0, 0.6)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  padding: '6px',
-                  flexShrink: 0,
-                  transition: 'transform 0.3s ease, box-shadow 0.3s ease'
-                }}
-              >
-                <img
-                  src="/csu-logo.png"
-                  alt="Caraga State University Logo"
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    objectFit: 'contain',
-                    borderRadius: '50%',
-                    filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
-                  }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-              </div>
+              {visibleEmblems.map((emblem, idx) => {
+                const isCenter = !!emblem.is_center;
+                return (
+                  <div
+                    key={emblem.id || `emblem-${idx}`}
+                    title={emblem.label}
+                    className={isCenter ? 'admin-seal-center' : 'admin-seal-side'}
+                    style={
+                      isCenter
+                        ? {
+                          width: 'clamp(8rem, 15vw, 11rem)',
+                          height: 'clamp(8rem, 15vw, 11rem)',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, #064e2e 0%, #032b19 100%)',
+                          border: '4.5px solid #e5a900',
+                          boxShadow: '0 18px 52px rgba(0, 0, 0, 0.7), 0 0 48px rgba(229, 169, 0, 0.6), 0 0 90px rgba(250, 204, 21, 0.35)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '12px',
+                          flexShrink: 0,
+                          zIndex: 2,
+                          overflow: 'visible',
+                          transition: 'transform 0.3s ease, box-shadow 0.3s ease'
+                        }
+                        : {
+                          width: 'clamp(3.5rem, 6.5vw, 5rem)',
+                          height: 'clamp(3.5rem, 6.5vw, 5rem)',
+                          borderRadius: '50%',
+                          background: 'linear-gradient(135deg, rgba(6, 78, 46, 0.6) 0%, rgba(3, 43, 25, 0.8) 100%)',
+                          border: '2.5px solid rgba(229, 169, 0, 0.65)',
+                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45), 0 0 15px rgba(229, 169, 0, 0.2)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          padding: '6px',
+                          flexShrink: 0,
+                          transition: 'transform 0.3s ease, box-shadow 0.3s ease'
+                        }
+                    }
+                  >
+                    <img
+                      src={emblem.url || '/rotc-seal-transparent.png'}
+                      alt={emblem.label}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'contain',
+                        borderRadius: isCenter ? '0%' : '50%',
+                        filter: isCenter
+                          ? 'drop-shadow(0 0 24px rgba(229, 169, 0, 0.65)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5))'
+                          : 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
+                      }}
+                      onError={(e) => {
+                        if (e.target.src !== window.location.origin + '/rotc-seal-transparent.png') {
+                          e.target.src = '/rotc-seal-transparent.png';
+                        } else {
+                          e.target.style.display = 'none';
+                        }
+                      }}
+                    />
+                  </div>
+                );
+              })}
             </div>
 
             {/* Official Badge Pill */}
@@ -823,7 +790,7 @@ export default function PublicLandingPage({
                 lineHeight: 1.3
               }}
             >
-              Caraga State University Main ROTCU
+              Caraga State University Main
             </div>
             <p style={{ margin: '0 0 1rem 0', fontSize: '0.78rem', lineHeight: 1.5 }}>
               Department of Military Science & Tactics (DMST) <br /> Ampayon, Butuan City, Agusan del Norte, Philippines

@@ -104,15 +104,23 @@ export function UnitProvider({ children }) {
     }
   }, []);
 
-  // Helper selectors
+  // Helper selectors (filters out soft-archived units for active operational views)
   const battalions = useMemo(() => {
-    return (unitStructure || []).map(b => ({
-      id: b.id,
-      name: b.name,
-      shortCode: b.shortCode || b.code || '',
-      targetQuota: b.targetQuota || 0,
-      companies: b.companies || []
-    }));
+    return (unitStructure || [])
+      .filter(b => !b.is_archived)
+      .map(b => ({
+        id: b.id,
+        name: b.name,
+        shortCode: b.shortCode || b.code || '',
+        targetQuota: b.targetQuota || 0,
+        is_archived: Boolean(b.is_archived),
+        companies: (b.companies || [])
+          .filter(c => !c.is_archived)
+          .map(c => ({
+            ...c,
+            platoons: (c.platoons || []).filter(p => !p.is_archived)
+          }))
+      }));
   }, [unitStructure]);
 
   const getCompaniesForBattalion = useCallback((bnIdentifier) => {
@@ -129,13 +137,15 @@ export function UnitProvider({ children }) {
         (targetNorm.includes('2') && bNorm.includes('2'));
     }) || unitStructure[0];
 
-    return (bnObj && Array.isArray(bnObj.companies)) ? bnObj.companies : [];
+    return (bnObj && Array.isArray(bnObj.companies))
+      ? bnObj.companies.filter(c => !c.is_archived)
+      : [];
   }, [unitStructure]);
 
   const getPlatoonsForCompany = useCallback((bnIdentifier, coIdentifier) => {
     const companies = getCompaniesForBattalion(bnIdentifier);
     if (!companies || companies.length === 0) return [];
-    if (!coIdentifier) return companies[0]?.platoons || [];
+    if (!coIdentifier) return (companies[0]?.platoons || []).filter(p => !p.is_archived);
 
     const norm = (s) => String(s || '').trim().toLowerCase().replace(/company|coy|\s+/gi, '');
     const targetNorm = norm(coIdentifier);
@@ -145,7 +155,9 @@ export function UnitProvider({ children }) {
       return cNorm === targetNorm || cNorm.includes(targetNorm) || targetNorm.includes(cNorm);
     }) || companies[0];
 
-    return (coObj && Array.isArray(coObj.platoons)) ? coObj.platoons : [];
+    return (coObj && Array.isArray(coObj.platoons))
+      ? coObj.platoons.filter(p => !p.is_archived)
+      : [];
   }, [getCompaniesForBattalion]);
 
   const totalUnitTarget = useMemo(() => {

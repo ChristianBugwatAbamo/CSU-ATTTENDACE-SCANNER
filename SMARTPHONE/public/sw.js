@@ -1,9 +1,9 @@
-const CACHE_NAME = 'csu-rotc-scanner-v1';
+const CACHE_NAME = 'csu-rotc-scanner-v2';
 const ASSETS_TO_CACHE = [
-  './',
-  './index.html',
-  './manifest.json',
-  './rotc-seal-transparent.png'
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/rotc-seal-transparent.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -49,7 +49,7 @@ self.addEventListener('fetch', (event) => {
         return networkResponse;
       }).catch(() => {
         if (event.request.mode === 'navigate') {
-          return caches.match('./index.html');
+        return caches.match('/index.html');
         }
       });
     })

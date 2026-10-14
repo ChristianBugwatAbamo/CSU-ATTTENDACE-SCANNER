@@ -22,6 +22,7 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { useAttendanceData } from '../hooks/useAttendanceData';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 import {
   approveExcuseRequest,
   rejectExcuseRequest,
@@ -145,6 +146,9 @@ export default function ExcuseReports({
   attendanceLogs = [],
   onRefresh
 }) {
+  const { selectedTermId, activeTermId, selectedTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+
   const { records: hookLogs = [], cadets: hookCadets = [] } = useAttendanceData();
   const effectiveLogs = Array.isArray(attendanceLogs) && attendanceLogs.length > 0 ? attendanceLogs : hookLogs;
   const effectiveCadets = Array.isArray(cadets) && cadets.length > 0 ? cadets : hookCadets;
@@ -226,7 +230,7 @@ export default function ExcuseReports({
     async function loadSessions() {
       setIsSessionsLoading(true);
       try {
-        const sessions = await fetchAttendanceSessionsFromSupabase();
+        const sessions = await fetchAttendanceSessionsFromSupabase(currentTermId);
         if (!isCancelled && Array.isArray(sessions)) {
           setDbSessions(sessions);
         }
@@ -238,17 +242,17 @@ export default function ExcuseReports({
     }
     loadSessions();
     return () => { isCancelled = true; };
-  }, []);
+  }, [currentTermId]);
 
   // Official declared absent cadets directly from Supabase excuse_requests table
-  // Queries excuse_requests where status = 'REJECTED' or status = 'ABSENT'
+  // Queries excuse_requests where status = 'REJECTED' or status = 'ABSENT' filtered by academic_term_id
   const [dbDeclaredAbsent, setDbDeclaredAbsent] = useState([]);
   const [isDeclaredAbsentLoading, setIsDeclaredAbsentLoading] = useState(false);
 
   const loadDeclaredAbsent = useCallback(async () => {
     setIsDeclaredAbsentLoading(true);
     try {
-      const data = await fetchDeclaredAbsentCadets(selectedDate === 'ALL' ? null : selectedDate);
+      const data = await fetchDeclaredAbsentCadets(selectedDate === 'ALL' ? null : selectedDate, currentTermId);
       // STRICT: Only use records returned directly from the excuse_requests database query.
       // If no database row exists (e.g. for cadet 221-00005), do not inject any fallback record.
       if (Array.isArray(data)) {
@@ -262,7 +266,7 @@ export default function ExcuseReports({
     } finally {
       setIsDeclaredAbsentLoading(false);
     }
-  }, [selectedDate]);
+  }, [selectedDate, currentTermId]);
 
   useEffect(() => {
     loadDeclaredAbsent();
@@ -272,32 +276,45 @@ export default function ExcuseReports({
   const declaredAbsentRecords = useMemo(() => {
     if (!Array.isArray(dbDeclaredAbsent)) return [];
 
-    return dbDeclaredAbsent.map(row => {
-      const cid = String(row.cadet_id || row.cadetId || '').trim().toUpperCase();
-      const cadetMeta = cadetsMap.get(cid) || {};
-      const rawDate = row.drill_date || row.date || '';
-      const dateFiled = row.submitted_at || row.created_at || null;
+    return dbDeclaredAbsent
+      .filter(row => {
+        const cid = String(row.cadet_id || row.cadetId || '').trim().toUpperCase();
+        // Strict term filter: exclude records from other academic terms
+        if (currentTermId && row.academic_term_id && String(row.academic_term_id) !== String(currentTermId)) {
+          return false;
+        }
+        // Strict cadet roster scoping: cadet must belong to the active/selected term
+        if (cadetsMap.size > 0 && !cadetsMap.has(cid)) {
+          return false;
+        }
+        return true;
+      })
+      .map(row => {
+        const cid = String(row.cadet_id || row.cadetId || '').trim().toUpperCase();
+        const cadetMeta = cadetsMap.get(cid) || {};
+        const rawDate = row.drill_date || row.date || '';
+        const dateFiled = row.submitted_at || row.created_at || null;
 
-      return {
-        id: row.id,
-        logId: row.id,
-        cadetId: cid,
-        name: row.name && row.name !== 'UNREGISTERED CADET' ? row.name : (cadetMeta.name || `Cadet ${cid}`),
-        rank: row.rank || cadetMeta.rank || 'Cadet',
-        battalion: row.battalion || cadetMeta.battalion || '1st Battalion',
-        company: row.company || cadetMeta.company || 'Alpha Company',
-        platoon: row.platoon || cadetMeta.platoon || '1st Platoon',
-        date: rawDate,
-        status: 'ABSENT',
-        reason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
-        excuseReason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
-        submittedAt: dateFiled,
-        dutyOfficer: row.reviewed_by || 'Admin',
-        proofUrl: row.proof_url || null,
-        source: 'excuse_requests'
-      };
-    });
-  }, [dbDeclaredAbsent, cadetsMap]);
+        return {
+          id: row.id,
+          logId: row.id,
+          cadetId: cid,
+          name: row.name && row.name !== 'UNREGISTERED CADET' ? row.name : (cadetMeta.name || `Cadet ${cid}`),
+          rank: row.rank || cadetMeta.rank || 'Cadet',
+          battalion: row.battalion || cadetMeta.battalion || '1st Battalion',
+          company: row.company || cadetMeta.company || 'Alpha Company',
+          platoon: row.platoon || cadetMeta.platoon || '1st Platoon',
+          date: rawDate,
+          status: 'ABSENT',
+          reason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
+          excuseReason: row.reason || 'Declared Absent / Excuse Rejected by Admin',
+          submittedAt: dateFiled,
+          dutyOfficer: row.reviewed_by || 'Admin',
+          proofUrl: row.proof_url || null,
+          source: 'excuse_requests'
+        };
+      });
+  }, [dbDeclaredAbsent, cadetsMap, currentTermId]);
 
   // Extract all report rows: EXCUSE_PENDING and EXCUSED
   // STRICT: Only displays cadets who submitted an actual excuse request (dateFiled exists or isExcuseRequest === true)
@@ -307,6 +324,15 @@ export default function ExcuseReports({
     const recordsFromLogs = effectiveLogs
       .filter(log => {
         const cid = String(log.cadet_id || log.cadetId || '').trim().toUpperCase();
+        // Strict term filter: exclude attendance logs from other academic terms
+        if (currentTermId && log.academic_term_id && String(log.academic_term_id) !== String(currentTermId)) {
+          return false;
+        }
+        // Strict cadet roster scoping: cadet must belong to the active/selected term
+        if (cadetsMap.size > 0 && !cadetsMap.has(cid)) {
+          return false;
+        }
+
         const rawDate = log.date || log.session_date || log.sessionDate || toDateKey(log.timestamp) || '';
         const key = `${cid}_${rawDate}`;
         const overriddenStatus = localStatusOverrides[log.id] || localStatusOverrides[key] || localStatusOverrides[`${cid}__${rawDate}`];
@@ -381,7 +407,7 @@ export default function ExcuseReports({
       if (diff !== 0) return diff;
       return (b.date || '').localeCompare(a.date || '');
     });
-  }, [effectiveLogs, cadetsMap, localStatusOverrides]);
+  }, [effectiveLogs, cadetsMap, localStatusOverrides, currentTermId]);
 
   // Combined records for dropdown filters (Dates & Battalions)
   const allRecords = useMemo(() => {

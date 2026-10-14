@@ -13,6 +13,8 @@ import {
   fetchSettingsFromSupabase
 } from '../utils/supabaseClient';
 import { useUnitStructure } from '../context/UnitContext';
+import { getActiveAcademicTerm } from '../utils/academicTermsApi';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 
 // Re-export shared helpers (used by QRCodeGenerator too)
 export { MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity };
@@ -185,10 +187,18 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   const [gender, setGender] = useState(() => load('gender', 'Male'));
   const [department, setDepartment] = useState(() => load('department', 'CCIS'));
   const [academicProgram, setProgram] = useState(() => load('academicProgram', ''));
+  const [rotcSubject, setRotcSubject] = useState(() => load('rotcSubject', 'MS1'));
   const [cadetId, setCadetId] = useState(() => load('cadetId', ''));
   const [battalion, setBattalion] = useState(() => load('battalion', '1st Battalion'));
   const [company, setCompany] = useState(() => load('company', 'Alpha Company'));
   const [platoon, setPlatoon] = useState(() => load('platoon', '1st Platoon'));
+
+  const { selectedTerm, activeTerm: contextActiveTerm } = useAcademicTerm();
+  const [activeTerm, setActiveTerm] = useState(null);
+  const [isLoadingTerm, setIsLoadingTerm] = useState(true);
+
+  const effectiveTerm = selectedTerm || contextActiveTerm || activeTerm;
+  const isArchived = String(effectiveTerm?.status || '').toUpperCase() === 'ARCHIVED';
 
   const [formErrors, setFormErrors] = useState({});
   const [isSaving, setIsSaving] = useState(false);
@@ -196,14 +206,40 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   const [alertModal, setAlertModal] = useState(null);
   const [registrationMode, setRegistrationMode] = useState('single'); // 'single' | 'bulk'
 
+  // ── Auto-Link Current Active Academic Term on Mount ──
+  useEffect(() => {
+    let isMounted = true;
+    const fetchActiveTerm = async () => {
+      setIsLoadingTerm(true);
+      try {
+        const term = await getActiveAcademicTerm();
+        if (isMounted && term) {
+          setActiveTerm(term);
+          // Auto-align default ROTC subject if not already explicitly chosen
+          const cached = load('rotcSubject', null);
+          if (!cached) {
+            const suggested = (term.semester && term.semester.includes('2')) ? 'MS2' : 'MS1';
+            setRotcSubject(suggested);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not auto-link active academic term:', err);
+      } finally {
+        if (isMounted) setIsLoadingTerm(false);
+      }
+    };
+    fetchActiveTerm();
+    return () => { isMounted = false; };
+  }, []);
+
   // Persist form to localStorage
   useEffect(() => {
     try {
       localStorage.setItem(FORM_KEY, JSON.stringify({
-        lastName, firstName, middleInitial, gender, department, academicProgram, cadetId, battalion, company, platoon
+        lastName, firstName, middleInitial, gender, department, academicProgram, rotcSubject, cadetId, battalion, company, platoon
       }));
     } catch (_) { }
-  }, [lastName, firstName, middleInitial, gender, department, academicProgram, cadetId, battalion, company, platoon]);
+  }, [lastName, firstName, middleInitial, gender, department, academicProgram, rotcSubject, cadetId, battalion, company, platoon]);
 
   // ── Dynamic echelon selectors from unit structure ──
   const dynamicBattalions = useMemo(() =>
@@ -315,6 +351,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
 
   const clearForm = () => {
     setLastName(''); setFirstName(''); setMI(''); setCadetId(''); setProgram('');
+    setRotcSubject(activeTerm?.semester?.includes('2') ? 'MS2' : 'MS1');
     setFormErrors({});
     try { localStorage.removeItem(FORM_KEY); } catch (_) { }
   };
@@ -327,6 +364,15 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   // ── Register & Save ──
   const handleRegister = async (e) => {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
+
+    if (isArchived) {
+      setAlertModal({
+        type: 'warning',
+        title: 'Registration Locked',
+        message: 'Registration Locked: You are currently inspecting an archived semester. Switch to the current active term to enroll new cadets.'
+      });
+      return;
+    }
 
     const NAME_RE = /^[A-Z\s\-Ñ']+$/i;
     const ID_RE = /^\d{3}-\d{5}$/;
@@ -363,6 +409,15 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
       return;
     }
 
+    // Ensure activeTerm is resolved if not already in state
+    let resolvedTerm = activeTerm;
+    if (!resolvedTerm) {
+      try {
+        resolvedTerm = await getActiveAcademicTerm();
+        if (resolvedTerm) setActiveTerm(resolvedTerm);
+      } catch (_) { }
+    }
+
     const payload = {
       id: cadetId.trim(),
       name: fullName,
@@ -370,7 +425,9 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
       battalion: battalion || '1st Battalion',
       company: normalizeCompany(company),
       platoon: platoon || '1st Platoon',
-      type: 'Basic Cadet',
+      type: rotcSubject || 'MS1',
+      rotc_subject: rotcSubject || 'MS1',
+      academic_term_id: resolvedTerm?.id || null,
       designation: 'N/A',
       gender: gender || 'Male',
       department: department || 'CCIS',
@@ -395,7 +452,17 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
         return;
       }
 
-      const { error } = await client.from('cadets').upsert(payload, { onConflict: 'id' });
+      let { error } = await client.from('cadets').upsert(payload, { onConflict: 'id' });
+      // If columns rotc_subject or academic_term_id not yet created in Supabase SQL editor, retry with fallback payload
+      if (error && (error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id') || error.code === 'PGRST204')) {
+        console.warn('Columns rotc_subject or academic_term_id not found in cadets table. Retrying with fallback payload...');
+        const fallback = { ...payload };
+        delete fallback.rotc_subject;
+        delete fallback.academic_term_id;
+        const fallbackRes = await client.from('cadets').upsert(fallback, { onConflict: 'id' });
+        error = fallbackRes.error;
+      }
+
       if (error) throw error;
 
       showToast('success', `✅ ${payload.name} (${payload.id}) registered successfully!`);
@@ -531,6 +598,8 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
         <BulkCadetUpload
           cadets={cadets}
           onRefresh={onRefresh}
+          activeTerm={effectiveTerm || activeTerm}
+          isArchived={isArchived}
           onBackToSingle={() => setRegistrationMode('single')}
         />
       ) : (
@@ -545,303 +614,430 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
             padding: '2rem'
           }}
         >
-        {/* ── 1. PERSONAL INFORMATION ── */}
-        <div style={{ marginBottom: '2.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
-              1. PERSONAL INFORMATION
-            </span>
-          </div>
-
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(160px, 1.2fr) minmax(180px, 1.4fr) minmax(180px, 1.4fr) 90px 140px',
-            gap: '1.25rem'
-          }}>
-            {/* Cadet ID */}
-            <div className="form-field-group">
-              <label>Student ID <span style={{ color: '#ef4444' }}>*</span></label>
-              <input
-                type="text"
-                className="custom-input"
+          {/* Warning banner when viewing an archived term */}
+          {isArchived && (
+            <div
+              style={{
+                marginBottom: '1.75rem',
+                padding: '1rem 1.25rem',
+                borderRadius: '0.75rem',
+                backgroundColor: '#fffbeb',
+                border: '2px solid #fcd34d',
+                color: '#78350f',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.875rem',
+                boxShadow: '0 2px 6px rgba(245, 158, 11, 0.15)'
+              }}
+            >
+              <div
                 style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem', fontFamily: 'monospace', letterSpacing: '0.05em',
-                  ...(formErrors.cadetId ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
+                  padding: '0.5rem',
+                  backgroundColor: '#f59e0b',
+                  color: '#ffffff',
+                  borderRadius: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
                 }}
-                placeholder="e.g. 221-11101"
-                maxLength={9}
-                value={cadetId}
-                onChange={e => handleIdChange(e.target.value)}
-              />
-              {formErrors.cadetId && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.cadetId}</span>}
-            </div>
-
-            {/* Last Name */}
-            <div className="form-field-group">
-              <label>Last Name <span style={{ color: '#ef4444' }}>*</span></label>
-              <input
-                type="text"
-                className="custom-input"
-                style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem',
-                  ...(formErrors.lastName ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
-                }}
-                placeholder="e.g. DELA CRUZ"
-                value={lastName}
-                onChange={e => handleLastName(e.target.value)}
-              />
-              {formErrors.lastName && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.lastName}</span>}
-            </div>
-
-            {/* First Name */}
-            <div className="form-field-group">
-              <label>First Name <span style={{ color: '#ef4444' }}>*</span></label>
-              <input
-                type="text"
-                className="custom-input"
-                style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem',
-                  ...(formErrors.firstName ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
-                }}
-                placeholder="e.g. JUAN"
-                value={firstName}
-                onChange={e => handleFirstName(e.target.value)}
-              />
-              {formErrors.firstName && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.firstName}</span>}
-            </div>
-
-            {/* M.I. */}
-            <div className="form-field-group">
-              <label>M.I.</label>
-              <input
-                type="text"
-                className="custom-input"
-                style={{ padding: '0.8rem 1rem', fontSize: '0.95rem', textAlign: 'center' }}
-                placeholder="A"
-                maxLength={1}
-                value={middleInitial}
-                onChange={e => handleMI(e.target.value)}
-              />
-            </div>
-
-            {/* Gender */}
-            <div className="form-field-group">
-              <label>Gender <span style={{ color: '#ef4444' }}>*</span></label>
-              <select
-                className="custom-select"
-                style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem',
-                  ...(formErrors.gender ? { borderColor: '#ef4444' } : {})
-                }}
-                value={gender}
-                onChange={e => { setGender(e.target.value); if (formErrors.gender) setFormErrors(p => ({ ...p, gender: '' })); }}
               >
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-              </select>
-              {formErrors.gender && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.gender}</span>}
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.02em', color: '#78350f' }}>
+                  Registration Locked
+                </div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#92400e', marginTop: '2px' }}>
+                  Registration Locked: You are currently inspecting an archived semester. Switch to the current active term to enroll new cadets.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 1. PERSONAL INFORMATION ── */}
+          <div style={{ marginBottom: '2.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
+                1. PERSONAL INFORMATION
+              </span>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(160px, 1.2fr) minmax(180px, 1.4fr) minmax(180px, 1.4fr) 90px 140px',
+              gap: '1.25rem'
+            }}>
+              {/* Cadet ID */}
+              <div className="form-field-group">
+                <label>Student ID <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem', fontFamily: 'monospace', letterSpacing: '0.05em',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.cadetId ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
+                  }}
+                  placeholder="e.g. 221-11101"
+                  maxLength={9}
+                  value={cadetId}
+                  onChange={e => handleIdChange(e.target.value)}
+                />
+                {formErrors.cadetId && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.cadetId}</span>}
+              </div>
+
+              {/* Last Name */}
+              <div className="form-field-group">
+                <label>Last Name <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.lastName ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
+                  }}
+                  placeholder="e.g. DELA CRUZ"
+                  value={lastName}
+                  onChange={e => handleLastName(e.target.value)}
+                />
+                {formErrors.lastName && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.lastName}</span>}
+              </div>
+
+              {/* First Name */}
+              <div className="form-field-group">
+                <label>First Name <span style={{ color: '#ef4444' }}>*</span></label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.firstName ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
+                  }}
+                  placeholder="e.g. JUAN"
+                  value={firstName}
+                  onChange={e => handleFirstName(e.target.value)}
+                />
+                {formErrors.firstName && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.firstName}</span>}
+              </div>
+
+              {/* M.I. */}
+              <div className="form-field-group">
+                <label>M.I.</label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem', textAlign: 'center',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {})
+                  }}
+                  placeholder="A"
+                  maxLength={1}
+                  value={middleInitial}
+                  onChange={e => handleMI(e.target.value)}
+                />
+              </div>
+
+              {/* Gender */}
+              <div className="form-field-group">
+                <label>Gender <span style={{ color: '#ef4444' }}>*</span></label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.gender ? { borderColor: '#ef4444' } : {})
+                  }}
+                  value={gender}
+                  onChange={e => { setGender(e.target.value); if (formErrors.gender) setFormErrors(p => ({ ...p, gender: '' })); }}
+                >
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
+                {formErrors.gender && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.gender}</span>}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* ── 2. ACADEMIC PROGRAM & DEPARTMENT ── */}
-        <div style={{ marginBottom: '2.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
-              2. ACADEMIC PROGRAM &amp; DEPARTMENT
-            </span>
-          </div>
+          {/* ── 2. ACADEMIC PROGRAM & DEPARTMENT ── */}
+          <div style={{ marginBottom: '2.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1', flexWrap: 'wrap', gap: '8px' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
+                2. ACADEMIC PROGRAM &amp; DEPARTMENT
+              </span>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-            <div className="form-field-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <Building size={14} color="#047857" /> Department <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <select
-                className="custom-select"
-                style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem',
-                  ...(formErrors.department ? { borderColor: '#ef4444' } : {})
-                }}
-                value={department}
-                onChange={e => { setDepartment(e.target.value); if (formErrors.department) setFormErrors(p => ({ ...p, department: '' })); }}
-              >
-                <option value="CCIS">CCIS</option>
-                <option value="CEGS">CEGS</option>
-                <option value="CHASS">CHASS</option>
-                <option value="CAA">CAA</option>
-                <option value="CMNS">CMNS</option>
-                <option value="CED">CED</option>
-                <option value="COFES">COFES</option>
-              </select>
-              {formErrors.department && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.department}</span>}
+              {/* Auto-Linked Active Term Indicator */}
+              {activeTerm ? (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  color: '#065f46',
+                  background: '#ecfdf5',
+                  border: '1px solid #a7f3d0',
+                  padding: '3px 9px',
+                  borderRadius: '6px'
+                }}>
+                  <CheckCircle2 size={13} color="#059669" />
+                  Active Term: <strong>{activeTerm.academicYear} • {activeTerm.semester}</strong>
+                </span>
+              ) : (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '0.7rem',
+                  color: '#92400e',
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  padding: '3px 8px',
+                  borderRadius: '6px'
+                }}>
+                  <AlertTriangle size={12} color="#d97706" />
+                  {isLoadingTerm ? 'Checking active academic term...' : 'No active term set (configured in Settings > Academic Terms)'}
+                </span>
+              )}
             </div>
 
-            <div className="form-field-group">
-              <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <GraduationCap size={14} color="#047857" /> Academic Program <span style={{ color: '#ef4444' }}>*</span>
-              </label>
-              <input
-                type="text"
-                className="custom-input"
-                style={{
-                  padding: '0.8rem 1rem', fontSize: '0.95rem',
-                  ...(formErrors.program ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
-                }}
-                placeholder="e.g. BSCS, BSIT, BSCE"
-                value={academicProgram}
-                onChange={e => { setProgram(e.target.value.toUpperCase()); if (formErrors.program) setFormErrors(p => ({ ...p, program: '' })); }}
-              />
-              {formErrors.program && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.program}</span>}
-            </div>
-          </div>
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1.5rem' }}>
+              <div className="form-field-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Building size={14} color="#047857" /> Department <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.department ? { borderColor: '#ef4444' } : {})
+                  }}
+                  value={department}
+                  onChange={e => { setDepartment(e.target.value); if (formErrors.department) setFormErrors(p => ({ ...p, department: '' })); }}
+                >
+                  <option value="CCIS">CCIS</option>
+                  <option value="CEGS">CEGS</option>
+                  <option value="CHASS">CHASS</option>
+                  <option value="CAA">CAA</option>
+                  <option value="CMNS">CMNS</option>
+                  <option value="CED">CED</option>
+                  <option value="COFES">COFES</option>
+                </select>
+                {formErrors.department && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.department}</span>}
+              </div>
 
-        {/* ── 3. UNIT ECHELON ASSIGNMENT ── */}
-        <div style={{ marginBottom: '2.25rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
-              3. UNIT ECHELON ASSIGNMENT
-            </span>
-          </div>
+              <div className="form-field-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <GraduationCap size={14} color="#047857" /> Academic Program <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  className="custom-input"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {}),
+                    ...(formErrors.program ? { borderColor: '#ef4444', boxShadow: '0 0 0 2px rgba(239,68,68,0.12)' } : {})
+                  }}
+                  placeholder="e.g. BSCS, BSIT, BSCE"
+                  value={academicProgram}
+                  onChange={e => { setProgram(e.target.value.toUpperCase()); if (formErrors.program) setFormErrors(p => ({ ...p, program: '' })); }}
+                />
+                {formErrors.program && <span style={{ fontSize: '0.7rem', color: '#ef4444', fontWeight: 700 }}>⚠️ {formErrors.program}</span>}
+              </div>
 
-          {/* Echelon Selection (Battalion, Company, Platoon) */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
-            <div className="form-field-group">
-              <label>Battalion</label>
-              <select
-                className="custom-select"
-                style={{ padding: '0.8rem 1rem', fontSize: '0.95rem' }}
-                value={battalion}
-                onChange={e => handleBattalionChange(e.target.value)}
-              >
-                {dynamicBattalions.map(b => <option key={b} value={b}>{b}</option>)}
-              </select>
-            </div>
-
-            <div className="form-field-group">
-              <label>Company</label>
-              <select
-                className="custom-select"
-                style={{ padding: '0.8rem 1rem', fontSize: '0.95rem' }}
-                value={selectedCompanyObj ? (typeof selectedCompanyObj === 'string' ? selectedCompanyObj : selectedCompanyObj.name) : company}
-                onChange={e => handleCompanyChange(e.target.value)}
-              >
-                {availableCompanies.map(c => {
-                  const cn = typeof c === 'string' ? c : c.name;
-                  return <option key={cn} value={cn}>{cn}</option>;
-                })}
-              </select>
-            </div>
-
-            <div className="form-field-group">
-              <label>Platoon</label>
-              <select
-                className="custom-select"
-                style={{ padding: '0.8rem 1rem', fontSize: '0.95rem' }}
-                value={availablePlatoons.includes(platoon) ? platoon : (availablePlatoons[0] || platoon)}
-                onChange={e => setPlatoon(e.target.value)}
-              >
-                {availablePlatoons.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-          </div>
-
-          {/* Platoon Capacity Indicator */}
-          <div style={{
-            padding: '0.85rem 1.15rem',
-            backgroundColor: isPlatoonFull ? '#fee2e2' : currentLoad >= 30 ? '#fef3c7' : '#dcfce7',
-            borderRadius: '8px',
-            border: `1px solid ${isPlatoonFull ? '#f87171' : currentLoad >= 30 ? '#facc15' : '#86efac'}`,
-            transition: 'all 0.25s ease'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Users size={16} color={isPlatoonFull ? '#dc2626' : currentLoad >= 30 ? '#d97706' : '#059669'} />
-                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#1e293b' }}>
-                  Target Platoon: <strong style={{ color: '#064e2e' }}>{selectedPlatoonParts.label}</strong>
+              <div className="form-field-group">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <Shield size={14} color="#047857" /> ROTC Subject / Enrolled Course <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {})
+                  }}
+                  value={rotcSubject}
+                  onChange={e => setRotcSubject(e.target.value)}
+                >
+                  <option value="MS1">MS1 (ROTC 1)</option>
+                  <option value="MS2">MS2 (ROTC 2)</option>
+                </select>
+                <span style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '4px', display: 'block' }}>
+                  Military Science course assignment
                 </span>
               </div>
-              <span style={{ fontSize: '0.78rem', fontWeight: 800, color: isPlatoonFull ? '#b91c1c' : currentLoad >= 30 ? '#b45309' : '#047857' }}>
-                {currentLoad} / {MAX_PLATOON_CAPACITY} Cadets ({Math.min(100, Math.round((currentLoad / MAX_PLATOON_CAPACITY) * 100))}%)
-              </span>
-            </div>
-            <div style={{ width: '100%', height: '8px', backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${Math.min(100, (currentLoad / MAX_PLATOON_CAPACITY) * 100)}%`,
-                height: '100%',
-                background: isPlatoonFull ? 'linear-gradient(90deg,#ef4444,#b91c1c)' : currentLoad >= 30 ? 'linear-gradient(90deg,#f59e0b,#d97706)' : 'linear-gradient(90deg,#10b981,#059669)',
-                borderRadius: '999px', transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)'
-              }} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem', fontSize: '0.72rem', color: '#475569' }}>
-              <span>Supabase Official Roster: <strong style={{ color: '#0f172a' }}>{currentLoad}</strong> enrolled</span>
-              <span style={{ fontWeight: 800, color: isPlatoonFull ? '#dc2626' : currentLoad >= 30 ? '#d97706' : '#059669' }}>
-                {isPlatoonFull ? '⛔ Platoon Capacity Reached (Cannot add more)' : `${MAX_PLATOON_CAPACITY - currentLoad} enrollment slot(s) remaining`}
-              </span>
             </div>
           </div>
-        </div>
 
-        {/* Toast feedback */}
-        {toast && (
-          <div style={{
-            marginBottom: '1.5rem',
-            padding: '0.85rem 1.25rem', borderRadius: '8px',
-            background: toast.type === 'success' ? '#ecfdf5' : '#fef2f2',
-            border: `1.5px solid ${toast.type === 'success' ? '#10b981' : '#ef4444'}`,
-            color: toast.type === 'success' ? '#065f46' : '#991b1b',
-            fontSize: '0.88rem', fontWeight: 700,
-            display: 'flex', alignItems: 'center', gap: '10px'
-          }}>
-            {toast.type === 'success' ? <CheckCircle2 size={18} color="#059669" /> : <AlertTriangle size={18} color="#dc2626" />}
-            {toast.message}
+          {/* ── 3. UNIT ECHELON ASSIGNMENT ── */}
+          <div style={{ marginBottom: '2.25rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1.25rem', paddingBottom: '0.5rem', borderBottom: '1px solid #cbd5e1' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#064e2e', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: 'Oswald, sans-serif' }}>
+                3. UNIT ECHELON ASSIGNMENT
+              </span>
+            </div>
+
+            {/* Echelon Selection (Battalion, Company, Platoon) */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+              <div className="form-field-group">
+                <label>Battalion</label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {})
+                  }}
+                  value={battalion}
+                  onChange={e => handleBattalionChange(e.target.value)}
+                >
+                  {dynamicBattalions.map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </div>
+
+              <div className="form-field-group">
+                <label>Company</label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {})
+                  }}
+                  value={selectedCompanyObj ? (typeof selectedCompanyObj === 'string' ? selectedCompanyObj : selectedCompanyObj.name) : company}
+                  onChange={e => handleCompanyChange(e.target.value)}
+                >
+                  {availableCompanies.map(c => {
+                    const cn = typeof c === 'string' ? c : c.name;
+                    return <option key={cn} value={cn}>{cn}</option>;
+                  })}
+                </select>
+              </div>
+
+              <div className="form-field-group">
+                <label>Platoon</label>
+                <select
+                  className="custom-select"
+                  disabled={isArchived}
+                  style={{
+                    padding: '0.8rem 1rem', fontSize: '0.95rem',
+                    ...(isArchived ? { backgroundColor: '#f1f5f9', cursor: 'not-allowed', color: '#64748b' } : {})
+                  }}
+                  value={availablePlatoons.includes(platoon) ? platoon : (availablePlatoons[0] || platoon)}
+                  onChange={e => setPlatoon(e.target.value)}
+                >
+                  {availablePlatoons.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Platoon Capacity Indicator */}
+            <div style={{
+              padding: '0.85rem 1.15rem',
+              backgroundColor: isPlatoonFull ? '#fee2e2' : currentLoad >= 30 ? '#fef3c7' : '#dcfce7',
+              borderRadius: '8px',
+              border: `1px solid ${isPlatoonFull ? '#f87171' : currentLoad >= 30 ? '#facc15' : '#86efac'}`,
+              transition: 'all 0.25s ease'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Users size={16} color={isPlatoonFull ? '#dc2626' : currentLoad >= 30 ? '#d97706' : '#059669'} />
+                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#1e293b' }}>
+                    Target Platoon: <strong style={{ color: '#064e2e' }}>{selectedPlatoonParts.label}</strong>
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.78rem', fontWeight: 800, color: isPlatoonFull ? '#b91c1c' : currentLoad >= 30 ? '#b45309' : '#047857' }}>
+                  {currentLoad} / {MAX_PLATOON_CAPACITY} Cadets ({Math.min(100, Math.round((currentLoad / MAX_PLATOON_CAPACITY) * 100))}%)
+                </span>
+              </div>
+              <div style={{ width: '100%', height: '8px', backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${Math.min(100, (currentLoad / MAX_PLATOON_CAPACITY) * 100)}%`,
+                  height: '100%',
+                  background: isPlatoonFull ? 'linear-gradient(90deg,#ef4444,#b91c1c)' : currentLoad >= 30 ? 'linear-gradient(90deg,#f59e0b,#d97706)' : 'linear-gradient(90deg,#10b981,#059669)',
+                  borderRadius: '999px', transition: 'width 0.4s cubic-bezier(0.4,0,0.2,1)'
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.4rem', fontSize: '0.72rem', color: '#475569' }}>
+                <span>Supabase Official Roster: <strong style={{ color: '#0f172a' }}>{currentLoad}</strong> enrolled</span>
+                <span style={{ fontWeight: 800, color: isPlatoonFull ? '#dc2626' : currentLoad >= 30 ? '#d97706' : '#059669' }}>
+                  {isPlatoonFull ? '⛔ Platoon Capacity Reached (Cannot add more)' : `${MAX_PLATOON_CAPACITY - currentLoad} enrollment slot(s) remaining`}
+                </span>
+              </div>
+            </div>
           </div>
-        )}
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-          <button
-            type="button"
-            onClick={handleRegister}
-            disabled={isSaving || isPlatoonFull}
-            style={{
-              flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-              background: (isSaving || isPlatoonFull) ? '#94a3b8' : 'linear-gradient(135deg, #064e2e, #065f46)',
-              color: '#ffffff', fontWeight: 800, fontSize: '0.95rem',
-              padding: '0.9rem 2rem', borderRadius: '10px', border: 'none',
-              cursor: (isSaving || isPlatoonFull) ? 'not-allowed' : 'pointer',
-              boxShadow: (isSaving || isPlatoonFull) ? 'none' : '0 4px 14px rgba(6,78,46,0.25)',
-              transition: 'all 0.2s ease',
-              letterSpacing: '0.3px'
-            }}
-            onMouseEnter={e => { if (!isSaving && !isPlatoonFull) e.currentTarget.style.transform = 'translateY(-1px)'; }}
-            onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
-          >
-            {isSaving
-              ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Saving to Database...</>
-              : <><Database size={18} /> Register &amp; Save to Supabase</>
-            }
-          </button>
+          {/* Toast feedback */}
+          {toast && (
+            <div style={{
+              marginBottom: '1.5rem',
+              padding: '0.85rem 1.25rem', borderRadius: '8px',
+              background: toast.type === 'success' ? '#ecfdf5' : '#fef2f2',
+              border: `1.5px solid ${toast.type === 'success' ? '#10b981' : '#ef4444'}`,
+              color: toast.type === 'success' ? '#065f46' : '#991b1b',
+              fontSize: '0.88rem', fontWeight: 700,
+              display: 'flex', alignItems: 'center', gap: '10px'
+            }}>
+              {toast.type === 'success' ? <CheckCircle2 size={18} color="#059669" /> : <AlertTriangle size={18} color="#dc2626" />}
+              {toast.message}
+            </div>
+          )}
 
-          <button
-            type="button"
-            onClick={clearForm}
-            disabled={isSaving}
-            title="Clear form"
-            style={{
-              padding: '0.9rem 1.5rem', borderRadius: '10px', border: '1.5px solid #cbd5e1',
-              background: '#ffffff', color: '#64748b', cursor: isSaving ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.88rem',
-              transition: 'all 0.15s ease'
-            }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#94a3b8'; e.currentTarget.style.color = '#374151'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#64748b'; }}
-          >
-            <X size={17} /> Clear Form
-          </button>
+          {/* Action Buttons */}
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <button
+              type="button"
+              onClick={handleRegister}
+              disabled={isSaving || isPlatoonFull || isArchived}
+              style={{
+                flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+                background: (isSaving || isPlatoonFull || isArchived) ? '#94a3b8' : 'linear-gradient(135deg, #064e2e, #065f46)',
+                color: '#ffffff', fontWeight: 800, fontSize: '0.95rem',
+                padding: '0.9rem 2rem', borderRadius: '10px', border: 'none',
+                cursor: (isSaving || isPlatoonFull || isArchived) ? 'not-allowed' : 'pointer',
+                boxShadow: (isSaving || isPlatoonFull || isArchived) ? 'none' : '0 4px 14px rgba(6,78,46,0.25)',
+                transition: 'all 0.2s ease',
+                letterSpacing: '0.3px'
+              }}
+              onMouseEnter={e => { if (!isSaving && !isPlatoonFull && !isArchived) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+            >
+              {isSaving
+                ? <><RefreshCw size={18} style={{ animation: 'spin 1s linear infinite' }} /> Saving to Database...</>
+                : isArchived
+                  ? <><AlertTriangle size={18} /> Registration Locked (Archived Term)</>
+                  : <><Database size={18} /> Register &amp; Save to Supabase</>
+              }
+            </button>
+
+            <button
+              type="button"
+              onClick={clearForm}
+              disabled={isSaving || isArchived}
+              title={isArchived ? "Registration locked for archived term" : "Clear form"}
+              style={{
+                padding: '0.9rem 1.5rem', borderRadius: '10px', border: '1.5px solid #cbd5e1',
+                background: '#ffffff', color: isArchived ? '#94a3b8' : '#64748b', cursor: (isSaving || isArchived) ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700, fontSize: '0.88rem',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = '#94a3b8'; e.currentTarget.style.color = '#374151'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#64748b'; }}
+            >
+              <X size={17} /> Clear Form
+            </button>
+          </div>
         </div>
-      </div>
       )}
 
       {/* Capacity Alert Modal */}

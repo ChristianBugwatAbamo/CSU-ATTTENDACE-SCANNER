@@ -58,7 +58,11 @@ export function getSupabaseClient() {
 
   if (!supabaseInstance) {
     supabaseInstance = createClient(url, anonKey, {
-      auth: { persistSession: false },
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        storageKey: 'csu_rotc_admin_sb_auth'
+      },
       realtime: { params: { eventsPerSecond: 10 } }
     });
   }
@@ -79,18 +83,23 @@ export const supabase = new Proxy({}, {
 // ==============================================================================
 
 /**
- * Fetches all cadets from Supabase
+ * Fetches all cadets from Supabase, optionally scoped strictly to an academic term
  */
-export async function fetchCadetsFromSupabase() {
+export async function fetchCadetsFromSupabase(termId = null) {
   const client = getSupabaseClient();
   if (!client) return [];
 
   try {
-    const { data, error } = await client
+    let query = client
       .from('cadets')
       .select('*')
-      .order('id', { ascending: true })
-      .limit(10000);
+      .order('id', { ascending: true });
+
+    if (termId) {
+      query = query.eq('academic_term_id', termId);
+    }
+
+    const { data, error } = await query.limit(10000);
 
     if (error) throw error;
     return data || [];
@@ -101,16 +110,22 @@ export async function fetchCadetsFromSupabase() {
 }
 
 /**
- * Fetches exact registered cadet count from Supabase
+ * Fetches exact registered cadet count from Supabase, optionally scoped to an academic term
  */
-export async function fetchCadetCountFromSupabase() {
+export async function fetchCadetCountFromSupabase(termId = null) {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
-    const { count, error } = await client
+    let query = client
       .from('cadets')
       .select('*', { count: 'exact', head: true });
+
+    if (termId) {
+      query = query.eq('academic_term_id', termId);
+    }
+
+    const { count, error } = await query;
 
     if (error) throw error;
     return count;
@@ -260,6 +275,8 @@ export async function addCadetToSupabase(cadet) {
       gender: cadet.gender || null,
       department: cadet.department || null,
       program: cadet.program || null,
+      rotc_subject: cadet.rotc_subject || cadet.rotcSubject || 'MS1',
+      academic_term_id: cadet.academic_term_id || cadet.academicTermId || null,
       contact_number: cadet.contactNumber || cadet.contact_number || '',
       emergency_contact: cadet.emergencyContact || cadet.emergency_contact || '',
       province: cadet.province || null,
@@ -356,13 +373,39 @@ export async function fetchAttendanceFromSupabase() {
       (sessionRows || []).map(s => s.id).filter(Boolean)
     );
 
-    const { data: rawData, error } = await client
+    let rawData = [];
+    // Query attendance_logs joined with live cadets data so reassignments reflect immediately across history
+    const { data: joinedData, error: joinErr } = await client
       .from('attendance_logs')
-      .select('*')
+      .select(`
+        *,
+        cadets (
+          id,
+          name,
+          rank,
+          battalion,
+          company,
+          platoon,
+          battalion_id,
+          company_id,
+          platoon_id
+        )
+      `)
       .order('date', { ascending: false })
       .limit(10000);
 
-    if (error) throw error;
+    if (joinErr) {
+      console.warn('[Supabase] Joined query fallback notice:', joinErr.message);
+      const { data: fallbackData, error: fbError } = await client
+        .from('attendance_logs')
+        .select('*')
+        .order('date', { ascending: false })
+        .limit(10000);
+      if (fbError) throw fbError;
+      rawData = fallbackData || [];
+    } else {
+      rawData = joinedData || [];
+    }
 
     // Strict Session Verification Filter: Only keep logs that belong to an active session
     // (matches active session_id OR matches an active session_date)
@@ -375,6 +418,36 @@ export async function fetchAttendanceFromSupabase() {
         return hasValidSessionId || hasValidSessionDate;
       });
     }
+
+    // Merge live joined cadet data over snapshotted logs
+    data = data.map(l => {
+      const live = l.cadets || l.cadet;
+      if (live) {
+        const livePlatoon = live.platoon || live.platoon_name || l.platoon;
+        const liveCompany = live.company || live.company_name || l.company;
+        const liveBattalion = live.battalion || live.battalion_name || l.battalion;
+        return {
+          ...l,
+          name: live.name || l.name,
+          rank: live.rank || l.rank,
+          battalion: liveBattalion,
+          battalion_name: liveBattalion,
+          company: liveCompany,
+          company_name: liveCompany,
+          platoon: livePlatoon,
+          platoon_name: livePlatoon,
+          battalion_id: live.battalion_id || l.battalion_id,
+          company_id: live.company_id || l.company_id,
+          platoon_id: live.platoon_id || l.platoon_id
+        };
+      }
+      return {
+        ...l,
+        platoon_name: l.platoon_name || l.platoon,
+        company_name: l.company_name || l.company,
+        battalion_name: l.battalion_name || l.battalion
+      };
+    });
 
     // Also query excuse_requests table if present to merge submitted reasons
     try {
@@ -520,14 +593,39 @@ export async function fetchAttendanceByDate(dateKey) {
       return [];
     }
 
-    // 2. Verified active session exists -> query attendance_logs for this date
-    const { data: logs, error: logsErr } = await client
+    // 2. Verified active session exists -> query attendance_logs joined with live cadets table
+    let logs = [];
+    const { data: joinedLogs, error: joinErr } = await client
       .from('attendance_logs')
-      .select('*')
+      .select(`
+        *,
+        cadets (
+          id,
+          name,
+          rank,
+          battalion,
+          company,
+          platoon,
+          battalion_id,
+          company_id,
+          platoon_id
+        )
+      `)
       .eq('date', cleanDate)
       .order('time_in', { ascending: true });
 
-    if (logsErr) throw logsErr;
+    if (joinErr) {
+      console.warn('[Supabase] fetchAttendanceByDate joined query notice:', joinErr.message);
+      const { data: fallbackLogs, error: logsErr } = await client
+        .from('attendance_logs')
+        .select('*')
+        .eq('date', cleanDate)
+        .order('time_in', { ascending: true });
+      if (logsErr) throw logsErr;
+      logs = fallbackLogs || [];
+    } else {
+      logs = joinedLogs || [];
+    }
 
     // 3. Query excuse_requests for this date and merge
     try {
@@ -568,29 +666,41 @@ export async function fetchAttendanceByDate(dateKey) {
       }
     } catch (_) {}
 
-    return (logs || []).map(l => ({
-      id: l.id,
-      ...l,
-      cadetId: l.cadet_id,
-      cadet_id: l.cadet_id,
-      name: l.name,
-      rank: l.rank,
-      battalion: l.battalion,
-      company: l.company,
-      platoon: l.platoon,
-      designation: l.designation,
-      date: l.date,
-      timeIn: l.time_in,
-      timeOut: l.time_out,
-      time_in: l.time_in,
-      time_out: l.time_out,
-      timestamp: l.timestamp || l.time_in || l.time_out,
-      status: l.final_daily_status || l.status,
-      finalDailyStatus: l.final_daily_status || l.status,
-      dutyOfficer: l.duty_officer,
-      sessionName: l.session_name,
-      scannedBy: l.scanned_by
-    }));
+    return (logs || []).map(l => {
+      const live = l.cadets || l.cadet;
+      const livePlatoon = live?.platoon || live?.platoon_name || l.platoon;
+      const liveCompany = live?.company || live?.company_name || l.company;
+      const liveBattalion = live?.battalion || live?.battalion_name || l.battalion;
+      return {
+        id: l.id,
+        ...l,
+        cadetId: l.cadet_id,
+        cadet_id: l.cadet_id,
+        name: live?.name || l.name,
+        rank: live?.rank || l.rank,
+        battalion: liveBattalion,
+        battalion_name: liveBattalion,
+        company: liveCompany,
+        company_name: liveCompany,
+        platoon: livePlatoon,
+        platoon_name: livePlatoon,
+        battalion_id: live?.battalion_id || l.battalion_id,
+        company_id: live?.company_id || l.company_id,
+        platoon_id: live?.platoon_id || l.platoon_id,
+        designation: live?.designation || l.designation,
+        date: l.date,
+        timeIn: l.time_in,
+        timeOut: l.time_out,
+        time_in: l.time_in,
+        time_out: l.time_out,
+        timestamp: l.timestamp || l.time_in || l.time_out,
+        status: l.final_daily_status || l.status,
+        finalDailyStatus: l.final_daily_status || l.status,
+        dutyOfficer: l.duty_officer,
+        sessionName: l.session_name,
+        scannedBy: l.scanned_by
+      };
+    });
   } catch (err) {
     console.error(`fetchAttendanceByDate error for ${cleanDate}:`, err);
     return [];
@@ -610,17 +720,30 @@ export async function fetchAttendanceSessionsFromSupabase() {
   }
 
   try {
-    const { data, error } = await client
-      .from('attendance_sessions')
-      .select('session_date, session_name, duty_officer, cutoff_time, total_scanned')
-      .order('session_date', { ascending: false })
-      .limit(500);
+    let sessionRows = null;
+    try {
+      const { data, error } = await client
+        .from('attendance_sessions')
+        .select('id, session_date, session_name, duty_officer, cutoff_time, total_scanned, academic_term_id')
+        .order('session_date', { ascending: false })
+        .limit(500);
+      if (!error && Array.isArray(data)) {
+        sessionRows = data;
+      }
+    } catch (_) {}
 
-    // Log raw response for diagnosis (visible in browser DevTools → Console)
-    console.log('[Supabase] attendance_sessions query →', { rowCount: (data || []).length, error, data });
+    if (!sessionRows) {
+      const { data, error } = await client
+        .from('attendance_sessions')
+        .select('session_date, session_name, duty_officer, cutoff_time, total_scanned')
+        .order('session_date', { ascending: false })
+        .limit(500);
+      if (error) throw error;
+      sessionRows = data || [];
+    }
 
-    if (error) throw error;
-    return (data || []).map(s => ({
+    return sessionRows.map(s => ({
+      id: s.id,
       dateKey: s.session_date,
       sessionDate: s.session_date,
       session_date: s.session_date,
@@ -630,7 +753,9 @@ export async function fetchAttendanceSessionsFromSupabase() {
       duty_officer: s.duty_officer,
       cutoffTime: s.cutoff_time,
       cutoff_time: s.cutoff_time,
-      totalScanned: s.total_scanned || 0
+      totalScanned: s.total_scanned || 0,
+      academic_term_id: s.academic_term_id || null,
+      academicTermId: s.academic_term_id || null
     }));
   } catch (err) {
     console.error('[Supabase] fetchAttendanceSessionsFromSupabase error:', err);
@@ -1251,16 +1376,70 @@ export async function ensureSessionWithDutyOfficer(sessionDate, officerName = nu
       ? `Saturday Formation & Muster (${cleanDate})`
       : `Daily Training & Drill Session (${cleanDate})`);
 
-    const { data: newSession, error: insertErr } = await client
+    // Resolve active academic term ID
+    let currentTermId = null;
+    try {
+      const { data: setRow } = await client
+        .from('system_settings')
+        .select('current_term_id')
+        .limit(1)
+        .maybeSingle();
+      if (setRow?.current_term_id) {
+        currentTermId = setRow.current_term_id;
+      } else {
+        const { data: activeTermRow } = await client
+          .from('academic_terms')
+          .select('id')
+          .eq('status', 'current')
+          .limit(1)
+          .maybeSingle();
+        if (activeTermRow?.id) currentTermId = activeTermRow.id;
+      }
+    } catch (_) {}
+
+    const sessionPayload = {
+      session_date: cleanDate,
+      session_name: defaultTitle,
+      duty_officer: finalOfficer,
+      cutoff_time: activeCutoff
+    };
+    if (currentTermId) {
+      sessionPayload.academic_term_id = currentTermId;
+    }
+
+    let { data: newSession, error: insertErr } = await client
       .from('attendance_sessions')
-      .insert({
-        session_date: cleanDate,
-        session_name: defaultTitle,
-        duty_officer: finalOfficer,
-        cutoff_time: activeCutoff
-      })
+      .insert(sessionPayload)
       .select('id, session_date, session_name, duty_officer, cutoff_time')
       .maybeSingle();
+
+    if (insertErr && (insertErr.code === 'PGRST204' || String(insertErr.message).includes('academic_term_id'))) {
+      delete sessionPayload.academic_term_id;
+      const retry = await client
+        .from('attendance_sessions')
+        .insert(sessionPayload)
+        .select('id, session_date, session_name, duty_officer, cutoff_time')
+        .maybeSingle();
+      newSession = retry.data;
+      insertErr = retry.error;
+    }
+
+    // Auto-sync completed_training_days on academic_terms
+    if (newSession && currentTermId) {
+      try {
+        const { data: termSessions } = await client
+          .from('attendance_sessions')
+          .select('session_date')
+          .eq('academic_term_id', currentTermId);
+        if (termSessions) {
+          const uniqueDates = new Set(termSessions.map(s => s.session_date));
+          await client
+            .from('academic_terms')
+            .update({ completed_training_days: uniqueDates.size })
+            .eq('id', currentTermId);
+        }
+      } catch (_) {}
+    }
 
     if (!insertErr && newSession && newSession.id) {
       return newSession;
@@ -1463,21 +1642,97 @@ export const subscribeToHistoryRealtime = subscribeToAttendanceRealtime;
 // ==============================================================================
 
 /**
- * Fetches system settings from Supabase
+ * Uploads an official seal or logo asset to Supabase Storage in the 'branding-assets' bucket.
+ * Returns the public URL, with fallback to base64 data URL if storage bucket is unavailable.
+ */
+export async function uploadBrandingAsset(file, slotName = 'logo') {
+  const client = getSupabaseClient();
+  if (!client) throw new Error('Supabase client not configured');
+
+  const cleanSlot = String(slotName || 'logo').replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+  const fileExt = (file.name && file.name.includes('.')) ? file.name.split('.').pop() : 'png';
+  const filePath = `logos/${cleanSlot}-${Date.now()}.${fileExt}`;
+
+  try {
+    const { data, error } = await client.storage
+      .from('branding-assets')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: true
+      });
+
+    if (error) {
+      console.warn('Supabase storage upload error:', error.message || error);
+      throw error;
+    }
+
+    const { data: publicUrlData } = client.storage
+      .from('branding-assets')
+      .getPublicUrl(filePath);
+
+    if (publicUrlData?.publicUrl) {
+      return publicUrlData.publicUrl;
+    }
+  } catch (err) {
+    console.warn(`Falling back to local Data URL for ${slotName}:`, err.message || err);
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(file);
+    });
+  }
+}
+
+/**
+ * Fetches system settings and unit settings from Supabase
  */
 export async function fetchSettingsFromSupabase() {
   const client = getSupabaseClient();
   if (!client) return null;
 
   try {
+    let combined = {};
+
+    // 1. Fetch from system_settings (master configuration singleton)
     const { data, error } = await client
       .from('system_settings')
       .select('*')
       .order('updated_at', { ascending: false })
       .limit(1);
 
-    if (error) throw error;
-    return (data && data.length > 0) ? data[0] : null;
+    if (!error && data && data.length > 0) {
+      combined = { ...data[0] };
+    }
+
+    // 2. Fetch from unit_settings (if table exists)
+    try {
+      const { data: unitData, error: unitError } = await client
+        .from('unit_settings')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+
+      if (!unitError && unitData && unitData.length > 0) {
+        const u = unitData[0];
+        combined = {
+          ...combined,
+          commandant: u.commandant || combined.commandant || combined.commanding_officer,
+          unit_name: u.unit_name || combined.unit_name,
+          school_name: u.school_name || combined.school_name || combined.host_institution,
+          cdc_name: u.cdc_name || combined.cdc_name,
+          rcdg_name: u.rcdg_name || combined.rcdg_name || combined.parent_command
+        };
+      }
+    } catch (_) {}
+
+    if (combined && combined.hero_emblems && typeof combined.hero_emblems === 'string') {
+      try {
+        combined.hero_emblems = JSON.parse(combined.hero_emblems);
+      } catch (_) {}
+    }
+
+    return Object.keys(combined).length > 0 ? combined : null;
   } catch (err) {
     console.error('Supabase fetch settings error:', err);
     return null;
@@ -1485,9 +1740,9 @@ export async function fetchSettingsFromSupabase() {
 }
 
 /**
- * Saves system settings to Supabase across all 4 tab sections:
+ * Saves system settings to Supabase across all tab sections:
  * Tab 1: Muster & Unit (formation_cutoff_time, total_unit_target, unit_structure)
- * Tab 2: Unit Branding (unit_name, commanding_officer, host_institution, parent_command, rotc_seal_url, university_logo_url)
+ * Tab 2: Unit Branding & Passes (commandant, unit_name, school_name, cdc_name, rcdg_name, 5 hero logo URLs)
  * Tab 3: Exports & Letters (excel_export_path, letterhead_config, auto_backup_enabled)
  * Tab 4: ID Printing (id_signatory_name, id_signatory_title, id_signature_url, id_card_orientation, officer_ranks_list, officer_roles_list)
  */
@@ -1507,9 +1762,13 @@ export async function saveSettingsToSupabase(settings) {
     }
 
     const activeUnitStructure = settings.unit_structure || settings.unitStructure || null;
-    const officerName = settings.commanding_officer || settings.commandingOfficer || 'COL CHARIS J ABAMO INF (GSC) PA';
+    const activeCommandant = settings.commandant || settings.commanding_officer || settings.commandingOfficer || 'LTC CHRISTIAN B ABAMO INF (GSC) PA';
+    const activeUnitName = settings.unit_name || settings.unitName || '1501st CDC ROTC Unit';
+    const activeSchoolName = settings.school_name || settings.host_institution || settings.hostInstitution || 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)';
+    const activeCdcName = settings.cdc_name || '1501st Community Defense Center';
+    const activeRcdgName = settings.rcdg_name || settings.parent_command || settings.parentCommand || '15th Regional Community Defense Group (15RCDG)';
     const officerTitle = settings.commanding_officer_title || settings.commandingOfficerTitle || 'Commandant, CSU ROTC Unit';
-    const signatoryName = settings.id_signatory_name || settings.signatoryName || officerName;
+    const signatoryName = settings.id_signatory_name || settings.signatoryName || activeCommandant;
     const signatoryTitle = settings.id_signatory_title || settings.signatoryDesignation || officerTitle;
 
     const fullPayload = {
@@ -1520,15 +1779,40 @@ export async function saveSettingsToSupabase(settings) {
       total_unit_target: Number(settings.totalUnitTarget || settings.unitTargetCapacity || 1184),
       excuse_grace_period_days: Number(settings.excuseGracePeriodDays ?? 3),
       unit_structure: activeUnitStructure,
+      ...(settings.current_term_id || settings.currentTermId ? { current_term_id: settings.current_term_id || settings.currentTermId } : {}),
 
-      // Tab 2: Unit Branding
-      unit_name: settings.unitName || settings.unit_name || '1501st CDC ROTC Unit',
-      commanding_officer: officerName,
+      // Tab 2: Unit Branding & Passes (Unit Command Profile)
+      commandant: activeCommandant,
+      unit_name: activeUnitName,
+      school_name: activeSchoolName,
+      cdc_name: activeCdcName,
+      rcdg_name: activeRcdgName,
+      commanding_officer: activeCommandant,
       commanding_officer_title: officerTitle,
-      parent_command: settings.parentCommand || settings.parent_command || '15th RCDG, ARESCOM, Philippine Army',
-      host_institution: settings.hostInstitution || settings.host_institution || 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
-      rotc_seal_url: settings.rotcSealUrl || settings.rotc_seal_url || '/rotc-seal-transparent.png',
-      university_logo_url: settings.universityLogoUrl || settings.university_logo_url || '/csu-logo.png',
+      parent_command: activeRcdgName,
+      host_institution: activeSchoolName,
+
+      // Hero Emblems JSONB array (dynamic management with payload sanitization)
+      hero_emblems: (() => {
+        const raw = Array.isArray(settings.hero_emblems)
+          ? settings.hero_emblems
+          : (Array.isArray(settings.heroEmblems) ? settings.heroEmblems : null);
+        if (!raw) return null;
+        return raw.map((item, idx) => ({
+          id: String(item?.id || `emblem-${idx + 1}`),
+          label: String(item?.label || `Seal ${idx + 1}`).trim(),
+          url: String(item?.url || '/rotc-seal-transparent.png').trim(),
+          is_center: Boolean(item?.is_center),
+          active: item?.active !== false
+        }));
+      })(),
+
+      // 5 Official Seals & Hero Banner Logos (backward compatibility fallback)
+      rcdg_seal_url: settings.rcdg_seal_url || settings.rcdgSealUrl || '/rcdg-logo.png',
+      cdc_seal_url: settings.cdc_seal_url || settings.cdcSealUrl || '/cdc-logo.png',
+      rotc_seal_url: settings.rotc_seal_url || settings.rotcSealUrl || '/rotc-seal-transparent.png',
+      nstp_logo_url: settings.nstp_logo_url || settings.nstpLogoUrl || '/nstp-logo.png',
+      university_logo_url: settings.university_logo_url || settings.universityLogoUrl || '/csu-logo.png',
 
       // Tab 3: Exports & Letters
       excel_export_path: settings.exportDirectory || settings.excelExportPath || './desktop_excel_reports/',
@@ -1540,8 +1824,8 @@ export async function saveSettingsToSupabase(settings) {
       auto_backup_enabled: settings.autoBackupEnabled !== false,
 
       // Tab 4: ID Printing
-      id_signatory_name: signatoryName, // 👈 Explicitly synced with commanding_officer
-      id_signatory_title: signatoryTitle, // 👈 Explicitly synced with commanding_officer_title
+      id_signatory_name: signatoryName, // 👈 Explicitly synced with commandant
+      id_signatory_title: signatoryTitle, // 👈 Explicitly synced with officer title
       id_signature_url: settings.signatureImageUrl || settings.idSignatureUrl || settings.id_signature_url || '',
       id_card_orientation: settings.cardOrientation || settings.idCardOrientation || settings.id_card_orientation || 'vertical',
       officer_ranks_list: settings.officerRanks || settings.officer_ranks_list || null,
@@ -1550,12 +1834,28 @@ export async function saveSettingsToSupabase(settings) {
       updated_at: new Date().toISOString()
     };
 
+    // Helper to prevent hanging Supabase promises
+    const promiseWithTimeout = (p, ms = 8000, errorMsg = 'Supabase network timeout') =>
+      Promise.race([
+        p,
+        new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+      ]);
+
     // Update existing singleton row in system_settings if present, else insert
-    const { data: existingRows } = await client
-      .from('system_settings')
-      .select('id')
-      .order('created_at', { ascending: true })
-      .limit(1);
+    let existingRows = null;
+    try {
+      const selectRes = await promiseWithTimeout(
+        client
+          .from('system_settings')
+          .select('id')
+          .order('created_at', { ascending: true })
+          .limit(1),
+        6000
+      );
+      existingRows = selectRes?.data || null;
+    } catch (errSelect) {
+      console.warn('Could not query existing system_settings row (proceeding with fallback):', errSelect.message || errSelect);
+    }
 
     let savedData = null;
     let targetId = (existingRows && existingRows.length > 0) ? existingRows[0].id : null;
@@ -1566,19 +1866,30 @@ export async function saveSettingsToSupabase(settings) {
     const maxAttempts = Object.keys(fullPayload).length + 2;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       let res;
-      if (targetId) {
-        res = await client
-          .from('system_settings')
-          .update(attemptPayload)
-          .eq('id', targetId)
-          .select()
-          .single();
-      } else {
-        res = await client
-          .from('system_settings')
-          .insert(attemptPayload)
-          .select()
-          .single();
+      try {
+        if (targetId) {
+          res = await promiseWithTimeout(
+            client
+              .from('system_settings')
+              .update(attemptPayload)
+              .eq('id', targetId)
+              .select()
+              .single(),
+            8000
+          );
+        } else {
+          res = await promiseWithTimeout(
+            client
+              .from('system_settings')
+              .insert(attemptPayload)
+              .select()
+              .single(),
+            8000
+          );
+        }
+      } catch (networkErr) {
+        console.warn(`Supabase network error on attempt ${attempt + 1}:`, networkErr.message || networkErr);
+        throw networkErr;
       }
 
       if (!res.error) {
@@ -1587,19 +1898,52 @@ export async function saveSettingsToSupabase(settings) {
       }
 
       // Check if error is due to missing column in Supabase schema cache
-      if (res.error.code === 'PGRST204' || res.error.message?.includes('column')) {
-        const match = res.error.message.match(/'([^']+)' column/);
-        if (match && match[1] && match[1] in attemptPayload) {
-          missingColumns.push(match[1]);
-          if (match[1] === 'unit_structure') {
-            console.warn("⚠️ Column 'unit_structure' does not exist yet in Supabase 'system_settings'. Run the migration in Supabase SQL editor: ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS unit_structure JSONB DEFAULT '[]'::jsonb;");
+      const errMsg = String(res.error.message || '');
+      if (res.error.code === 'PGRST204' || errMsg.includes('column') || errMsg.includes('does not exist') || errMsg.includes('schema cache')) {
+        const match = errMsg.match(/'([^']+)' column/) 
+          || errMsg.match(/column "([^"]+)"/i) 
+          || errMsg.match(/column ([a-zA-Z0-9_]+) does not exist/i)
+          || errMsg.match(/Could not find the '([^']+)' column/i);
+        const missingCol = match ? match[1] : null;
+        if (missingCol && missingCol in attemptPayload) {
+          missingColumns.push(missingCol);
+          if (missingCol === 'hero_emblems') {
+            console.warn("⚠️ Column 'hero_emblems' does not exist yet in Supabase 'system_settings'. Run the migration in Supabase SQL editor: ALTER TABLE system_settings ADD COLUMN IF NOT EXISTS hero_emblems JSONB DEFAULT '[]'::jsonb;");
           }
-          delete attemptPayload[match[1]];
+          delete attemptPayload[missingCol];
           continue;
         }
       }
 
       throw res.error;
+    }
+
+    // Execute UPSERT to unit_settings (so modifications persist across sessions)
+    try {
+      const { data: existingUnitRows } = await client
+        .from('unit_settings')
+        .select('id')
+        .order('created_at', { ascending: true })
+        .limit(1);
+
+      const unitPayload = {
+        commandant: activeCommandant,
+        unit_name: activeUnitName,
+        school_name: activeSchoolName,
+        cdc_name: activeCdcName,
+        rcdg_name: activeRcdgName,
+        updated_at: new Date().toISOString()
+      };
+
+      if (existingUnitRows && existingUnitRows.length > 0) {
+        unitPayload.id = existingUnitRows[0].id;
+      }
+
+      await client
+        .from('unit_settings')
+        .upsert(unitPayload);
+    } catch (errUnit) {
+      console.warn('Note on unit_settings upsert:', errUnit?.message || errUnit);
     }
 
     // Propagate cutoff to today's session in attendance_sessions if one already exists
@@ -1635,74 +1979,354 @@ export async function saveSettingsToSupabase(settings) {
 }
 
 /**
- * Reassign cadets and their attendance logs when an echelon (e.g. company) is deleted or modified.
- * Updates Supabase tables (`cadets` & `attendance_logs`) and local caches (`csu_rotc_cadets_roster` & `csu_rotc_master_attendance`).
+ * Checks if any cadets or attendance logs are currently linked to a unit echelon (Battalion, Company, or Platoon).
+ * Used before deletion/archival to prevent broken attendance records and database constraints.
+ * 
+ * @param {Object} params
+ * @param {'battalion'|'company'|'platoon'} params.level
+ * @param {string} params.id
+ * @param {string} params.name
+ * @param {string} [params.battalionName]
+ * @param {string} [params.companyName]
+ * @returns {Promise<{cadetCount: number, logCount: number, hasDependencies: boolean, sampleCadets: Array}>}
  */
-export async function reassignCadetsCompany(battalionName, oldCompanyName, targetCompanyName) {
+export async function checkUnitDependencies({ level, id, name, battalionName, companyName }) {
   const client = getSupabaseClient();
-  let supabaseUpdatedCount = 0;
-  let supabaseError = null;
+  let cadetCount = 0;
+  let logCount = 0;
+  let sampleCadets = [];
 
-  const bnClean = (battalionName || '').trim();
-  const oldCoClean = (oldCompanyName || '').trim();
-  const targetCoClean = (targetCompanyName || '').trim();
+  const cleanName = String(name || '').trim();
+  const cleanId = String(id || '').trim();
 
-  // 1. Update Supabase
-  if (client && bnClean && oldCoClean && targetCoClean) {
+  // Helper matcher for local rosters
+  const matchesUnit = (item) => {
+    if (!item) return false;
+    if (level === 'battalion') {
+      const bName = String(item.battalion || item.battalion_id || '').toLowerCase();
+      return bName.includes(cleanName.toLowerCase()) || bName === cleanId.toLowerCase();
+    }
+    if (level === 'company') {
+      const cName = String(item.company || item.company_id || '').toLowerCase();
+      const matchCo = cName.includes(cleanName.toLowerCase()) || cName === cleanId.toLowerCase();
+      if (battalionName) {
+        const bName = String(item.battalion || item.battalion_id || '').toLowerCase();
+        return matchCo && bName.includes(battalionName.toLowerCase());
+      }
+      return matchCo;
+    }
+    if (level === 'platoon') {
+      const pName = String(item.platoon || item.platoon_id || '').toLowerCase();
+      const matchPl = pName.includes(cleanName.toLowerCase()) || pName === cleanId.toLowerCase();
+      if (companyName) {
+        const cName = String(item.company || item.company_id || '').toLowerCase();
+        return matchPl && cName.includes(companyName.toLowerCase());
+      }
+      return matchPl;
+    }
+    return false;
+  };
+
+  // 1. Check local storage cache first for instant feedback
+  try {
+    const localCadets = JSON.parse(localStorage.getItem('csu_rotc_cadets_roster') || '[]');
+    if (Array.isArray(localCadets)) {
+      const matchingLocalCadets = localCadets.filter(matchesUnit);
+      cadetCount = Math.max(cadetCount, matchingLocalCadets.length);
+      sampleCadets = matchingLocalCadets.slice(0, 5).map(c => ({ id: c.id, name: c.name, rank: c.rank }));
+    }
+  } catch (_) { }
+
+  try {
+    const localLogs = JSON.parse(localStorage.getItem('csu_rotc_master_attendance') || '[]');
+    if (Array.isArray(localLogs)) {
+      const matchingLocalLogs = localLogs.filter(matchesUnit);
+      logCount = Math.max(logCount, matchingLocalLogs.length);
+    }
+  } catch (_) { }
+
+  // 2. Query Supabase for authoritative live counts
+  if (client && (cleanName || cleanId)) {
     try {
-      // Update cadets table
-      const { data: cadetData, error: cadetErr } = await client
-        .from('cadets')
-        .update({ company: targetCoClean, updated_at: new Date().toISOString() })
-        .ilike('battalion', `%${bnClean}%`)
-        .ilike('company', `%${oldCoClean.replace(/ COMPANY$| COY$/i, '')}%`)
-        .select();
-
-      if (cadetErr) {
-        console.warn('Supabase cadet reassignment warning:', cadetErr);
-        supabaseError = cadetErr;
-      } else {
-        supabaseUpdatedCount = cadetData?.length || 0;
+      // Query Cadets
+      let cadetQuery = client.from('cadets').select('id, name, rank', { count: 'exact' });
+      if (level === 'battalion') {
+        cadetQuery = cadetQuery.or(`battalion.ilike.%${cleanName}%,id.ilike.%${cleanId}%`);
+      } else if (level === 'company') {
+        const coSearch = cleanName.replace(/ COMPANY$| COY$/i, '');
+        cadetQuery = cadetQuery.ilike('company', `%${coSearch}%`);
+        if (battalionName) {
+          cadetQuery = cadetQuery.ilike('battalion', `%${battalionName}%`);
+        }
+      } else if (level === 'platoon') {
+        const plSearch = cleanName.replace(/ PLATOON$| PLTN$/i, '');
+        cadetQuery = cadetQuery.ilike('platoon', `%${plSearch}%`);
+        if (companyName) {
+          cadetQuery = cadetQuery.ilike('company', `%${companyName}%`);
+        }
       }
 
-      // Update attendance_logs table
-      const { error: logErr } = await client
-        .from('attendance_logs')
-        .update({ company: targetCoClean })
-        .ilike('battalion', `%${bnClean}%`)
-        .ilike('company', `%${oldCoClean.replace(/ COMPANY$| COY$/i, '')}%`);
+      const { data: dbCadets, count: dbCadetCount, error: cErr } = await cadetQuery.limit(5);
+      if (!cErr && typeof dbCadetCount === 'number') {
+        cadetCount = Math.max(cadetCount, dbCadetCount);
+        if (dbCadets && dbCadets.length > 0) {
+          sampleCadets = dbCadets;
+        }
+      }
 
-      if (logErr) console.warn('Supabase attendance logs reassignment warning:', logErr);
+      // Query Attendance Logs
+      let logQuery = client.from('attendance_logs').select('id', { count: 'exact', head: true });
+      if (level === 'battalion') {
+        logQuery = logQuery.ilike('battalion', `%${cleanName}%`);
+      } else if (level === 'company') {
+        const coSearch = cleanName.replace(/ COMPANY$| COY$/i, '');
+        logQuery = logQuery.ilike('company', `%${coSearch}%`);
+        if (battalionName) {
+          logQuery = logQuery.ilike('battalion', `%${battalionName}%`);
+        }
+      } else if (level === 'platoon') {
+        const plSearch = cleanName.replace(/ PLATOON$| PLTN$/i, '');
+        logQuery = logQuery.ilike('platoon', `%${plSearch}%`);
+        if (companyName) {
+          logQuery = logQuery.ilike('company', `%${companyName}%`);
+        }
+      }
+
+      const { count: dbLogCount, error: lErr } = await logQuery;
+      if (!lErr && typeof dbLogCount === 'number') {
+        logCount = Math.max(logCount, dbLogCount);
+      }
     } catch (err) {
-      console.warn('Supabase reassignCadetsCompany error:', err);
-      supabaseError = err;
+      console.warn('checkUnitDependencies network notice:', err.message || err);
+    }
+  }
+
+  return {
+    cadetCount,
+    logCount,
+    hasDependencies: cadetCount > 0 || logCount > 0,
+    sampleCadets
+  };
+}
+
+/**
+ * Reassigns cadets and their attendance logs when an echelon (Battalion, Company, or Platoon) is deleted or merged.
+ * Supports Battalion, Company, and Platoon level reassignments across Supabase and local cache.
+/**
+ * Fetches current cadet headcount per platoon across all active units.
+ * Keys are normalized `${battalionName}__${companyName}__${platoonName}` and `platoon_id`.
+ */
+export async function fetchSystemWidePlatoonCapacities() {
+  const counts = {};
+
+  // 1. Local storage cache
+  try {
+    const local = JSON.parse(localStorage.getItem('csu_rotc_cadets_roster') || '[]');
+    if (Array.isArray(local)) {
+      local.forEach(c => {
+        const b = String(c.battalion || '').trim().toLowerCase();
+        const co = String(c.company || '').trim().toLowerCase();
+        const pl = String(c.platoon || '').trim().toLowerCase();
+        const pId = c.platoon_id || c.platoonId;
+        const key = `${b}__${co}__${pl}`;
+        counts[key] = (counts[key] || 0) + 1;
+        if (pId) counts[pId] = (counts[pId] || 0) + 1;
+      });
+    }
+  } catch (_) {}
+
+  // 2. Authoritative live count from Supabase
+  const client = getSupabaseClient();
+  if (client) {
+    try {
+      const { data, error } = await client
+        .from('cadets')
+        .select('battalion, company, platoon, battalion_id, company_id, platoon_id');
+      if (!error && Array.isArray(data)) {
+        const liveCounts = {};
+        data.forEach(c => {
+          const b = String(c.battalion || '').trim().toLowerCase();
+          const co = String(c.company || '').trim().toLowerCase();
+          const pl = String(c.platoon || '').trim().toLowerCase();
+          const pId = c.platoon_id || c.platoonId;
+          const key = `${b}__${co}__${pl}`;
+          liveCounts[key] = (liveCounts[key] || 0) + 1;
+          if (pId) liveCounts[pId] = (liveCounts[pId] || 0) + 1;
+        });
+        return liveCounts;
+      }
+    } catch (err) {
+      console.warn('fetchSystemWidePlatoonCapacities Supabase notice:', err.message || err);
+    }
+  }
+
+  return counts;
+}
+
+/**
+ * Reassigns cadets and their attendance logs when an echelon (Battalion, Company, or Platoon) is deleted or merged.
+ * Supports Battalion, Company, and Platoon level reassignments across Supabase and local cache.
+ * Automatically cascades battalion_id, company_id, and platoon_id foreign keys simultaneously.
+ */
+export async function reassignUnitDependencies({ level, source, target }) {
+  const client = getSupabaseClient();
+  let supabaseUpdatedCount = 0;
+
+  const srcName = String(source?.name || '').trim();
+  const trgName = String(target?.name || '').trim();
+  const srcBn = String(source?.battalionName || '').trim();
+  const trgBn = String(target?.battalionName || target?.name || '').trim();
+  const srcCo = String(source?.companyName || '').trim();
+  const trgCo = String(target?.companyName || target?.name || '').trim();
+  const trgPl = String(target?.platoonName || target?.name || '').trim();
+
+  const trgBnId = target?.battalionId || target?.battalion_id || null;
+  const trgCoId = target?.companyId || target?.company_id || null;
+  const trgPlId = target?.platoonId || target?.platoon_id || (level === 'platoon' ? target?.id : null);
+
+  // 1. Update Supabase
+  if (client && srcName && trgName) {
+    try {
+      const now = new Date().toISOString();
+      let updatePayload = { updated_at: now };
+
+      if (level === 'battalion') {
+        updatePayload.battalion = trgName;
+        if (trgBnId) updatePayload.battalion_id = trgBnId;
+        if (target?.defaultCompanyName) updatePayload.company = target.defaultCompanyName;
+        if (target?.defaultCompanyId || target?.companyId) updatePayload.company_id = target.defaultCompanyId || target.companyId;
+        if (target?.defaultPlatoonName) updatePayload.platoon = target.defaultPlatoonName;
+        if (target?.defaultPlatoonId || target?.platoonId) updatePayload.platoon_id = target.defaultPlatoonId || target.platoonId;
+      } else if (level === 'company') {
+        updatePayload.company = trgName;
+        if (trgCoId) updatePayload.company_id = trgCoId;
+        if (trgBn && trgBn !== srcBn) updatePayload.battalion = trgBn;
+        if (trgBnId) updatePayload.battalion_id = trgBnId;
+        if (target?.defaultPlatoonName) updatePayload.platoon = target.defaultPlatoonName;
+        if (target?.defaultPlatoonId || target?.platoonId) updatePayload.platoon_id = target.defaultPlatoonId || target.platoonId;
+      } else if (level === 'platoon') {
+        updatePayload.platoon = trgPl || trgName;
+        if (trgPlId) updatePayload.platoon_id = trgPlId;
+        if (trgCo) updatePayload.company = trgCo;
+        if (trgCoId) updatePayload.company_id = trgCoId;
+        if (trgBn) updatePayload.battalion = trgBn;
+        if (trgBnId) updatePayload.battalion_id = trgBnId;
+      }
+
+      // Safe updater with foreign key schema tolerance
+      const executeSafeUpdate = async (table, filterBuilder, selectCount = false) => {
+        let q = filterBuilder(client.from(table).update(updatePayload));
+        if (selectCount) q = q.select('id');
+        let res = await q;
+        if (res.error && (res.error.message?.includes('column') || res.error.message?.includes('does not exist'))) {
+          const fallback = { ...updatePayload };
+          delete fallback.battalion_id;
+          delete fallback.company_id;
+          delete fallback.platoon_id;
+          let retryQ = filterBuilder(client.from(table).update(fallback));
+          if (selectCount) retryQ = retryQ.select('id');
+          res = await retryQ;
+        }
+        return res;
+      };
+
+      if (level === 'battalion') {
+        const cRes = await executeSafeUpdate('cadets', (b) => b.ilike('battalion', `%${srcName.replace(/ BATTALION$| BN$/i, '')}%`), true);
+        supabaseUpdatedCount += cRes?.data?.length || 0;
+        await executeSafeUpdate('attendance_logs', (b) => b.ilike('battalion', `%${srcName.replace(/ BATTALION$| BN$/i, '')}%`));
+      } else if (level === 'company') {
+        const cRes = await executeSafeUpdate('cadets', (b) => {
+          let q = b.ilike('company', `%${srcName.replace(/ COMPANY$| COY$/i, '')}%`);
+          if (srcBn) q = q.ilike('battalion', `%${srcBn.replace(/ BATTALION$| BN$/i, '')}%`);
+          return q;
+        }, true);
+        supabaseUpdatedCount += cRes?.data?.length || 0;
+        await executeSafeUpdate('attendance_logs', (b) => {
+          let q = b.ilike('company', `%${srcName.replace(/ COMPANY$| COY$/i, '')}%`);
+          if (srcBn) q = q.ilike('battalion', `%${srcBn.replace(/ BATTALION$| BN$/i, '')}%`);
+          return q;
+        });
+      } else if (level === 'platoon') {
+        const cRes = await executeSafeUpdate('cadets', (b) => {
+          let q = b.ilike('platoon', `%${srcName.replace(/ PLATOON$| PLTN$/i, '')}%`);
+          if (srcCo) q = q.ilike('company', `%${srcCo.replace(/ COMPANY$| COY$/i, '')}%`);
+          return q;
+        }, true);
+        supabaseUpdatedCount += cRes?.data?.length || 0;
+        await executeSafeUpdate('attendance_logs', (b) => {
+          let q = b.ilike('platoon', `%${srcName.replace(/ PLATOON$| PLTN$/i, '')}%`);
+          if (srcCo) q = q.ilike('company', `%${srcCo.replace(/ COMPANY$| COY$/i, '')}%`);
+          return q;
+        });
+      }
+    } catch (err) {
+      console.warn('reassignUnitDependencies Supabase error:', err);
     }
   }
 
   // 2. Update local storage: csu_rotc_cadets_roster
-  let localCadetsCount = 0;
   try {
     const rawCadets = localStorage.getItem('csu_rotc_cadets_roster');
     if (rawCadets) {
       const parsedCadets = JSON.parse(rawCadets);
       let modified = false;
       const updatedCadets = parsedCadets.map(cadet => {
-        const matchBn = (cadet.battalion || '').toLowerCase().includes(bnClean.toLowerCase().replace(/ battalion/i, ''));
-        const matchCo = (cadet.company || '').toLowerCase().includes(oldCoClean.toLowerCase().replace(/ company$| coy$/i, ''));
-        if (matchBn && matchCo) {
-          modified = true;
-          localCadetsCount++;
-          return { ...cadet, company: targetCoClean };
+        let match = false;
+        if (level === 'battalion') {
+          match = (cadet.battalion || '').toLowerCase().includes(srcName.toLowerCase().replace(/ battalion/i, ''));
+          if (match) {
+            modified = true;
+            return {
+              ...cadet,
+              battalion: trgName,
+              ...(trgBnId ? { battalion_id: trgBnId } : {}),
+              ...(target?.defaultCompanyName ? { company: target.defaultCompanyName } : {}),
+              ...(target?.defaultCompanyId || target?.companyId ? { company_id: target.defaultCompanyId || target.companyId } : {}),
+              ...(target?.defaultPlatoonName ? { platoon: target.defaultPlatoonName } : {}),
+              ...(target?.defaultPlatoonId || target?.platoonId ? { platoon_id: target.defaultPlatoonId || target.platoonId } : {})
+            };
+          }
+        } else if (level === 'company') {
+          const matchCo = (cadet.company || '').toLowerCase().includes(srcName.toLowerCase().replace(/ company$| coy$/i, ''));
+          const matchBn = srcBn ? (cadet.battalion || '').toLowerCase().includes(srcBn.toLowerCase().replace(/ battalion/i, '')) : true;
+          if (matchCo && matchBn) {
+            modified = true;
+            return {
+              ...cadet,
+              company: trgName,
+              ...(trgCoId ? { company_id: trgCoId } : {}),
+              ...(trgBn ? { battalion: trgBn } : {}),
+              ...(trgBnId ? { battalion_id: trgBnId } : {}),
+              ...(target?.defaultPlatoonName ? { platoon: target.defaultPlatoonName } : {}),
+              ...(target?.defaultPlatoonId || target?.platoonId ? { platoon_id: target.defaultPlatoonId || target.platoonId } : {})
+            };
+          }
+        } else if (level === 'platoon') {
+          const matchPl = (cadet.platoon || '').toLowerCase().includes(srcName.toLowerCase().replace(/ platoon$| pltn$/i, ''));
+          const matchCo = srcCo ? (cadet.company || '').toLowerCase().includes(srcCo.toLowerCase().replace(/ company$| coy$/i, '')) : true;
+          if (matchPl && matchCo) {
+            modified = true;
+            return {
+              ...cadet,
+              platoon: trgPl || trgName,
+              ...(trgPlId ? { platoon_id: trgPlId } : {}),
+              ...(trgCo ? { company: trgCo } : {}),
+              ...(trgCoId ? { company_id: trgCoId } : {}),
+              ...(trgBn ? { battalion: trgBn } : {}),
+              ...(trgBnId ? { battalion_id: trgBnId } : {})
+            };
+          }
         }
         return cadet;
       });
+
       if (modified) {
         localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(updatedCadets));
         window.dispatchEvent(new CustomEvent('csu_cadets_updated', { detail: updatedCadets }));
       }
     }
   } catch (e) {
-    console.warn('LocalStorage cadets reassignment error:', e);
+    console.warn('reassignUnitDependencies local cadets error:', e);
   }
 
   // 3. Update local storage: csu_rotc_master_attendance
@@ -1712,29 +2336,123 @@ export async function reassignCadetsCompany(battalionName, oldCompanyName, targe
       const parsedLogs = JSON.parse(rawLogs);
       let modified = false;
       const updatedLogs = parsedLogs.map(log => {
-        const matchBn = (log.battalion || '').toLowerCase().includes(bnClean.toLowerCase().replace(/ battalion/i, ''));
-        const matchCo = (log.company || '').toLowerCase().includes(oldCoClean.toLowerCase().replace(/ company$| coy$/i, ''));
-        if (matchBn && matchCo) {
-          modified = true;
-          return { ...log, company: targetCoClean };
+        if (level === 'battalion') {
+          if ((log.battalion || '').toLowerCase().includes(srcName.toLowerCase().replace(/ battalion/i, ''))) {
+            modified = true;
+            return {
+              ...log,
+              battalion: trgName,
+              ...(trgBnId ? { battalion_id: trgBnId } : {}),
+              ...(target?.defaultCompanyName ? { company: target.defaultCompanyName } : {}),
+              ...(target?.defaultCompanyId || target?.companyId ? { company_id: target.defaultCompanyId || target.companyId } : {}),
+              ...(target?.defaultPlatoonName ? { platoon: target.defaultPlatoonName } : {}),
+              ...(target?.defaultPlatoonId || target?.platoonId ? { platoon_id: target.defaultPlatoonId || target.platoonId } : {})
+            };
+          }
+        } else if (level === 'company') {
+          const matchCo = (log.company || '').toLowerCase().includes(srcName.toLowerCase().replace(/ company$| coy$/i, ''));
+          const matchBn = srcBn ? (log.battalion || '').toLowerCase().includes(srcBn.toLowerCase().replace(/ battalion/i, '')) : true;
+          if (matchCo && matchBn) {
+            modified = true;
+            return {
+              ...log,
+              company: trgName,
+              ...(trgCoId ? { company_id: trgCoId } : {}),
+              ...(trgBn ? { battalion: trgBn } : {}),
+              ...(trgBnId ? { battalion_id: trgBnId } : {}),
+              ...(target?.defaultPlatoonName ? { platoon: target.defaultPlatoonName } : {}),
+              ...(target?.defaultPlatoonId || target?.platoonId ? { platoon_id: target.defaultPlatoonId || target.platoonId } : {})
+            };
+          }
+        } else if (level === 'platoon') {
+          const matchPl = (log.platoon || '').toLowerCase().includes(srcName.toLowerCase().replace(/ platoon$| pltn$/i, ''));
+          const matchCo = srcCo ? (log.company || '').toLowerCase().includes(srcCo.toLowerCase().replace(/ company$| coy$/i, '')) : true;
+          if (matchPl && matchCo) {
+            modified = true;
+            return {
+              ...log,
+              platoon: trgPl || trgName,
+              ...(trgPlId ? { platoon_id: trgPlId } : {}),
+              ...(trgCo ? { company: trgCo } : {}),
+              ...(trgCoId ? { company_id: trgCoId } : {}),
+              ...(trgBn ? { battalion: trgBn } : {}),
+              ...(trgBnId ? { battalion_id: trgBnId } : {})
+            };
+          }
         }
         return log;
       });
+
       if (modified) {
         localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(updatedLogs));
         window.dispatchEvent(new CustomEvent('local-attendance-update', { detail: updatedLogs }));
       }
     }
   } catch (e) {
-    console.warn('LocalStorage logs reassignment error:', e);
+    console.warn('reassignUnitDependencies local logs error:', e);
   }
 
-  return {
-    success: true,
-    supabaseUpdatedCount,
-    localCadetsCount,
-    error: supabaseError
-  };
+  return { success: true, supabaseUpdatedCount };
+}
+
+/**
+ * Reassign cadets and their attendance logs when a company is deleted or modified.
+ * Backward compatible wrapper over reassignUnitDependencies.
+ */
+export async function reassignCadetsCompany(battalionName, oldCompanyName, targetCompanyName) {
+  return reassignUnitDependencies({
+    level: 'company',
+    source: { name: oldCompanyName, battalionName },
+    target: { name: targetCompanyName, battalionName }
+  });
+}
+
+/**
+ * Marks a unit echelon as soft-archived (is_archived = true) in Supabase unit tables.
+ * Prevents hard DELETE SQL calls and preserves relational integrity with attendance_logs and cadets.
+ */
+export async function softArchiveUnitEchelon({ level, id, name }) {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'No client' };
+  try {
+    const table = level === 'battalion' ? 'battalions' : level === 'company' ? 'companies' : 'platoons';
+    const now = new Date().toISOString();
+    let query = client.from(table).update({ is_archived: true, archived_at: now });
+    if (id) {
+      query = query.eq('id', id);
+    } else if (name) {
+      query = query.eq('name', name);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    console.warn(`softArchiveUnitEchelon warning for ${level} (${id || name}):`, err.message || err);
+    return { success: false, error: err.message || err };
+  }
+}
+
+/**
+ * Restores a soft-archived unit echelon (is_archived = false) in Supabase unit tables.
+ */
+export async function restoreUnitEchelon({ level, id, name }) {
+  const client = getSupabaseClient();
+  if (!client) return { success: false, error: 'No client' };
+  try {
+    const table = level === 'battalion' ? 'battalions' : level === 'company' ? 'companies' : 'platoons';
+    let query = client.from(table).update({ is_archived: false, archived_at: null });
+    if (id) {
+      query = query.eq('id', id);
+    } else if (name) {
+      query = query.eq('name', name);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return { success: true, data };
+  } catch (err) {
+    console.warn(`restoreUnitEchelon warning for ${level} (${id || name}):`, err.message || err);
+    return { success: false, error: err.message || err };
+  }
 }
 
 /**
@@ -2489,21 +3207,41 @@ export async function fetchExcuseRequests() {
  * @param {string} [dateKey] - Specific formation date (YYYY-MM-DD) or 'ALL'
  * @returns {Promise<Array>}
  */
-export async function fetchDeclaredAbsentCadets(dateKey = null) {
+export async function fetchDeclaredAbsentCadets(dateKey = null, termId = null) {
   const client = getSupabaseClient();
   if (!client) return [];
 
   try {
     let query = client
       .from('excuse_requests')
-      .select('id, cadet_id, drill_date, date, reason, proof_url, status, reviewed_by, reviewed_at, submitted_at, created_at, updated_at')
+      .select('id, cadet_id, drill_date, date, reason, proof_url, status, reviewed_by, reviewed_at, submitted_at, created_at, updated_at, academic_term_id')
       .or('status.eq.REJECTED,status.eq.ABSENT,status.eq.rejected,status.eq.absent');
 
     if (dateKey && dateKey !== 'ALL') {
       query = query.or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
     }
 
-    const { data, error } = await query.order('submitted_at', { ascending: false });
+    if (termId && termId !== 'ALL') {
+      query = query.eq('academic_term_id', termId);
+    }
+
+    let { data, error } = await query.order('submitted_at', { ascending: false });
+
+    // Fallback if academic_term_id column is not in excuse_requests table
+    if (error && (error.code === 'PGRST204' || String(error.message).includes('academic_term_id'))) {
+      let fallbackQuery = client
+        .from('excuse_requests')
+        .select('id, cadet_id, drill_date, date, reason, proof_url, status, reviewed_by, reviewed_at, submitted_at, created_at, updated_at')
+        .or('status.eq.REJECTED,status.eq.ABSENT,status.eq.rejected,status.eq.absent');
+
+      if (dateKey && dateKey !== 'ALL') {
+        fallbackQuery = fallbackQuery.or(`drill_date.eq.${dateKey},date.eq.${dateKey}`);
+      }
+      const res = await fallbackQuery.order('submitted_at', { ascending: false });
+      data = res.data;
+      error = res.error;
+    }
+
     if (error) {
       console.warn('[fetchDeclaredAbsentCadets] Query note:', error.message);
       return [];

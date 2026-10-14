@@ -13,7 +13,8 @@ import {
   UserX,
   FileText,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  GraduationCap
 } from 'lucide-react';
 import DashboardUnitHierarchy from './DashboardUnitHierarchy';
 import {
@@ -22,11 +23,15 @@ import {
   normalizeBattalion,
   normalizeCompany,
   normalizePlatoon,
-  formatDisplayTime
+  formatDisplayTime,
+  hasSDAScansInSession,
+  isSDACompany,
+  isSDACadet
 } from '../utils/attendanceStatus';
 import { getDutyOfficerForCadet } from './AttendanceHistory';
 import { useAttendanceData } from '../hooks/useAttendanceData';
 import { useUnitStructure } from '../context/UnitContext';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 import {
   subscribeToAttendanceRealtime,
   fetchCadetCountFromSupabase,
@@ -34,7 +39,9 @@ import {
   fetchAttendanceSessionsFromSupabase,
   approveExcuseRequest,
   rejectExcuseRequest,
-  autoExpireExcusePending
+  autoExpireExcusePending,
+  getSupabaseClient,
+  supabase
 } from '../utils/supabaseClient';
 
 function formatDisplayTimeFallback(timestamp) {
@@ -73,8 +80,87 @@ export default function DashboardView({
   onRefresh,
   onNavigateToHistory
 }) {
+  const { selectedTermId, activeTermId, activeTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+
+  // Live term-scoped data fetched directly from Supabase
+  const [termCadets, setTermCadets] = useState(null);
+  const [termLogs, setTermLogs] = useState(null);
+
+  // Dynamic Dashboard Query: Fetch cadets and attendance logs using .eq('academic_term_id', currentTermId)
+  useEffect(() => {
+    let isMounted = true;
+    setTermCadets(null);
+    setTermLogs(null);
+    async function fetchTermDashboardData() {
+      if (!currentTermId) return;
+      try {
+        const client = getSupabaseClient() || supabase;
+        if (client) {
+          // 1. Fetch cadets strictly enrolled in this academic term
+          const { data: cData, error: cErr } = await client
+            .from('cadets')
+            .select('*')
+            .eq('academic_term_id', currentTermId)
+            .order('name', { ascending: true });
+
+          if (!cErr && Array.isArray(cData) && isMounted) {
+            setTermCadets(cData);
+          }
+
+          // 2. Fetch attendance logs strictly for this term
+          const cadetIds = (cData || []).map((c) => c.id).filter(Boolean);
+          if (cadetIds.length > 0) {
+            const { data: lData, error: lErr } = await client
+              .from('attendance_logs')
+              .select('*, cadets(*)')
+              .in('cadet_id', cadetIds)
+              .order('date', { ascending: false });
+
+            if (!lErr && Array.isArray(lData) && isMounted) {
+              setTermLogs(lData);
+            }
+          } else {
+            if (isMounted) setTermLogs([]);
+          }
+        }
+      } catch (err) {
+        console.warn('[DashboardView] Dynamic term query error:', err);
+      }
+    }
+
+    fetchTermDashboardData();
+    return () => {
+      isMounted = false;
+    };
+  }, [currentTermId, onRefresh]);
+
   const { records: hookLogs = [], settings: hookSettings, activeCutoff, refreshFromStorage } = useAttendanceData();
   const rawMasterLogs = hookLogs && hookLogs.length > 0 ? hookLogs : propsLogs;
+
+  // Derive effective cadets strictly enrolled in this academic term
+  const effectiveCadets = useMemo(() => {
+    if (Array.isArray(termCadets)) return termCadets;
+    if (Array.isArray(propsCadets)) {
+      if (!currentTermId) return propsCadets;
+      return propsCadets.filter((c) => {
+        const tid = c.academic_term_id || c.academicTermId;
+        return String(tid || '') === String(currentTermId);
+      });
+    }
+    return [];
+  }, [termCadets, propsCadets, currentTermId]);
+
+  // Derive master logs for this term
+  const effectiveMasterLogs = useMemo(() => {
+    if (Array.isArray(termLogs)) return termLogs;
+    if (!currentTermId) return rawMasterLogs;
+    const validCadetIds = new Set(effectiveCadets.map((c) => String(c.id || c.cadetId || '').toUpperCase()));
+    return (rawMasterLogs || []).filter((l) => {
+      const cid = String(l.cadetId || l.cadet_id || l.id || '').toUpperCase();
+      return validCadetIds.has(cid);
+    });
+  }, [termLogs, rawMasterLogs, effectiveCadets, currentTermId]);
 
   const todayKey = useMemo(() => {
     const d = new Date();
@@ -118,10 +204,10 @@ export default function DashboardView({
     };
   }, [refreshFromStorage, onRefresh]);
 
-  // Resilient Date Filter: Command dashboard strictly observes today's session_date
+  // Resilient Date Filter: Command dashboard strictly observes today's session_date for the selected term
   const attendanceLogs = useMemo(() => {
-    if (!Array.isArray(rawMasterLogs)) return [];
-    return rawMasterLogs.filter(log => {
+    if (!Array.isArray(effectiveMasterLogs)) return [];
+    return effectiveMasterLogs.filter(log => {
       const rawDate = log.date || log.session_date || log.sessionDate || log.scanned_at || log.scannedAt || log.timestamp || log.time_in || log.timeIn || log.received_at || log.receivedAt || log.created_at;
       if (!rawDate) return false;
       const key = toDateKey(rawDate);
@@ -130,10 +216,16 @@ export default function DashboardView({
       if (typeof rawDate === 'string' && rawDate.length >= 10 && rawDate.slice(0, 10) === todayKey) return true;
       return false;
     });
-  }, [rawMasterLogs, todayKey]);
+  }, [effectiveMasterLogs, todayKey]);
 
   const hasTodayScans = attendanceLogs.length > 0;
   const formationCutoff = activeCutoff || hookSettings?.formation_cutoff_time || hookSettings?.morningCutoffTime || hookSettings?.formationCutoffTime || getActiveFormationCutoff() || '07:30';
+
+  // ── SDA Dynamic Session Merge ──────────────────────────────────────────────────────
+  // If at least 1 SDA scan exists today → Combined Drill (SDA included).
+  // If 0 SDA scans exist today      → Standard Regular Drill (SDA excluded).
+  const sdaMergeActive = useMemo(() => hasSDAScansInSession(attendanceLogs), [attendanceLogs]);
+  // ────────────────────────────────────────────────────────────────────────────
   
   const [cloudStructure, setCloudStructure] = useState(null);
   const [dbSessions, setDbSessions] = useState([]);
@@ -184,29 +276,16 @@ export default function DashboardView({
   };
 
   // 1. Dynamic Hierarchical Structure & Auto-Expanding Total Strength
+  // Strictly isolates to cadets enrolled in the active/selected academic term
   const dynamicHierarchy = useMemo(() => {
     const allCadetsMap = new Map();
-    (propsCadets || []).forEach(c => {
+    (effectiveCadets || []).forEach(c => {
       const cid = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
       if (cid) allCadetsMap.set(cid, {
         ...c,
         id: cid,
         cadetId: cid
       });
-    });
-    (rawMasterLogs || []).forEach(l => {
-      const cid = String(l.cadetId || l.cadet_id || l.id || l.i || '').trim().toUpperCase();
-      if (cid && !allCadetsMap.has(cid)) {
-        allCadetsMap.set(cid, {
-          id: cid,
-          cadetId: cid,
-          name: l.name || `Cadet ${cid}`,
-          rank: l.rank || 'Cadet',
-          battalion: l.battalion || '1st Battalion',
-          company: l.company || 'Alpha Company',
-          platoon: l.platoon || '1st Platoon'
-        });
-      }
     });
 
     const allCadetsList = Array.from(allCadetsMap.values());
@@ -268,16 +347,16 @@ export default function DashboardView({
       battalions,
       totalUnitStrength
     };
-  }, [propsCadets, rawMasterLogs, unitStructure]);
+  }, [effectiveCadets, unitStructure]);
 
   const [supabaseCadetCount, setSupabaseCadetCount] = useState(null);
 
-  // Fetch real-time Total Cadets from Supabase
+  // Fetch real-time Total Cadets from Supabase scoped strictly to current academic term
   useEffect(() => {
     let isMounted = true;
     const fetchUnitStrength = async () => {
       try {
-        const count = await fetchCadetCountFromSupabase();
+        const count = await fetchCadetCountFromSupabase(currentTermId);
         if (isMounted && typeof count === 'number' && count >= 0) {
           setSupabaseCadetCount(count);
         }
@@ -291,25 +370,42 @@ export default function DashboardView({
     return () => {
       isMounted = false;
     };
-  }, [propsCadets, rawMasterLogs]);
+  }, [currentTermId, effectiveCadets]);
 
-  const totalStrength = typeof supabaseCadetCount === 'number' && supabaseCadetCount > 0
+  const supabaseCadetCount_raw = typeof supabaseCadetCount === 'number' && supabaseCadetCount >= 0
     ? supabaseCadetCount
     : dynamicHierarchy.totalUnitStrength;
 
+  // Count of SDA cadets in master roster (used for effective strength adjustment)
+  const sdaExcludedCount = useMemo(() => {
+    if (sdaMergeActive) return 0;
+    return dynamicHierarchy.allCadetsList.filter(c => isSDACadet(c)).length;
+  }, [sdaMergeActive, dynamicHierarchy.allCadetsList]);
+
+  // Effective total strength: strictly equals cadets.length for the selected term
+  const totalStrength = sdaMergeActive
+    ? dynamicHierarchy.totalUnitStrength
+    : Math.max(0, dynamicHierarchy.totalUnitStrength - sdaExcludedCount);
+
   // 2. Dynamic Counts calculated directly from today's attendanceLogs
+  // Pass sdaMergeActive so SDA cadets are excluded in Standard Drills
   const { reconciledRoster: rawReconciledRoster, summary: rawSummary } = useMemo(() => {
     return reconcileRosterAttendance(
       dynamicHierarchy.allCadetsList,
       attendanceLogs,
       null,
-      formationCutoff
+      formationCutoff,
+      sdaMergeActive
     );
-  }, [dynamicHierarchy.allCadetsList, attendanceLogs, formationCutoff]);
+  }, [dynamicHierarchy.allCadetsList, attendanceLogs, formationCutoff, sdaMergeActive]);
 
   const reconciledRoster = useMemo(() => {
     if (!hasTodayScans) {
-      return dynamicHierarchy.allCadetsList.map(cadet => ({
+      // In Standard Drill (SDA excluded), also filter from the "NO SCAN TODAY" fallback
+      const base = sdaMergeActive
+        ? dynamicHierarchy.allCadetsList
+        : dynamicHierarchy.allCadetsList.filter(c => !isSDACadet(c));
+      return base.map(cadet => ({
         ...cadet,
         cadetId: cadet.id || cadet.cadetId,
         hasTimeIn: false,
@@ -323,7 +419,7 @@ export default function DashboardView({
       }));
     }
     return rawReconciledRoster;
-  }, [hasTodayScans, rawReconciledRoster, dynamicHierarchy.allCadetsList]);
+  }, [hasTodayScans, rawReconciledRoster, dynamicHierarchy.allCadetsList, sdaMergeActive]);
 
   const attendanceSummary = useMemo(() => {
     if (!hasTodayScans) {
@@ -437,6 +533,14 @@ export default function DashboardView({
 
   // Interactive Filtered Master Roster Records
   const tableFilteredCadets = reconciledRoster.filter(cadet => {
+    // ── SDA Dynamic Session Merge Guard ──────────────────────────────────────
+    // When Standard Regular Drill (no SDA scans detected), completely remove
+    // SDA cadets from the table — they must NOT appear as ABSENT or any status.
+    if (!sdaMergeActive && isSDACadet(cadet)) {
+      return false;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
       const id = String(cadet.cadetId || '').toLowerCase();
@@ -508,13 +612,86 @@ export default function DashboardView({
       {/* Header Banner */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h2 className="text-2xl font-black" style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
-            COMMAND DASHBOARD
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <h2 className="text-2xl font-black" style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
+              COMMAND DASHBOARD
+            </h2>
+            {activeTerm && (
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  padding: '2px 8px',
+                  borderRadius: '9999px',
+                  background: '#eff6ff',
+                  color: '#1d4ed8',
+                  border: '1px solid #bfdbfe',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <GraduationCap size={12} color="#1d4ed8" />
+                {activeTerm.academicYear} • {activeTerm.semester} ({String(activeTerm.status || '').toUpperCase()})
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '2px' }}>
             Live formation attendance and master unit records for {formatHumanDate(todayKey)}.
           </div>
         </div>
+
+        {/* SDA Dynamic Session Merge Status Indicator */}
+        {hasTodayScans && (
+          <div
+            title={
+              sdaMergeActive
+                ? 'Combined Drill: SDA Company cadets are scanned in this session and are included in the active roster and absence evaluation.'
+                : `Standard Regular Drill: No SDA Company scans detected. ${sdaExcludedCount > 0 ? `${sdaExcludedCount} SDA cadets excluded from target quota and absence marking.` : 'SDA cadets are excluded from quota and absence tracking.'}`
+            }
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.45rem',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '999px',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              letterSpacing: '0.4px',
+              textTransform: 'uppercase',
+              userSelect: 'none',
+              cursor: 'default',
+              background: sdaMergeActive
+                ? 'linear-gradient(135deg, rgba(6,78,46,0.12) 0%, rgba(16,185,129,0.15) 100%)'
+                : 'linear-gradient(135deg, rgba(180,120,0,0.12) 0%, rgba(245,158,11,0.15) 100%)',
+              border: sdaMergeActive
+                ? '1.5px solid rgba(6,78,46,0.35)'
+                : '1.5px solid rgba(180,120,0,0.35)',
+              color: sdaMergeActive ? 'var(--rotc-green-dark)' : '#92400e',
+              boxShadow: sdaMergeActive
+                ? '0 1px 6px rgba(6,78,46,0.10)'
+                : '0 1px 6px rgba(180,120,0,0.10)',
+              transition: 'all 0.3s ease'
+            }}
+          >
+            {/* Pulse dot */}
+            <span style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              flexShrink: 0,
+              background: sdaMergeActive ? '#10b981' : '#f59e0b',
+              boxShadow: sdaMergeActive
+                ? '0 0 0 2px rgba(16,185,129,0.25)'
+                : '0 0 0 2px rgba(245,158,11,0.25)',
+              animation: 'pulse 2s ease-in-out infinite'
+            }} />
+            {sdaMergeActive
+              ? '⛪ Combined Drill — SDA Included'
+              : `🔕 Standard Drill — SDA Excluded${sdaExcludedCount > 0 ? ` (${sdaExcludedCount})` : ''}`
+            }
+          </div>
+        )}
       </div>
 
       {/* Top Metric Cards: Unit Strength, Present, Late, No Time In/Out, No Scan Today, Excuse (6 Cards in 1 Row) */}

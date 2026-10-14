@@ -1,13 +1,24 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import basicSsl from '@vitejs/plugin-basic-ssl';
 
 export default defineConfig({
-  plugins: [react(), basicSsl()],
-  base: './',
+  plugins: [react()],
+  base: '/',
   server: {
     host: true,
     port: 3002,
-    strictPort: true,
+    https: true, // local dev only
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          scanner: ['html5-qrcode', 'jsqr'],
+        }
+      }
+    }
   }
 });

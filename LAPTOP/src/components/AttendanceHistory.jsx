@@ -29,7 +29,8 @@ import {
   Settings,
   FileText,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  GraduationCap
 } from 'lucide-react';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
 import DashboardUnitHierarchy from './DashboardUnitHierarchy';
@@ -41,7 +42,10 @@ import {
   normalizePlatoon,
   formatDisplayTime,
   parseTimestampMinutes,
-  parseCutoffMinutes
+  parseCutoffMinutes,
+  hasSDAScansInSession,
+  isSDACompany,
+  isSDACadet
 } from '../utils/attendanceStatus';
 import { exportAttendanceToExcel } from '../utils/excelExport';
 
@@ -139,8 +143,11 @@ import {
   fetchAttendanceSessionsFromSupabase,
   subscribeToHistoryRealtime,
   approveExcuseRequest,
-  rejectExcuseRequest
+  rejectExcuseRequest,
+  getSupabaseClient,
+  fetchAttendanceByDate
 } from '../utils/supabaseClient';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 
 export default function AttendanceHistory({
   cadets = [],
@@ -160,9 +167,94 @@ export default function AttendanceHistory({
   // True while the initial sessions fetch is in progress
   const [isSessionsLoading, setIsSessionsLoading] = useState(true);
 
+  // Live Joined Attendance State:
+  // Query attendance_logs joined with the updated cadets table directly from Supabase
+  // so that reassigned cadets immediately reflect their new platoon across all views.
+  const [liveJoinedDateLogs, setLiveJoinedDateLogs] = useState(null);
+  const [isJoinedQueryLoading, setIsJoinedQueryLoading] = useState(false);
+
   const formationCutoff = getActiveFormationCutoff();
   const todayKey = useMemo(() => toDateKey(new Date()), []);
   const calendarPopoverRef = useRef(null);
+
+  // ── Global Term Context Integration & Prevention of Cross-Semester Leaks ──
+  const {
+    academicTerms,
+    selectedTermId,
+    activeTermId,
+    setSelectedTermId,
+    setActiveTermId,
+    isLoadingTerms
+  } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+  const setCurrentTermId = setSelectedTermId || setActiveTermId;
+  const [termRosterCadets, setTermRosterCadets] = useState([]);
+  const [isRosterLoading, setIsRosterLoading] = useState(false);
+
+  // Query cadets table directly from Supabase filtered strictly by .eq('academic_term_id', currentTermId)
+  useEffect(() => {
+    let isCancelled = false;
+    const client = getSupabaseClient();
+    if (!client || !currentTermId) {
+      setTermRosterCadets([]);
+      return;
+    }
+
+    async function fetchTermCadetRoster() {
+      setIsRosterLoading(true);
+      try {
+        const { data, error } = await client
+          .from('cadets')
+          .select(`
+            id,
+            name,
+            rank,
+            battalion,
+            company,
+            platoon,
+            battalion_id,
+            company_id,
+            platoon_id,
+            type,
+            rotc_subject,
+            academic_term_id
+          `)
+          .eq('academic_term_id', currentTermId)
+          .order('name', { ascending: true });
+
+        if (!error && Array.isArray(data) && !isCancelled) {
+          setTermRosterCadets(data);
+        } else if (error) {
+          console.warn('[AttendanceHistory] Error querying term cadets:', error.message);
+        }
+      } catch (err) {
+        console.warn('[AttendanceHistory] Exception querying term cadets:', err);
+      } finally {
+        if (!isCancelled) setIsRosterLoading(false);
+      }
+    }
+
+    fetchTermCadetRoster();
+    return () => { isCancelled = true; };
+  }, [currentTermId]);
+
+  const selectedTerm = useMemo(() => {
+    return academicTerms.find(t => t.id === currentTermId) || null;
+  }, [academicTerms, currentTermId]);
+
+  // Roster strictly filtered by currentTermId to prevent cross-semester leaks:
+  const termFilteredCadets = useMemo(() => {
+    if (currentTermId) {
+      if (termRosterCadets && termRosterCadets.length > 0) {
+        return termRosterCadets;
+      }
+      return (effectiveCadets || []).filter(c => {
+        const tid = c.academic_term_id || c.academicTermId;
+        return tid && String(tid) === String(currentTermId);
+      });
+    }
+    return effectiveCadets;
+  }, [termRosterCadets, effectiveCadets, currentTermId]);
 
   // 1. Discover all unique formation dates with Strict Session Verification:
   //    Authoritative Source: attendance_sessions records from Supabase
@@ -172,8 +264,15 @@ export default function AttendanceHistory({
     const datesMap = new Map();
     const activeSessionDates = new Set();
 
+    // Filter dbSessions strictly for the selected term if academic_term_id is attached
+    const termSessions = dbSessions.filter((s) => {
+      const tid = s.academic_term_id || s.academicTermId;
+      if (!tid) return true; // Legacy untagged sessions stay visible
+      return String(tid) === String(currentTermId);
+    });
+
     // Source A: Populate authoritative session records from attendance_sessions
-    dbSessions.forEach((session) => {
+    termSessions.forEach((session) => {
       const key = session.dateKey;
       if (!key) return;
       activeSessionDates.add(key);
@@ -196,6 +295,11 @@ export default function AttendanceHistory({
 
     // Source B: Count actual scans — ONLY attached to dates that have an active session in attendance_sessions
     effectiveLogs.forEach((log) => {
+      // Exclude logs belonging to another academic term if academic_term_id is attached
+      if (currentTermId && log.academic_term_id && String(log.academic_term_id) !== String(currentTermId)) {
+        return;
+      }
+
       const rawDate = log.timestamp || log.date || log.receivedAt;
       const key = toDateKey(rawDate);
       if (!key) return;
@@ -225,7 +329,7 @@ export default function AttendanceHistory({
     return Array.from(datesMap.values())
       .filter(d => dbSessions.length > 0 ? d.hasSession : (d.scansCount > 0 || d.hasSession))
       .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
-  }, [effectiveLogs, dbSessions]);
+  }, [effectiveLogs, dbSessions, currentTermId]);
 
   // Auto-Purge Orphaned Local Storage Cache:
   // When active sessions are loaded from Supabase, remove any cached logs for deleted sessions
@@ -271,15 +375,18 @@ export default function AttendanceHistory({
       if (!selectedDate || !exists) {
         setSelectedDate(historicalDates[0].dateKey);
       }
+    } else {
+      setSelectedDate('');
     }
   }, [historicalDates, historicalDatesMap]);
+
 
   // Fetch attendance_sessions from Supabase on mount and whenever sessionsRefreshKey
   // changes. This populates the calendar independently of attendance_logs so formation
   // dates appear even when individual scan records haven't been loaded yet.
   useEffect(() => {
     setIsSessionsLoading(true);
-    fetchAttendanceSessionsFromSupabase()
+    fetchAttendanceSessionsFromSupabase(currentTermId)
       .then(sessions => {
         console.log('[AttendanceHistory] Supabase attendance_sessions fetch result:', sessions.length, 'records', sessions);
         setDbSessions(sessions);
@@ -288,7 +395,7 @@ export default function AttendanceHistory({
         console.error('[AttendanceHistory] Failed to fetch attendance_sessions from Supabase:', err);
       })
       .finally(() => setIsSessionsLoading(false));
-  }, [sessionsRefreshKey]);
+  }, [sessionsRefreshKey, currentTermId]);
 
   // Subscribe to Supabase Realtime for attendance_logs AND attendance_sessions.
   // On any change: trigger parent fetchData() for logs AND bump sessionsRefreshKey
@@ -302,6 +409,107 @@ export default function AttendanceHistory({
       if (channel) channel.unsubscribe();
     };
   }, [onRefresh]);
+
+  // Query live attendance_logs joined with the updated cadets table directly from Supabase
+  // with strict inner join on cadets.academic_term_id matching currentTermId
+  useEffect(() => {
+    let isCancelled = false;
+    const client = getSupabaseClient();
+    if (!client || !selectedDate) {
+      setLiveJoinedDateLogs(null);
+      return;
+    }
+
+    async function queryLiveAttendanceWithCadetJoin() {
+      setIsJoinedQueryLoading(true);
+      try {
+        let query = client
+          .from('attendance_logs')
+          .select(`
+            *,
+            cadets!inner (
+              id,
+              name,
+              rank,
+              battalion,
+              company,
+              platoon,
+              battalion_id,
+              company_id,
+              platoon_id,
+              academic_term_id
+            )
+          `)
+          .eq('date', selectedDate);
+
+        if (currentTermId) {
+          query = query.eq('cadets.academic_term_id', currentTermId);
+        }
+
+        const { data: joinedData, error: joinErr } = await query.order('time_in', { ascending: true });
+
+        if (joinErr) {
+          console.warn('[AttendanceHistory] Live joined query notice, falling back to fetchAttendanceByDate:', joinErr.message);
+          const fallback = await fetchAttendanceByDate(selectedDate);
+          if (!isCancelled && Array.isArray(fallback)) {
+            // Strictly filter fallback logs by currentTermId
+            const filteredFallback = currentTermId
+              ? fallback.filter(l => {
+                  const tid = l.academic_term_id || l.academicTermId;
+                  if (tid && String(tid) === String(currentTermId)) return true;
+                  const cMatch = (termFilteredCadets || []).find(c => {
+                    const cId = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+                    const logCid = String(l.cadet_id || l.cadetId || '').trim().toUpperCase();
+                    return cId === logCid;
+                  });
+                  return Boolean(cMatch);
+                })
+              : fallback;
+            setLiveJoinedDateLogs(filteredFallback);
+          }
+        } else if (!isCancelled && Array.isArray(joinedData)) {
+          const mapped = joinedData.map(l => {
+            const live = l.cadets || l.cadet;
+            const livePl = live?.platoon || live?.platoon_name || l.platoon;
+            const liveCo = live?.company || live?.company_name || l.company;
+            const liveBn = live?.battalion || live?.battalion_name || l.battalion;
+            return {
+              ...l,
+              cadet_id: live?.id || l.cadet_id,
+              cadetId: live?.id || l.cadet_id,
+              name: live?.name || l.name,
+              rank: live?.rank || l.rank,
+              battalion: liveBn,
+              battalion_name: liveBn,
+              company: liveCo,
+              company_name: liveCo,
+              platoon: livePl,
+              platoon_name: livePl,
+              platoon_id: live?.platoon_id || l.platoon_id,
+              company_id: live?.company_id || l.company_id,
+              battalion_id: live?.battalion_id || l.battalion_id,
+              academic_term_id: live?.academic_term_id || l.academic_term_id,
+              academicTermId: live?.academic_term_id || l.academic_term_id,
+              timeIn: l.time_in,
+              timeOut: l.time_out,
+              status: l.final_daily_status || l.status,
+              finalDailyStatus: l.final_daily_status || l.status
+            };
+          });
+          setLiveJoinedDateLogs(mapped);
+        }
+      } catch (err) {
+        console.warn('[AttendanceHistory] Error querying live attendance joined data:', err);
+      } finally {
+        if (!isCancelled) {
+          setIsJoinedQueryLoading(false);
+        }
+      }
+    }
+
+    queryLiveAttendanceWithCadetJoin();
+    return () => { isCancelled = true; };
+  }, [selectedDate, sessionsRefreshKey, currentTermId]);
 
   // Guard: whether the currently selected date actually has recorded formation data
   // and has a verified active session in attendance_sessions
@@ -414,6 +622,67 @@ export default function AttendanceHistory({
     return parseCutoffMinutes(cutoff);
   }, [selectedSessionCutoff, formationCutoff]);
 
+  // Session Verification: Pass only logs matching this verified session date
+  // Prioritizes liveJoinedDateLogs (joined with live cadets table) if available, falling back to effectiveLogs
+  const verifiedDateLogs = useMemo(() => {
+    if (!selectedDate) return [];
+
+    // Secondary live join against termFilteredCadets ensuring 100% sync even when offline or cached
+    const cadetsMap = new Map();
+    (termFilteredCadets || []).forEach(c => {
+      const id = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+      if (id) cadetsMap.set(id, c);
+    });
+
+    const baseLogs = (liveJoinedDateLogs && Array.isArray(liveJoinedDateLogs))
+      ? liveJoinedDateLogs
+      : (effectiveLogs || []).filter(l => {
+          const ld = toDateKey(l.date || l.session_date || l.timestamp || l.receivedAt);
+          return ld === selectedDate;
+        });
+
+    return baseLogs
+      .filter(log => {
+        // Strict filter: When currentTermId is active, ONLY keep logs for cadets who belong to termFilteredCadets
+        if (currentTermId) {
+          const cid = String(log.cadet_id || log.cadetId || '').trim().toUpperCase();
+          if (!cadetsMap.has(cid)) return false;
+        }
+        return true;
+      })
+      .map(log => {
+        const cid = String(log.cadet_id || log.cadetId || '').trim().toUpperCase();
+        const live = cadetsMap.get(cid);
+        if (live) {
+          const livePl = live.platoon || live.platoon_name || log.platoon || log.platoon_name;
+          const liveCo = live.company || live.company_name || log.company || log.company_name;
+          const liveBn = live.battalion || live.battalion_name || log.battalion || log.battalion_name;
+          return {
+            ...log,
+            name: live.name || log.name,
+            rank: live.rank || log.rank,
+            battalion: liveBn,
+            battalion_name: liveBn,
+            company: liveCo,
+            company_name: liveCo,
+            platoon: livePl,
+            platoon_name: livePl
+          };
+        }
+        return {
+          ...log,
+          platoon_name: log.platoon_name || log.platoon,
+          company_name: log.company_name || log.company,
+          battalion_name: log.battalion_name || log.battalion
+        };
+      });
+  }, [liveJoinedDateLogs, effectiveLogs, selectedDate, termFilteredCadets, currentTermId]);
+
+  // SDA Dynamic Session Merge: detect if this historical session included SDA scans
+  const sdaMergeActive = useMemo(() => {
+    return hasSDAScansInSession(verifiedDateLogs);
+  }, [verifiedDateLogs]);
+
   // 2. Reconcile complete cadet roster ONLY if the date has recorded formation data
   // Empty State Guard: If unrecorded, return 0 counts to prevent false absentee generation
   const { reconciledRoster, summary } = useMemo(() => {
@@ -430,19 +699,55 @@ export default function AttendanceHistory({
       };
     }
 
-    // Session Verification: Pass only logs matching this verified session date
-    const verifiedDateLogs = (effectiveLogs || []).filter(l => {
-      const ld = toDateKey(l.date || l.session_date || l.timestamp || l.receivedAt);
-      return ld === selectedDate;
-    });
-
-    return reconcileRosterAttendance(
-      effectiveCadets,
+    const rawReconciliation = reconcileRosterAttendance(
+      sdaMergeActive
+        ? termFilteredCadets
+        : termFilteredCadets.filter(c => !isSDACadet(c)),
       verifiedDateLogs,
       new Date(`${selectedDate}T12:00:00`),
-      selectedSessionCutoff
+      selectedSessionCutoff,
+      sdaMergeActive
     );
-  }, [effectiveCadets, effectiveLogs, selectedDate, isRecordedDate, selectedSessionCutoff]);
+
+    // Build map of live cadets by ID
+    const cadetsMap = new Map();
+    (termFilteredCadets || []).forEach(c => {
+      const id = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+      if (id) cadetsMap.set(id, c);
+    });
+
+    // Guarantee that every cadet in the reconciled roster uses their live updated platoon/company/battalion
+    // and STRICTLY belongs to the active currentTermId (excluding any out-of-semester virtual cadets)
+    const liveEnrichedRoster = (rawReconciliation.reconciledRoster || [])
+      .filter(c => {
+        if (!currentTermId) return true;
+        const cid = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+        return cadetsMap.has(cid);
+      })
+      .map(c => {
+        const cid = String(c.id || c.cadetId || c.cadet_id || '').trim().toUpperCase();
+        const live = cadetsMap.get(cid);
+        const livePl = live?.platoon || live?.platoon_name || c.platoon || c.platoon_name;
+        const liveCo = live?.company || live?.company_name || c.company || c.company_name;
+        const liveBn = live?.battalion || live?.battalion_name || c.battalion || c.battalion_name;
+        return {
+          ...c,
+          name: live?.name || c.name,
+          rank: live?.rank || c.rank,
+          platoon: livePl,
+          platoon_name: livePl,
+          company: liveCo,
+          company_name: liveCo,
+          battalion: liveBn,
+          battalion_name: liveBn
+        };
+      });
+
+    return {
+      reconciledRoster: liveEnrichedRoster,
+      summary: rawReconciliation.summary
+    };
+  }, [termFilteredCadets, verifiedDateLogs, selectedDate, isRecordedDate, selectedSessionCutoff, sdaMergeActive, currentTermId]);
 
   // Dynamic summary derived directly from the reconciled roster to guarantee KPI card consistency
   const displaySummary = useMemo(() => {
@@ -527,6 +832,8 @@ export default function AttendanceHistory({
     if (!isRecordedDate) return [];
 
     return reconciledRoster.filter((cadet) => {
+      if (!sdaMergeActive && isSDACadet(cadet)) return false;
+
       const isValidTimeVal = (val) => {
         if (!val) return false;
         const s = String(val).trim().toUpperCase();
@@ -569,21 +876,21 @@ export default function AttendanceHistory({
 
       // 2. Battalion Filter
       if (selectedBattalion) {
-        const cadetBn = normalizeBattalion(cadet.battalion);
+        const cadetBn = normalizeBattalion(cadet.battalion_name || cadet.battalion);
         const filterBn = normalizeBattalion(selectedBattalion);
         if (cadetBn !== filterBn) return false;
       }
 
       // 3. Company Filter
       if (selectedCompany) {
-        const cadetCo = normalizeCompany(cadet.company);
+        const cadetCo = normalizeCompany(cadet.company_name || cadet.company);
         const filterCo = normalizeCompany(selectedCompany);
         if (cadetCo !== filterCo) return false;
       }
 
       // 4. Platoon Filter
       if (selectedPlatoon) {
-        const cadetPl = normalizePlatoon(cadet.platoon);
+        const cadetPl = normalizePlatoon(cadet.platoon_name || cadet.platoon);
         const filterPl = normalizePlatoon(selectedPlatoon);
         if (cadetPl !== filterPl) return false;
       }
@@ -593,14 +900,14 @@ export default function AttendanceHistory({
         const q = searchQuery.toLowerCase().trim();
         const matchId = cadet.cadetId && cadet.cadetId.toLowerCase().includes(q);
         const matchName = cadet.name && cadet.name.toLowerCase().includes(q);
-        const matchCo = cadet.company && cadet.company.toLowerCase().includes(q);
-        const matchPl = cadet.platoon && cadet.platoon.toLowerCase().includes(q);
+        const matchCo = (cadet.company_name || cadet.company) && (cadet.company_name || cadet.company).toLowerCase().includes(q);
+        const matchPl = (cadet.platoon_name || cadet.platoon) && (cadet.platoon_name || cadet.platoon).toLowerCase().includes(q);
         if (!matchId && !matchName && !matchCo && !matchPl) return false;
       }
 
       return true;
     });
-  }, [reconciledRoster, isRecordedDate, statusFilter, selectedBattalion, selectedCompany, selectedPlatoon, searchQuery]);
+  }, [reconciledRoster, isRecordedDate, statusFilter, selectedBattalion, selectedCompany, selectedPlatoon, searchQuery, sdaMergeActive]);
 
   // Navigate between recorded formation dates step-by-step
   const handleStepDate = (direction) => {
@@ -640,9 +947,9 @@ export default function AttendanceHistory({
           cadetId: r.cadetId || r.id || 'N/A',
           name: r.name || 'Cadet',
           rank: r.rank || 'Cadet',
-          battalion: r.battalion || '1st Battalion',
-          company: r.company || 'Alpha Company',
-          platoon: r.platoon || '1st Platoon',
+          battalion: r.battalion_name || r.battalion || '1st Battalion',
+          company: r.company_name || r.company || 'Alpha Company',
+          platoon: r.platoon_name || r.platoon || '1st Platoon',
           timeIn: timeInVal,
           timeOut: timeOutVal,
           timeInDisplay: r.timeInDisplay || timeInVal,
@@ -794,6 +1101,7 @@ export default function AttendanceHistory({
 
           {/* Action Buttons */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+
 
             <button
               type="button"
@@ -1122,6 +1430,26 @@ export default function AttendanceHistory({
             {isTodaySelected && (
               <span style={{ fontSize: '0.68rem', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', background: '#dcfce7', color: '#15803d', border: '1px solid #bbf7d0' }}>
                 LIVE TODAY
+              </span>
+            )}
+            {selectedTerm && (
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  padding: '2px 7px',
+                  borderRadius: '4px',
+                  background: '#eff6ff',
+                  color: '#1e40af',
+                  border: '1px solid #bfdbfe',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+                title={`Academic Term: ${selectedTerm.academicYear} • ${selectedTerm.semester}`}
+              >
+                <GraduationCap size={11} color="#1d4ed8" />
+                {selectedTerm.academicYear} • {selectedTerm.semester}
               </span>
             )}
           </div>
@@ -1655,21 +1983,21 @@ export default function AttendanceHistory({
                           {/* Soft Pill Tag: Battalion */}
                           <td style={{ padding: '12px 16px' }}>
                             <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#334155', border: '1px solid #e2e8f0' }}>
-                              {cadet.battalion}
+                              {cadet.battalion_name || cadet.battalion}
                             </span>
                           </td>
 
                           {/* Soft Pill Tag: Company */}
                           <td style={{ padding: '12px 16px' }}>
                             <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', background: '#f8fafc', color: '#475569', border: '1px solid #e2e8f0' }}>
-                              {cadet.company}
+                              {cadet.company_name || cadet.company}
                             </span>
                           </td>
 
                           {/* Soft Pill Tag: Platoon */}
                           <td style={{ padding: '12px 16px' }}>
                             <span style={{ fontSize: '0.72rem', fontWeight: 600, padding: '3px 8px', borderRadius: '6px', background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}>
-                              {cadet.platoon}
+                              {cadet.platoon_name || cadet.platoon}
                             </span>
                           </td>
 

@@ -49,9 +49,8 @@ export async function fetchActiveLetterhead(providedLetterhead = null) {
         // Extract motto, heading, unit name, address/location from system_settings
         const topMotto = data.motto_text || data.top_motto || lhConfig.motto_text || lhConfig.mottoText || lhConfig.topMotto || DEFAULT_LETTERHEAD.topMotto;
         const headquarters = data.heading_title || data.headquarters || lhConfig.heading_title || lhConfig.headingTitle || lhConfig.headquarters || DEFAULT_LETTERHEAD.headquarters;
-        const unitName = data.unit_name || data.unitName || lhConfig.unit_name || lhConfig.unitName || DEFAULT_LETTERHEAD.unitName;
-        const parentCommand = data.parent_command || data.parentCommand || lhConfig.parent_command || lhConfig.parentCommand || DEFAULT_LETTERHEAD.parentCommand;
-        const location = data.unit_address || data.host_institution || data.hostInstitution || data.location || lhConfig.unit_address || lhConfig.unitAddress || lhConfig.location || DEFAULT_LETTERHEAD.location;
+        const parentCommand = data.rcdg_name || data.parent_command || data.parentCommand || lhConfig.rcdg_name || lhConfig.parent_command || lhConfig.parentCommand || DEFAULT_LETTERHEAD.parentCommand;
+        const location = data.school_name || data.host_institution || data.hostInstitution || data.unit_address || data.location || lhConfig.school_name || lhConfig.host_institution || lhConfig.unit_address || lhConfig.unitAddress || lhConfig.location || DEFAULT_LETTERHEAD.location;
         const officeSymbol = data.office_symbol || data.officeSymbol || lhConfig.office_symbol || lhConfig.officeSymbol || DEFAULT_LETTERHEAD.officeSymbol;
 
         // Base64 seal images or URL paths

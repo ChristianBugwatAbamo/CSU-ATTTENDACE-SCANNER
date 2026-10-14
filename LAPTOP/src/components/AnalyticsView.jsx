@@ -46,6 +46,7 @@ import {
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { Line, Doughnut, Bar } from 'react-chartjs-2';
 import { getSupabaseClient } from '../utils/supabaseClient';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 import {
   evaluateCadetAttendance,
   calculateCadetAttendanceStats,
@@ -54,7 +55,7 @@ import {
   ACTIVE_FORMATION_DATES,
   toDateKey as normalizeDateKey
 } from '../utils/attendanceRules';
-import { reconcileRosterAttendance } from '../utils/attendanceStatus';
+import { reconcileRosterAttendance, hasSDAScansInSession, isSDACompany, isSDACadet } from '../utils/attendanceStatus';
 
 // Register Chart.js components + DataLabels plugin
 ChartJS.register(
@@ -346,6 +347,10 @@ export default function AnalyticsView({
   onRefresh,
   onNavigateToHistory
 }) {
+  const { selectedTermId, activeTermId, selectedTerm, activeTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+  const effectiveTerm = selectedTerm || activeTerm;
+
   const [selectedSemester, setSelectedSemester] = useState('1ST_SEM_2025_2026');
   const [isCollegeChartStacked, setIsCollegeChartStacked] = useState(false);
   const [flaggedCadets, setFlaggedCadets] = useState([]);
@@ -392,27 +397,46 @@ export default function AnalyticsView({
       let cadetsData = [];
       let sessionsData = [];
 
-      // 1. Fetch cadets with their attendance logs & recorded sessions from Supabase
+      // 1. Fetch cadets strictly for the selected term with attendance logs & recorded sessions from Supabase
       if (client) {
-        const { data: cData, error: cErr } = await client
+        let cQuery = client
           .from('cadets')
-          .select('id, name, battalion, company, platoon, contact_number, emergency_contact, attendance_logs(date, status, timestamp, time_in, time_out, scan_mode, final_daily_status, time_in_status, time_out_status)');
-        if (!cErr && Array.isArray(cData) && cData.length > 0) {
+          .select('id, name, battalion, company, platoon, contact_number, emergency_contact, academic_term_id, attendance_logs(date, status, timestamp, time_in, time_out, scan_mode, final_daily_status, time_in_status, time_out_status)');
+
+        if (currentTermId) {
+          cQuery = cQuery.eq('academic_term_id', currentTermId);
+        }
+
+        const { data: cData, error: cErr } = await cQuery;
+        if (!cErr && Array.isArray(cData)) {
           cadetsData = cData;
         }
 
-        const { data: sData } = await client
+        let sQuery = client
           .from('attendance_sessions')
-          .select('session_date, date');
+          .select('session_date, date, academic_term_id');
+
+        if (currentTermId) {
+          sQuery = sQuery.eq('academic_term_id', currentTermId);
+        }
+
+        const { data: sData } = await sQuery;
         if (Array.isArray(sData)) {
           sessionsData = sData;
         }
       }
 
-      // Fallback to props / local master roster + logs if Supabase query is unavailable or empty
+      // Fallback to props / local master roster + logs if Supabase query is unavailable
       if (cadetsData.length === 0) {
         const sourceCadets = (propsCadets && propsCadets.length > 0) ? propsCadets : liveCadets;
-        cadetsData = (sourceCadets || []).map(cadet => {
+        const scopedSource = currentTermId
+          ? (sourceCadets || []).filter(c => {
+              const tid = c.academic_term_id || c.academicTermId;
+              return String(tid || '') === String(currentTermId);
+            })
+          : (sourceCadets || []);
+
+        cadetsData = scopedSource.map(cadet => {
           const cId = String(cadet.id || cadet.cadet_id || '').trim().toUpperCase();
           const logs = (propsLogs || []).filter(l => String(l.cadet_id || l.cadetId || '').trim().toUpperCase() === cId);
           return {
@@ -422,6 +446,7 @@ export default function AnalyticsView({
             company: cadet.company || 'Alpha Company',
             platoon: cadet.platoon || '1st Platoon',
             contact_number: cadet.contact_number || cadet.contactNumber || cadet.phone || '',
+            academic_term_id: cadet.academic_term_id || cadet.academicTermId || null,
             attendance_logs: logs
           };
         });
@@ -471,7 +496,7 @@ export default function AnalyticsView({
 
   useEffect(() => {
     fetchAndEvaluateAttendance();
-  }, [propsCadets, propsLogs]);
+  }, [propsCadets, propsLogs, currentTermId]);
 
   const [growthData, setGrowthData] = useState({
     labels: [],
@@ -512,12 +537,18 @@ export default function AnalyticsView({
         let fetchedCadetsList = [];
 
         if (client) {
-          const { data: allCadets, error: cadetErr } = await client
+          let cadetQuery = client
             .from('cadets')
             .select('*')
             .order('created_at', { ascending: true });
 
-          if (!cadetErr && Array.isArray(allCadets) && allCadets.length > 0) {
+          if (currentTermId) {
+            cadetQuery = cadetQuery.eq('academic_term_id', currentTermId);
+          }
+
+          const { data: allCadets, error: cadetErr } = await cadetQuery;
+
+          if (!cadetErr && Array.isArray(allCadets)) {
             fetchedCadetsList = allCadets;
             if (isMounted) {
               setLiveCadets(allCadets);
@@ -604,20 +635,30 @@ export default function AnalyticsView({
         const dailyPresentMap = new Map(); // dateKey -> Set of unique cadet_ids
 
         if (client) {
-          // Session Verification: Verify active sessions so orphaned logs from deleted dates are excluded
-          const { data: activeSessions } = await client
+          // Session Verification: Verify active sessions strictly for the selected term
+          let sessQuery = client
             .from('attendance_sessions')
-            .select('session_date');
+            .select('session_date, academic_term_id');
+          if (currentTermId) {
+            sessQuery = sessQuery.eq('academic_term_id', currentTermId);
+          }
+          const { data: activeSessions } = await sessQuery;
 
           const validSessionDates = new Set(
             (activeSessions || []).map(s => toDateKey(s.session_date)).filter(Boolean)
           );
 
-          const { data: logs, error: logsError } = await client
-            .from('attendance_logs')
-            .select('cadet_id, date, timestamp, status, final_daily_status');
+          const termCadetIds = (fetchedCadetsList || []).map(c => c.id).filter(Boolean);
+          let logs = [];
+          if (termCadetIds.length > 0) {
+            const { data: logsData, error: logsError } = await client
+              .from('attendance_logs')
+              .select('cadet_id, date, timestamp, status, final_daily_status')
+              .in('cadet_id', termCadetIds);
+            if (!logsError && Array.isArray(logsData)) logs = logsData;
+          }
 
-          if (!logsError && Array.isArray(logs) && logs.length > 0) {
+          if (Array.isArray(logs) && logs.length > 0) {
             logs.forEach(curr => {
               // Always prioritize actual drill date over row creation metadata
               const rawDate = curr.date || curr.timestamp;
@@ -644,10 +685,14 @@ export default function AnalyticsView({
               }
             });
           } else {
-            const { data: sessions, error: sessErr } = await client
+            let sessionsQuery = client
               .from('attendance_sessions')
-              .select('session_date, present_count, late_count, total_scanned')
+              .select('session_date, present_count, late_count, total_scanned, academic_term_id')
               .order('session_date', { ascending: true });
+            if (currentTermId) {
+              sessionsQuery = sessionsQuery.eq('academic_term_id', currentTermId);
+            }
+            const { data: sessions, error: sessErr } = await sessionsQuery;
 
             if (!sessErr && Array.isArray(sessions) && sessions.length > 0) {
               sessions.forEach(curr => {
@@ -692,7 +737,7 @@ export default function AnalyticsView({
           });
         }
 
-        const unitCapacity = totalCount > 0 ? totalCount : 33;
+        const unitCapacity = totalCount > 0 ? totalCount : 1;
         const sortedDateKeys = Array.from(formationDatesSet).sort();
 
         const labels = sortedDateKeys.map(key => {
@@ -752,11 +797,16 @@ export default function AnalyticsView({
       isMounted = false;
       window.removeEventListener('local-cadet-update', handleCadetUpdated);
     };
-  }, [liveCadets.length, propsCadets, propsLogs]);
+  }, [liveCadets.length, propsCadets, propsLogs, currentTermId]);
 
   const activeCadets = useMemo(() => {
-    return liveCadets && liveCadets.length > 0 ? liveCadets : (propsCadets || []);
-  }, [liveCadets, propsCadets]);
+    const list = liveCadets && liveCadets.length > 0 ? liveCadets : (propsCadets || []);
+    if (!currentTermId) return list;
+    return list.filter((c) => {
+      const tid = c.academic_term_id || c.academicTermId;
+      return String(tid || '') === String(currentTermId);
+    });
+  }, [liveCadets, propsCadets, currentTermId]);
 
   const collegeGenderData = useMemo(() => {
     const colleges = [
@@ -1089,11 +1139,16 @@ export default function AnalyticsView({
     let absent = 0;
 
     if (todayLogs.length > 0) {
-      const { summary } = reconcileRosterAttendance(cadetList, todayLogs, todayKey);
+      // SDA Dynamic Session Merge: detect if today's session included SDA scans
+      const sdaMergeActive = hasSDAScansInSession(todayLogs);
+      const effectiveCadetList = sdaMergeActive
+        ? cadetList
+        : cadetList.filter(c => !isSDACadet(c));
+      const { summary } = reconcileRosterAttendance(effectiveCadetList, todayLogs, todayKey, '07:30', sdaMergeActive);
       present = summary?.presentCompleteCount || 0;
       late = summary?.lateCompleteCount || 0;
       noTimeInOut = summary?.incompleteCount || 0;
-      absent = Math.max(0, total - (present + late + noTimeInOut));
+      absent = Math.max(0, (sdaMergeActive ? total : Math.max(0, total - cadetList.filter(c => !sdaMergeActive && isSDACadet(c)).length)) - (present + late + noTimeInOut));
     } else {
       absent = total;
     }
@@ -1175,11 +1230,29 @@ export default function AnalyticsView({
       {/* Top Header Banner: Analytics & Reports */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.85rem' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
             <h2 style={{ color: 'var(--rotc-green-dark)', fontFamily: 'Oswald, sans-serif', fontSize: '1.5rem', margin: 0, letterSpacing: '0.5px' }}>
               ANALYTICS & REPORTS
             </h2>
-
+            {effectiveTerm && (
+              <span
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  padding: '3px 9px',
+                  borderRadius: '9999px',
+                  background: String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#ecfdf5' : '#f1f5f9',
+                  color: String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#047857' : '#475569',
+                  border: `1px solid ${String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#a7f3d0' : '#cbd5e1'}`,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px'
+                }}
+              >
+                <GraduationCap size={13} />
+                {effectiveTerm.academicYear} • {effectiveTerm.semester} ({String(effectiveTerm.status || '').toUpperCase()})
+              </span>
+            )}
           </div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px' }}>
             Official CSU ROTC single-semester cadet demographics, gender distributions, geographic origins, and turnout trends.

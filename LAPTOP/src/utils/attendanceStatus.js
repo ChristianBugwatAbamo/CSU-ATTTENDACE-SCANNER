@@ -310,7 +310,18 @@ export function normalizeDateKey(dateInput) {
  * Reconciles the full cadet roster against attendance scan records.
  * Returns the enriched list of reconciled cadets + attendance summary breakdown.
  */
-export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sessionDate = null, cutoffTimeStr = '07:30') {
+/**
+ * Reconciles the full cadet roster against attendance scan records.
+ * Returns the enriched list of reconciled cadets + attendance summary breakdown.
+ *
+ * @param {Array}   cadets          - master cadet roster
+ * @param {Array}   attendanceLogs  - today's scan records
+ * @param {string}  sessionDate     - optional YYYY-MM-DD filter
+ * @param {string}  cutoffTimeStr   - formation Time-In cutoff (default '07:30')
+ * @param {boolean} sdaMergeActive  - if false, SDA cadets are completely excluded
+ *                                    from target quota and absence marking
+ */
+export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sessionDate = null, cutoffTimeStr = '07:30', sdaMergeActive = true) {
   const targetDateKey = sessionDate ? normalizeDateKey(sessionDate) : null;
 
   const isValidTimeVal = (val) => {
@@ -396,11 +407,18 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
 
   const reconciledList = [];
   const processedIds = new Set();
+  const sdaSkippedIds = new Set();
 
   // 1. Process all registered cadets from master roster
+  // If sdaMergeActive is false, silently skip SDA cadets — they are excluded
+  // from both the target quota and absence evaluation for Standard Drills.
   cadets.forEach(cadet => {
     const id = String(cadet.id || cadet.cadetId || cadet.cadet_id || '').trim().toUpperCase();
-    processedIds.add(id);
+    if (!sdaMergeActive && isSDACadet(cadet)) {
+      if (id) sdaSkippedIds.add(id);
+      return;
+    }
+    if (id) processedIds.add(id);
     const logsGroup = cadetLogsMap.get(id);
     const timeInScan = logsGroup ? logsGroup.timeIn : null;
     const timeOutScan = logsGroup ? logsGroup.timeOut : null;
@@ -422,7 +440,9 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
   // 2. Include any scanned cadets not present in the static roster
   cadetLogsMap.forEach((logsGroup, id) => {
     if (!processedIds.has(id)) {
+      if (!sdaMergeActive && sdaSkippedIds.has(id)) return;
       const sample = logsGroup.timeIn || logsGroup.timeOut || logsGroup.all[0];
+      if (!sdaMergeActive && isSDACadet(sample)) return;
       const virtualCadet = {
         id: sample.cadetId || sample.cadet_id || id,
         name: sample.name || sample.cadetName || 'Cadet ' + id,
@@ -473,6 +493,84 @@ export function reconcileRosterAttendance(cadets = [], attendanceLogs = [], sess
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SDA DYNAMIC SESSION MERGE UTILITIES
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the given company field identifies the Seventh-day Adventist
+ * (SDA) Company, supporting all known field variants:
+ *   - coy_code: 'SDA'
+ *   - company: 'Seventh-day Adventist' | 'Seventh-day Adventist Company'
+ *   - shortCode: 'SDA'
+ */
+export function isSDACompany(companyVal) {
+  if (!companyVal) return false;
+  const s = String(companyVal).trim().toUpperCase();
+  return (
+    s === 'SDA' ||
+    s.includes('SEVENTH') ||
+    s.includes('ADVENTIST') ||
+    s.includes('7TH DAY') ||
+    s.includes('7-DAY')
+  );
+}
+
+/**
+ * Returns true if the given cadet or log object belongs to Seventh-day Adventist Company.
+ * Inspects all known company/coy fields.
+ */
+export function isSDACadet(cadet) {
+  if (!cadet) return false;
+  return Boolean(
+    isSDACompany(cadet.company) ||
+    isSDACompany(cadet.coy_code) ||
+    isSDACompany(cadet.shortCode) ||
+    isSDACompany(cadet.company_code) ||
+    isSDACompany(cadet.coy) ||
+    isSDACompany(cadet.companyName) ||
+    isSDACompany(cadet.battalion) ||
+    (cadet.sessionName && (
+      String(cadet.sessionName).toUpperCase().includes('SEVENTH') ||
+      String(cadet.sessionName).toUpperCase().includes('ADVENTIST') ||
+      String(cadet.sessionName).toUpperCase().includes('SDA')
+    ))
+  );
+}
+
+/**
+ * Inspects a list of today's attendance scan records and returns true if AT
+ * LEAST ONE scan belongs to an SDA Company cadet.
+ *
+ * SDA cadet detection checks (in priority order):
+ *   1. isSDACadet(log)
+ *   2. log.coy_code === 'SDA'
+ *   3. log.company matches any SDA variant (isSDACompany)
+ *   4. log.sessionName contains 'Seventh' or 'Adventist' or 'SDA'
+ *
+ * A session with ≥ 1 SDA scan is treated as a **Combined Drill** — SDA cadets
+ * are automatically included in roster computation and absence evaluation.
+ * A session with 0 SDA scans is treated as a **Standard Regular Drill** —
+ * SDA cadets are fully excluded (no absent marks, no quota impact).
+ *
+ * @param {Array} logs - today's filtered attendance scan records
+ * @returns {boolean}
+ */
+export function hasSDAScansInSession(logs = []) {
+  if (!Array.isArray(logs) || logs.length === 0) return false;
+  return logs.some(log => {
+    if (!log) return false;
+    if (isSDACadet(log)) return true;
+    if (log.coy_code && String(log.coy_code).trim().toUpperCase() === 'SDA') return true;
+    if (log.company && isSDACompany(log.company)) return true;
+    if (log.sessionName) {
+      const sn = String(log.sessionName).toUpperCase();
+      if (sn.includes('SEVENTH') || sn.includes('ADVENTIST') || sn.includes(' SDA')) return true;
+    }
+    return false;
+  });
+}
+
 /**
  * Normalizes Battalion identifier ('1', '2', 'OFFICER', etc.)
  */
@@ -495,6 +593,10 @@ export function normalizeCompany(val) {
   if (s.includes('bravo')) return 'bravo';
   if (s.includes('charlie')) return 'charlie';
   if (s.includes('delta')) return 'delta';
+  if (s.includes('echo')) return 'echo';
+  if (s.includes('foxtrot')) return 'foxtrot';
+  // SDA must be checked before 'officer' to avoid false-positive on 'Cadet Officer Company'
+  if (s === 'sda' || s.includes('seventh') || s.includes('adventist')) return 'sda';
   if (s.includes('hq') || s.includes('headquarters') || s.includes('officer')) return 'officer';
   return s.replace(' company', '').trim();
 }

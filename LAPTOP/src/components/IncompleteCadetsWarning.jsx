@@ -1,7 +1,7 @@
 import React from 'react';
 import { AlertTriangle, ChevronRight } from 'lucide-react';
 
-export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
+export default function IncompleteCadetsWarning({ cadets = [], onEditCadet, isReadOnlyTerm = false }) {
   // Filter cadets missing any essential detail
   const incompleteCadets = cadets.filter((cadet) => {
     const isMissingDept = !cadet.department;
@@ -21,7 +21,8 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
     );
   });
 
-  if (incompleteCadets.length === 0) return null;
+  // When inspecting an ARCHIVED term, completely hide/unmount the warning banner
+  if (isReadOnlyTerm || incompleteCadets.length === 0) return null;
 
   return (
     <div
@@ -85,7 +86,9 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
               margin: '2px 0 0 0'
             }}
           >
-            The following cadets are missing critical details. Click any item below to update.
+            {isReadOnlyTerm
+              ? 'The following cadets are missing critical details. Past records are locked and cannot be edited in an archived semester.'
+              : 'The following cadets are missing critical details. Click any item below to update.'}
           </p>
         </div>
       </div>
@@ -122,41 +125,56 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
           if (!cadet.religion) missing.push('Religion');
 
           return (
-            <button
+            <div
               key={cadet.id}
-              type="button"
-              onClick={() => onEditCadet({ ...cadet, _highlightMissing: true })}
-              className="flex items-center justify-between p-3 bg-white hover:bg-amber-100/50 border border-amber-200/80 hover:border-amber-400 rounded-xl transition-all text-left group shadow-2xs"
+              role={isReadOnlyTerm ? undefined : 'button'}
+              tabIndex={isReadOnlyTerm ? undefined : 0}
+              onClick={isReadOnlyTerm ? undefined : () => onEditCadet({ ...cadet, _highlightMissing: true })}
+              onKeyDown={isReadOnlyTerm ? undefined : (e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onEditCadet({ ...cadet, _highlightMissing: true });
+                }
+              }}
+              className={`flex items-center justify-between p-3 rounded-xl transition-all text-left shadow-2xs ${
+                isReadOnlyTerm
+                  ? 'bg-slate-50/80 border border-slate-200 cursor-default'
+                  : 'bg-white hover:bg-amber-100/50 border border-amber-200/80 hover:border-amber-400 group cursor-pointer'
+              }`}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 padding: '0.75rem',
-                backgroundColor: '#ffffff',
-                border: '1px solid rgba(253, 230, 138, 0.8)',
+                backgroundColor: isReadOnlyTerm ? '#f8fafc' : '#ffffff',
+                border: isReadOnlyTerm ? '1px solid #cbd5e1' : '1px solid rgba(253, 230, 138, 0.8)',
                 borderRadius: '0.75rem',
-                cursor: 'pointer',
+                cursor: isReadOnlyTerm ? 'default' : 'pointer',
                 textAlign: 'left',
                 transition: 'all 0.15s ease',
                 boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(254, 243, 199, 0.4)';
-                e.currentTarget.style.borderColor = '#fbbf24';
+                if (!isReadOnlyTerm) {
+                  e.currentTarget.style.backgroundColor = 'rgba(254, 243, 199, 0.4)';
+                  e.currentTarget.style.borderColor = '#fbbf24';
+                }
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#ffffff';
-                e.currentTarget.style.borderColor = 'rgba(253, 230, 138, 0.8)';
+                if (!isReadOnlyTerm) {
+                  e.currentTarget.style.backgroundColor = '#ffffff';
+                  e.currentTarget.style.borderColor = 'rgba(253, 230, 138, 0.8)';
+                }
               }}
             >
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                   <span
-                    className="text-xs font-black text-slate-800 group-hover:text-amber-950"
+                    className={`text-xs font-black ${isReadOnlyTerm ? 'text-slate-700' : 'text-slate-800 group-hover:text-amber-950'}`}
                     style={{
                       fontSize: '0.75rem',
                       fontWeight: 900,
-                      color: '#1e293b'
+                      color: isReadOnlyTerm ? '#334155' : '#1e293b'
                     }}
                   >
                     {cadet.name}
@@ -179,23 +197,27 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
                   {missing.map((item, idx) => (
                     <span
                       key={idx}
-                      onClick={(e) => {
+                      onClick={isReadOnlyTerm ? undefined : (e) => {
                         e.stopPropagation();
                         onEditCadet({ ...cadet, _highlightMissing: true, focusField: item });
                       }}
-                      title={`Click to edit missing ${item}`}
-                      className="text-[9.5px] font-black uppercase tracking-wider bg-rose-100 text-rose-800 px-1.5 py-0.5 rounded-md border border-rose-200 hover:bg-rose-200 transition-colors cursor-pointer"
+                      title={isReadOnlyTerm ? undefined : `Click to edit missing ${item}`}
+                      className={`text-[9.5px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-md border transition-colors ${
+                        isReadOnlyTerm
+                          ? 'bg-slate-100 text-slate-600 border-slate-200 cursor-default'
+                          : 'bg-rose-100 text-rose-800 border-rose-200 hover:bg-rose-200 cursor-pointer'
+                      }`}
                       style={{
                         fontSize: '0.6rem',
                         fontWeight: 900,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
-                        backgroundColor: '#ffe4e6',
-                        color: '#9f1239',
+                        backgroundColor: isReadOnlyTerm ? '#f1f5f9' : '#ffe4e6',
+                        color: isReadOnlyTerm ? '#475569' : '#9f1239',
                         padding: '0.125rem 0.375rem',
                         borderRadius: '0.375rem',
-                        border: '1px solid #fecdd3',
-                        cursor: 'pointer'
+                        border: isReadOnlyTerm ? '1px solid #cbd5e1' : '1px solid #fecdd3',
+                        cursor: isReadOnlyTerm ? 'default' : 'pointer'
                       }}
                     >
                       Missing {item}
@@ -204,24 +226,45 @@ export default function IncompleteCadetsWarning({ cadets = [], onEditCadet }) {
                 </div>
               </div>
 
-              {/* Action Icon */}
-              <div
-                className="flex items-center gap-1 text-amber-700 font-extrabold text-xs group-hover:translate-x-0.5 transition-transform"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.25rem',
-                  color: '#b45309',
-                  fontWeight: 800,
-                  fontSize: '0.75rem',
-                  marginLeft: '0.5rem',
-                  flexShrink: 0
-                }}
-              >
-                <span>Fix</span>
-                <ChevronRight className="w-4 h-4" size={16} />
-              </div>
-            </button>
+              {/* Action Area: 🔒 Archived Record (Read-Only) badge if archived, else Fix button */}
+              {isReadOnlyTerm ? (
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 700,
+                    color: '#475569',
+                    backgroundColor: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '6px',
+                    padding: '3px 8px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    flexShrink: 0,
+                    marginLeft: '0.5rem'
+                  }}
+                >
+                  🔒 Archived Record (Read-Only)
+                </span>
+              ) : (
+                <div
+                  className="flex items-center gap-1 text-amber-700 font-extrabold text-xs group-hover:translate-x-0.5 transition-transform"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.25rem',
+                    color: '#b45309',
+                    fontWeight: 800,
+                    fontSize: '0.75rem',
+                    marginLeft: '0.5rem',
+                    flexShrink: 0
+                  }}
+                >
+                  <span>Fix</span>
+                  <ChevronRight className="w-4 h-4" size={16} />
+                </div>
+              )}
+            </div>
           );
         })}
         </div>

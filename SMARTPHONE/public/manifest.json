@@ -2,7 +2,7 @@
   "name": "CSU ROTC Attendance Scanner",
   "short_name": "ROTC Scanner",
   "description": "Offline Field Attendance Scanner for Duty Officers",
-  "start_url": "./",
+  "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#064e2e",

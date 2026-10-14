@@ -8,6 +8,7 @@ import { getSupabaseClient, supabase } from '../utils/supabaseClient';
 import { generateQrPayload, getLastNameOnly } from './BasicCadetRegistration';
 import UnitHierarchyDrillDown from './UnitHierarchyDrillDown';
 import { getDepartmentStyle } from './CadetRosterTable';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 
 // ─── Formatters for Selected QR Pass Preview Card ────────────────────────────
 const formatBn = (bn) => {
@@ -154,6 +155,10 @@ function QRPassTile({ cadet, isPrint = false }) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function QRCodeGenerator() {
+  const { selectedTermId, activeTermId, selectedTerm, activeTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+  const effectiveTerm = selectedTerm || activeTerm;
+
   // ── Drill-down state: null means ALL (no filter applied at that level) ──
   const [selectedBattalion, setSelectedBattalion] = useState(null);
   const [selectedCompany, setSelectedCompany] = useState(null);
@@ -170,6 +175,11 @@ export default function QRCodeGenerator() {
 
   // ── Selected cadets map (persists across drill-down switches) ──
   const [selectedCadetsMap, setSelectedCadetsMap] = useState(new Map());
+
+  // Clear selections when switching academic terms
+  useEffect(() => {
+    setSelectedCadetsMap(new Map());
+  }, [currentTermId]);
 
   // ── Print state ──
   const [isPrinting, setIsPrinting] = useState(false);
@@ -215,6 +225,9 @@ export default function QRCodeGenerator() {
 
       if (client) {
         let query = client.from('cadets').select('*');
+        if (currentTermId) {
+          query = query.eq('academic_term_id', currentTermId);
+        }
         if (bnClean) query = query.ilike('battalion', `%${bnClean}%`);
         if (coClean) query = query.ilike('company', `%${coClean}%`);
         if (plClean) query = query.ilike('platoon', `%${plClean}%`);
@@ -233,6 +246,9 @@ export default function QRCodeGenerator() {
           if (saved) {
             const localCadets = JSON.parse(saved);
             fetched = localCadets.filter(c => {
+              if (currentTermId && c.academic_term_id && String(c.academic_term_id) !== String(currentTermId)) {
+                return false;
+              }
               const cBn = String(c.battalion || '').toLowerCase();
               const cCo = String(c.company || '').toLowerCase();
               const cPl = String(c.platoon || '').toLowerCase();
@@ -259,7 +275,7 @@ export default function QRCodeGenerator() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedBattalion, selectedCompany, selectedPlatoon]);
+  }, [selectedBattalion, selectedCompany, selectedPlatoon, currentTermId]);
 
   useEffect(() => {
     fetchCadets();
@@ -379,12 +395,32 @@ export default function QRCodeGenerator() {
             <QrCode size={22} color="#e5a900" />
           </div>
           <div>
-            <h1 style={{
-              fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-dark)',
-              fontFamily: 'Oswald, sans-serif', margin: 0, letterSpacing: '0.5px'
-            }}>
-              QR CODE GENERATOR
-            </h1>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <h1 style={{
+                fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-dark)',
+                fontFamily: 'Oswald, sans-serif', margin: 0, letterSpacing: '0.5px'
+              }}>
+                QR CODE GENERATOR
+              </h1>
+              {effectiveTerm && (
+                <span
+                  style={{
+                    fontSize: '0.68rem',
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: '9999px',
+                    background: String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#ecfdf5' : '#f1f5f9',
+                    color: String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#047857' : '#475569',
+                    border: `1px solid ${String(effectiveTerm.status || '').toLowerCase() === 'current' ? '#a7f3d0' : '#cbd5e1'}`,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  {effectiveTerm.academicYear} • {effectiveTerm.semester} ({String(effectiveTerm.status || '').toUpperCase()})
+                </span>
+              )}
+            </div>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: 0, fontWeight: 500 }}>
               Select cadets from the Supabase roster and print compact QR pass sheets
             </p>

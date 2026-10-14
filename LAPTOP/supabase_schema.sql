@@ -19,20 +19,34 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS public.system_settings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     
-    -- Tab 1: Muster & Unit Configuration
+    -- Tab 1: Unit Setup
     formation_cutoff_time VARCHAR(10) NOT NULL DEFAULT '07:30',
     formation_tardy_grace INTEGER NOT NULL DEFAULT 15,
     cadet_quota_per_platoon INTEGER NOT NULL DEFAULT 37,
     total_unit_target INTEGER NOT NULL DEFAULT 1184,
     unit_structure JSONB,
     
-    -- Tab 2: Unit Branding
+    -- Tab 2: Unit Branding & Passes (Unit Command Profile)
     unit_name VARCHAR(255) NOT NULL DEFAULT '1501st CDC ROTC Unit',
+    commandant VARCHAR(255) NOT NULL DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     commanding_officer VARCHAR(255) NOT NULL DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     commanding_officer_title VARCHAR(255) NOT NULL DEFAULT 'Commandant, CSU ROTC Unit',
-    parent_command VARCHAR(255) NOT NULL DEFAULT '15th RCDG, ARESCOM, Philippine Army',
+    school_name VARCHAR(255) NOT NULL DEFAULT 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
     host_institution VARCHAR(255) NOT NULL DEFAULT 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
+    cdc_name VARCHAR(255) NOT NULL DEFAULT '1501st Community Defense Center',
+    rcdg_name VARCHAR(255) NOT NULL DEFAULT '15th Regional Community Defense Group (15RCDG)',
+    parent_command VARCHAR(255) NOT NULL DEFAULT '15th RCDG, ARESCOM, Philippine Army',
+    hero_emblems JSONB DEFAULT '[
+      {"id": "1", "label": "15th RCDG Seal", "url": "/rcdg-logo.png", "is_center": false, "active": true},
+      {"id": "2", "label": "1501st CDC Seal", "url": "/cdc-logo.png", "is_center": false, "active": true},
+      {"id": "3", "label": "Official ROTC Unit Seal (Center)", "url": "/rotc-seal-transparent.png", "is_center": true, "active": true},
+      {"id": "4", "label": "NSTP Logo", "url": "/nstp-logo.png", "is_center": false, "active": true},
+      {"id": "5", "label": "University / College Logo", "url": "/csu-logo.png", "is_center": false, "active": true}
+    ]'::jsonb,
+    rcdg_seal_url TEXT DEFAULT '/rcdg-logo.png',
+    cdc_seal_url TEXT DEFAULT '/cdc-logo.png',
     rotc_seal_url TEXT DEFAULT '/rotc-seal-transparent.png',
+    nstp_logo_url TEXT DEFAULT '/nstp-logo.png',
     university_logo_url TEXT DEFAULT '/csu-logo.png',
     
     -- Tab 3: Data Management & Exports
@@ -49,6 +63,21 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
     officer_ranks_list JSONB,
     officer_roles_list JSONB,
     
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ==============================================================================
+-- 2b. TABLE: unit_settings
+-- Unit Command Profile configurations (Commandant, Unit, School, CDC, RCDG)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.unit_settings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    commandant VARCHAR(255) NOT NULL DEFAULT 'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+    unit_name VARCHAR(255) NOT NULL DEFAULT '1501st CDC ROTC Unit',
+    school_name VARCHAR(255) NOT NULL DEFAULT 'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
+    cdc_name VARCHAR(255) NOT NULL DEFAULT '1501st Community Defense Center',
+    rcdg_name VARCHAR(255) NOT NULL DEFAULT '15th Regional Community Defense Group (15RCDG)',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -205,6 +234,7 @@ EXECUTE FUNCTION public.cascade_delete_session_records();
 -- 6. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
 ALTER TABLE public.system_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.unit_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cadets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.attendance_logs ENABLE ROW LEVEL SECURITY;
@@ -212,6 +242,7 @@ ALTER TABLE public.excuse_requests ENABLE ROW LEVEL SECURITY;
 
 -- Allow read access to all users (scanner devices & desktop dashboard)
 CREATE POLICY "Allow public read access on system_settings" ON public.system_settings FOR SELECT USING (true);
+CREATE POLICY "Allow public read access on unit_settings" ON public.unit_settings FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on cadets" ON public.cadets FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_sessions" ON public.attendance_sessions FOR SELECT USING (true);
 CREATE POLICY "Allow public read access on attendance_logs" ON public.attendance_logs FOR SELECT USING (true);
@@ -219,21 +250,26 @@ CREATE POLICY "Allow public read access on excuse_requests" ON public.excuse_req
 
 -- Allow all write operations (anon & authenticated)
 CREATE POLICY "Allow all operations on system_settings" ON public.system_settings FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all operations on unit_settings" ON public.unit_settings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on cadets" ON public.cadets FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_sessions" ON public.attendance_sessions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on attendance_logs" ON public.attendance_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all operations on excuse_requests" ON public.excuse_requests FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
--- 7. INITIAL SEED: DEFAULT SYSTEM SETTINGS
+-- 7. INITIAL SEED: DEFAULT SYSTEM SETTINGS & UNIT SETTINGS
 -- ==============================================================================
 INSERT INTO public.system_settings (
     formation_cutoff_time,
     formation_tardy_grace,
     cadet_quota_per_platoon,
+    commandant,
     commanding_officer,
     commanding_officer_title,
     unit_name,
+    school_name,
+    cdc_name,
+    rcdg_name,
     parent_command,
     host_institution
 ) VALUES (
@@ -241,8 +277,55 @@ INSERT INTO public.system_settings (
     15,
     37,
     'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+    'LTC CHRISTIAN B ABAMO INF (GSC) PA',
     'Commandant, CSU ROTC Unit',
     '1501st CDC ROTC Unit',
+    'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
+    '1501st Community Defense Center',
+    '15th Regional Community Defense Group (15RCDG)',
     '15th RCDG, ARESCOM, Philippine Army',
     'Caraga State University (CSU Main Campus, Ampayon, Butuan City)'
 ) ON CONFLICT DO NOTHING;
+
+INSERT INTO public.unit_settings (
+    commandant,
+    unit_name,
+    school_name,
+    cdc_name,
+    rcdg_name
+) VALUES (
+    'LTC CHRISTIAN B ABAMO INF (GSC) PA',
+    '1501st CDC ROTC Unit',
+    'Caraga State University (CSU Main Campus, Ampayon, Butuan City)',
+    '1501st Community Defense Center',
+    '15th Regional Community Defense Group (15RCDG)'
+) ON CONFLICT DO NOTHING;
+
+-- ==============================================================================
+-- 8. STORAGE BUCKET: branding-assets
+-- Storage for 5 Official Seals & Hero Banner Logos
+-- ==============================================================================
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('branding-assets', 'branding-assets', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+-- Public Storage Access Policies for branding-assets
+DROP POLICY IF EXISTS "Public Read Access for Branding Assets" ON storage.objects;
+CREATE POLICY "Public Read Access for Branding Assets"
+    ON storage.objects FOR SELECT
+    USING (bucket_id = 'branding-assets');
+
+DROP POLICY IF EXISTS "Public Upload Access for Branding Assets" ON storage.objects;
+CREATE POLICY "Public Upload Access for Branding Assets"
+    ON storage.objects FOR INSERT
+    WITH CHECK (bucket_id = 'branding-assets');
+
+DROP POLICY IF EXISTS "Public Update Access for Branding Assets" ON storage.objects;
+CREATE POLICY "Public Update Access for Branding Assets"
+    ON storage.objects FOR UPDATE
+    USING (bucket_id = 'branding-assets');
+
+DROP POLICY IF EXISTS "Public Delete Access for Branding Assets" ON storage.objects;
+CREATE POLICY "Public Delete Access for Branding Assets"
+    ON storage.objects FOR DELETE
+    USING (bucket_id = 'branding-assets');

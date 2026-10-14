@@ -970,7 +970,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
               lineHeight: 1.3
             }}
           >
-            Caraga State University Main ROTCU
+            Caraga State University Main
           </div>
           <p style={{ margin: '0 0 1rem 0', fontSize: '0.78rem', lineHeight: 1.5 }}>
             Department of Military Science & Tactics (DMST) <br /> Ampayon, Butuan City, Agusan del Norte, Philippines

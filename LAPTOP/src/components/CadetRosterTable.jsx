@@ -423,14 +423,17 @@ export default function CadetRosterTable({
                           style={{
                             fontSize: '0.68rem',
                             fontWeight: 700,
-                            color: '#94a3b8',
+                            color: '#475569',
+                            backgroundColor: '#f1f5f9',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            padding: '3px 8px',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '4px'
                           }}
                         >
-                          <Lock size={12} />
-                          <span>Locked</span>
+                          🔒 Archived Record (Read-Only)
                         </span>
                       )}
                     </div>

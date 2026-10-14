@@ -323,8 +323,9 @@ function ValidationNotesCell({ notes = [] }) {
   );
 }
 
-export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle }) {
+export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle, activeTerm, isArchived = false }) {
   const { unitStructure } = useUnitStructure();
+  const isLocked = isArchived || String(activeTerm?.status || '').toUpperCase() === 'ARCHIVED';
   const [fileData, setFileData] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
@@ -726,6 +727,10 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
 
   // ── Batch Insertion to Supabase ──
   const handleBatchInsert = async () => {
+    if (isLocked) {
+      alert('Registration Locked: You are currently inspecting an archived semester. Switch to the current active term to enroll new cadets.');
+      return;
+    }
     if (!fileData) return;
 
     // Only save new cadets (READY) and modified cadets (UPDATE). Unchanged records are skipped!
@@ -749,10 +754,14 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
     setIsSaving(true);
     setSaveProgress({ current: 0, total: recordsToSave.length });
 
+    const termId = activeTerm?.id || null;
+    const defaultRotc = (activeTerm?.semester && activeTerm.semester.includes('2')) ? 'MS2' : 'MS1';
+
     const cadetsToUpsert = recordsToSave.map((r) => {
       const c = r.cadet;
       const deptUpper = String(c.department || 'CCIS').toUpperCase().trim();
       const progUpper = String(c.program || c.course || '').toUpperCase().trim();
+      const rotc = c.rotc_subject || defaultRotc;
       return {
         id: String(c.id || '').toUpperCase().trim(),
         name: String(c.name || '').toUpperCase().trim(),
@@ -760,7 +769,9 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
         battalion: c.battalion || '1st Battalion',
         company: c.company || 'Alpha Company',
         platoon: c.platoon || '1st Platoon',
-        type: c.type || 'Basic Cadet',
+        type: rotc || c.type || 'Basic Cadet',
+        rotc_subject: rotc,
+        academic_term_id: c.academic_term_id || termId,
         designation: c.designation || 'N/A',
         gender: c.gender || 'Male',
         department: deptUpper,
@@ -778,7 +789,14 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
     try {
       for (let i = 0; i < cadetsToUpsert.length; i += BATCH_SIZE) {
         const chunk = cadetsToUpsert.slice(i, i + BATCH_SIZE);
-        const { error } = await client.from('cadets').upsert(chunk, { onConflict: 'id' });
+        let { error } = await client.from('cadets').upsert(chunk, { onConflict: 'id' });
+
+        // If columns rotc_subject or academic_term_id not yet created in DB, fallback without them
+        if (error && (error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id') || error.code === 'PGRST204')) {
+          const fallbackChunk = chunk.map(({ rotc_subject, academic_term_id, ...rest }) => rest);
+          const fallbackRes = await client.from('cadets').upsert(fallbackChunk, { onConflict: 'id' });
+          error = fallbackRes.error;
+        }
 
         if (error) {
           console.error('Batch insert error on chunk:', i, error);
@@ -820,6 +838,46 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+      {/* Registration Locked Banner */}
+      {isLocked && (
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            borderRadius: '0.75rem',
+            backgroundColor: '#fffbeb',
+            border: '2px solid #fcd34d',
+            color: '#78350f',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.875rem',
+            boxShadow: '0 2px 6px rgba(245, 158, 11, 0.15)'
+          }}
+        >
+          <div
+            style={{
+              padding: '0.5rem',
+              backgroundColor: '#f59e0b',
+              color: '#ffffff',
+              borderRadius: '0.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0
+            }}
+          >
+            <AlertTriangle size={20} />
+          </div>
+          <div>
+            <div style={{ fontSize: '0.88rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.02em', color: '#78350f' }}>
+              Registration Locked
+            </div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#92400e', marginTop: '2px' }}>
+              Registration Locked: You are currently inspecting an archived semester. Switch to the current active term to enroll new cadets.
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Top Info & Template Download Card ── */}
       <div
         style={{

@@ -21,7 +21,14 @@ import {
   getSupabaseClient
 } from './utils/supabaseClient';
 import { recalculateAttendanceLogs, getActiveFormationCutoff, reconcileCadetDailyStatus } from './utils/attendanceStatus';
-import { ShieldCheck } from 'lucide-react';
+import {
+  readCachedAdminSession,
+  verifyAdminSession,
+  signOutAdmin,
+  ADMIN_SESSION_KEY
+} from './utils/adminAuth';
+import Header from './components/Header';
+import { useAcademicTerm } from './context/AcademicTermContext';
 
 export default function App() {
   const VALID_TABS = [
@@ -38,24 +45,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Authentication Session State
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('csu_rotc_auth_session');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.user) {
-          // Verify expiration if set
-          if (parsed.expiresAt && new Date(parsed.expiresAt) <= new Date()) {
-            localStorage.removeItem('csu_rotc_auth_session');
-            return null;
-          }
-          return parsed.user;
-        }
-      }
-    } catch (_) { }
-    return null;
-  });
+  // Authentication Session State (cached profile; re-verified against Supabase below)
+  const [currentUser, setCurrentUser] = useState(() => readCachedAdminSession());
 
   // Top-Level Route Navigation: 'home' (/) | 'login' (/login) | 'portal' (/dashboard/*)
   const [currentRoute, setCurrentRoute] = useState(() => {
@@ -63,7 +54,7 @@ export default function App() {
       const hash = window.location.hash.replace('#', '').trim().toLowerCase();
       if (hash === 'login') return 'login';
       if (VALID_TABS.includes(hash)) {
-        const savedSession = localStorage.getItem('csu_rotc_auth_session');
+        const savedSession = readCachedAdminSession();
         return savedSession ? 'portal' : 'login';
       }
       if (hash === 'home' || hash === '' || hash === '/') return 'home';
@@ -146,16 +137,68 @@ export default function App() {
     }
   });
 
+  const { selectedTermId, setSelectedTermId, activeTermId, activeTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+
+  // Global Academic Term Cadet Filtering:
+  // Strictly filters the master cadet roster to only cadets enrolled in the active/selected term
+  // to prevent cross-semester leaks across Dashboard, Analytics, Excuse Reports, etc.
+  const termFilteredCadets = React.useMemo(() => {
+    if (!currentTermId) return cadets;
+    return (cadets || []).filter((c) => {
+      const tid = c.academic_term_id || c.academicTermId;
+      return String(tid || '') === String(currentTermId);
+    });
+  }, [cadets, currentTermId]);
+
   const handleLogout = async () => {
-    try {
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        await supabase.auth.signOut().catch(() => { });
-      }
-    } catch (_) { }
-    localStorage.removeItem('csu_rotc_auth_session');
+    await signOutAdmin();
     setCurrentUser(null);
   };
+
+  // Session Guard: re-verify the persisted Supabase session + admin whitelist
+  // on startup, and react to sign-out / token revocation in real time.
+  useEffect(() => {
+    let cancelled = false;
+
+    const revoke = () => {
+      localStorage.removeItem(ADMIN_SESSION_KEY);
+      setCurrentUser(null);
+      setCurrentRoute((route) => (route === 'portal' ? 'login' : route));
+    };
+
+    (async () => {
+      // Cached UI session expired/missing → drop any lingering Supabase session too.
+      if (!readCachedAdminSession()) {
+        await signOutAdmin();
+        return;
+      }
+      const result = await verifyAdminSession();
+      if (cancelled) return;
+      if (result.status === 'invalid') {
+        revoke();
+      } else if (result.status === 'valid') {
+        setCurrentUser(result.user);
+      }
+      // 'error' (offline): keep cached session; Supabase RLS still enforces access.
+    })();
+
+    const supabase = getSupabaseClient();
+    const sub = supabase?.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        revoke();
+      } else if (event === 'USER_UPDATED') {
+        verifyAdminSession().then((r) => {
+          if (!cancelled && r.status === 'invalid') revoke();
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      sub?.data?.subscription?.unsubscribe();
+    };
+  }, []);
 
   const [serverOnline, setServerOnline] = useState(true);
 
@@ -521,43 +564,16 @@ export default function App() {
       />
 
       <main className="main-wrapper flex-1 h-full overflow-y-auto">
-        <header className="top-header no-print print:hidden">
-          <div className="page-title-group">
-            <h2>CSU ROTC ATTENDANCE</h2>
-            <p>Admin HQ Desktop</p>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-            {/* Authorized Admin HQ Badge */}
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                background: 'rgba(6, 78, 46, 0.08)',
-                border: '1px solid rgba(6, 78, 46, 0.2)',
-                padding: '0.35rem 0.75rem',
-                borderRadius: '9999px',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                color: 'var(--rotc-green-dark, #064e2e)'
-              }}
-            >
-              <ShieldCheck size={14} color="#059669" />
-              <span>Authorized Admin HQ</span>
-            </div>
-
-            {/* Live Date */}
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-              {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}
-            </div>
-          </div>
-        </header>
+        <Header
+          selectedTermId={selectedTermId}
+          setSelectedTermId={setSelectedTermId}
+          onSelectTerm={setSelectedTermId}
+        />
 
         <div className="content-body">
           {activeTab === 'dashboard' && (
             <DashboardView
-              cadets={cadets}
+              cadets={termFilteredCadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
               onNavigateToHistory={() => setActiveTab('history')}
@@ -566,7 +582,7 @@ export default function App() {
 
           {activeTab === 'analytics' && (
             <AnalyticsView
-              cadets={cadets}
+              cadets={termFilteredCadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
               onNavigateToHistory={() => setActiveTab('history')}
@@ -575,7 +591,7 @@ export default function App() {
 
           {(activeTab === 'excuse-reports' || activeTab === 'excuse') && (
             <ExcuseReports
-              cadets={cadets}
+              cadets={termFilteredCadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
             />
@@ -587,7 +603,7 @@ export default function App() {
 
           {(activeTab === 'history' || activeTab === 'attendance-history') && (
             <AttendanceHistory
-              cadets={cadets}
+              cadets={termFilteredCadets}
               attendanceLogs={attendanceLogs}
               onRefresh={fetchData}
             />
@@ -595,7 +611,7 @@ export default function App() {
 
           {activeTab === 'registration' && (
             <BasicCadetRegistration
-              cadets={cadets}
+              cadets={termFilteredCadets}
               onRefresh={fetchData}
             />
           )}
@@ -603,7 +619,7 @@ export default function App() {
           {/* Legacy 'idcards' hash → redirect silently to registration */}
           {activeTab === 'idcards' && (
             <BasicCadetRegistration
-              cadets={cadets}
+              cadets={termFilteredCadets}
               onRefresh={fetchData}
             />
           )}
@@ -614,7 +630,7 @@ export default function App() {
 
           {activeTab === 'scanner' && (
             <ScannerPage
-              cadets={cadets}
+              cadets={termFilteredCadets}
               attendanceLogs={attendanceLogs}
               onSyncComplete={handleSyncComplete}
             />
