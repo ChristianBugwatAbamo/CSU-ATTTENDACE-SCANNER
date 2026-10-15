@@ -19,7 +19,8 @@ export default function CadetPortalHeader({
   cadetId = '',
   isLoggingOut = false,
   handleLogoutClick,
-  onOpenFileExcuse
+  onOpenFileExcuse,
+  isArchived = false
 }) {
   return (
     <header
@@ -81,7 +82,8 @@ export default function CadetPortalHeader({
         {/* Dedicated File Absence Excuse Button (Icon-Only Square Button) */}
         <button
           type="button"
-          onClick={onOpenFileExcuse}
+          disabled={isArchived}
+          onClick={!isArchived ? onOpenFileExcuse : undefined}
           className="p-2 rounded-xl"
           style={{
             display: 'inline-flex',
@@ -89,26 +91,35 @@ export default function CadetPortalHeader({
             justifyContent: 'center',
             width: '36px',
             height: '36px',
-            background: isLight ? 'rgba(217, 119, 6, 0.14)' : 'rgba(245, 158, 11, 0.15)',
-            border: isLight ? '1.5px solid #d97706' : '1.5px solid rgba(251, 191, 36, 0.55)',
-            color: isLight ? '#92400e' : '#fef08a',
+            background: isArchived
+              ? (isLight ? 'rgba(148, 163, 184, 0.15)' : 'rgba(100, 116, 139, 0.2)')
+              : (isLight ? 'rgba(217, 119, 6, 0.14)' : 'rgba(245, 158, 11, 0.15)'),
+            border: isArchived
+              ? `1.5px solid ${isLight ? '#cbd5e1' : '#475569'}`
+              : (isLight ? '1.5px solid #d97706' : '1.5px solid rgba(251, 191, 36, 0.55)'),
+            color: isArchived ? '#94a3b8' : (isLight ? '#92400e' : '#fef08a'),
             borderRadius: '8px',
-            cursor: 'pointer',
+            cursor: isArchived ? 'not-allowed' : 'pointer',
+            opacity: isArchived ? 0.45 : 1,
             transition: 'all 0.15s ease',
             flexShrink: 0
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = isLight ? 'rgba(217, 119, 6, 0.25)' : 'rgba(245, 158, 11, 0.28)';
-            e.currentTarget.style.borderColor = '#facc15';
+            if (!isArchived) {
+              e.currentTarget.style.background = isLight ? 'rgba(217, 119, 6, 0.25)' : 'rgba(245, 158, 11, 0.28)';
+              e.currentTarget.style.borderColor = '#facc15';
+            }
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = isLight ? 'rgba(217, 119, 6, 0.14)' : 'rgba(245, 158, 11, 0.15)';
-            e.currentTarget.style.borderColor = isLight ? '#d97706' : 'rgba(251, 191, 36, 0.55)';
+            if (!isArchived) {
+              e.currentTarget.style.background = isLight ? 'rgba(217, 119, 6, 0.14)' : 'rgba(245, 158, 11, 0.15)';
+              e.currentTarget.style.borderColor = isLight ? '#d97706' : 'rgba(251, 191, 36, 0.55)';
+            }
           }}
-          title="File Absence Excuse"
-          aria-label="File Absence Excuse"
+          title={isArchived ? "File Excuse Request is locked for archived academic terms (Read-Only Mode)" : "File Excuse Request"}
+          aria-label="File Excuse Request"
         >
-          <FileText size={17} color={isLight ? '#92400e' : '#facc15'} />
+          <FileText size={17} color={isArchived ? (isLight ? '#94a3b8' : '#64748b') : (isLight ? '#92400e' : '#facc15')} />
         </button>
 
         {/* Theme Toggle Button (Dark / Light Mode) */}

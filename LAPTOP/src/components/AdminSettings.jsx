@@ -50,6 +50,7 @@ import {
 import ConfirmModal from './ConfirmModal';
 import LetterheadSettingsModal from './LetterheadSettingsModal';
 import AcademicTermsTab from './AcademicTermsTab';
+import { useAcademicTerm } from '../context/AcademicTermContext';
 import { recalculateAttendanceLogs } from '../utils/attendanceStatus';
 import {
   fetchSettingsFromSupabase,
@@ -63,7 +64,8 @@ import {
   reassignUnitDependencies,
   softArchiveUnitEchelon,
   restoreUnitEchelon,
-  fetchSystemWidePlatoonCapacities
+  fetchSystemWidePlatoonCapacities,
+  getSupabaseClient
 } from '../utils/supabaseClient';
 
 export { DEFAULT_UNIT_STRUCTURE, DEFAULT_HIERARCHY, STANDARD_BATTALIONS, STANDARD_COMPANIES, STANDARD_PLATOONS } from '../constants/defaultHierarchy.js';
@@ -169,6 +171,17 @@ const DEFAULT_SETTINGS = {
 
 export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefresh, serverOnline }) {
   const { updateUnitStructure } = useUnitStructure();
+  const { selectedTermId, activeTermId, selectedTerm, activeTerm } = useAcademicTerm();
+  const currentTermId = selectedTermId || activeTermId;
+  const isArchived = Boolean(
+    selectedTerm &&
+    (String(selectedTerm.status || '').toUpperCase() === 'ARCHIVED' || selectedTerm.is_archived === true)
+  );
+
+  // Live term-scoped cadets & platoon capacity counts
+  const [liveTermCadets, setLiveTermCadets] = useState(null);
+  const [livePlatoonHeadcounts, setLivePlatoonHeadcounts] = useState({});
+
   // Active top tab: 'structure' | 'branding' | 'storage' | 'terms'
   const [activeTab, setActiveTab] = useState('structure');
 
@@ -188,6 +201,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   });
 
   const handleOrientationChange = (newOrientation) => {
+    if (isArchived) return;
     setOrientation(newOrientation);
     handleChange('cardOrientation', newOrientation === 'portrait' ? 'vertical' : 'horizontal');
     handleChange('printOrientation', newOrientation);
@@ -314,9 +328,25 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             ];
           }
 
+          let termProfiles = sbSettings.term_command_profiles || sbSettings.termCommandProfiles || {};
+          if (typeof termProfiles === 'string') {
+            try { termProfiles = JSON.parse(termProfiles); } catch (_) {}
+          }
+
+          // If a command profile exists for the currently selected term, use it
+          const activeTermProfile = currentTermId && termProfiles[currentTermId] ? termProfiles[currentTermId] : null;
+          const finalCommandant = activeTermProfile?.commandant || activeTermProfile?.commanding_officer || loadedCommandant;
+          const finalOfficerTitle = activeTermProfile?.commanding_officer_title || activeTermProfile?.commandingOfficerTitle || loadedOfficerTitle;
+          const finalUnitName = activeTermProfile?.unit_name || loadedUnitName;
+          const finalSchoolName = activeTermProfile?.school_name || loadedSchoolName;
+          const finalCdcName = activeTermProfile?.cdc_name || loadedCdcName;
+          const finalRcdgName = activeTermProfile?.rcdg_name || loadedRcdgName;
+
           finalSettings = {
             ...DEFAULT_SETTINGS,
             ...sbSettings,
+            term_command_profiles: termProfiles,
+            termCommandProfiles: termProfiles,
             morningCutoffTime: loadedCutoff,
             formationCutoffTime: loadedCutoff,
             formationTardyGrace: sbSettings.formation_tardy_grace ?? DEFAULT_SETTINGS.formationTardyGrace,
@@ -325,20 +355,20 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
             excuseGracePeriodDays: sbSettings.excuse_grace_period_days ?? DEFAULT_SETTINGS.excuseGracePeriodDays,
             unitStructure: loadedUnitStructure,
             unit_structure: loadedUnitStructure,
-            commandant: loadedCommandant,
-            commandingOfficer: loadedCommandant,
-            commanding_officer: loadedCommandant,
-            commandingOfficerTitle: loadedOfficerTitle,
-            commanding_officer_title: loadedOfficerTitle,
-            unit_name: loadedUnitName,
-            unitName: loadedUnitName,
-            school_name: loadedSchoolName,
-            hostInstitution: loadedSchoolName,
-            host_institution: loadedSchoolName,
-            cdc_name: loadedCdcName,
-            rcdg_name: loadedRcdgName,
-            parentCommand: loadedRcdgName,
-            parent_command: loadedRcdgName,
+            commandant: finalCommandant,
+            commandingOfficer: finalCommandant,
+            commanding_officer: finalCommandant,
+            commandingOfficerTitle: finalOfficerTitle,
+            commanding_officer_title: finalOfficerTitle,
+            unit_name: finalUnitName,
+            unitName: finalUnitName,
+            school_name: finalSchoolName,
+            hostInstitution: finalSchoolName,
+            host_institution: finalSchoolName,
+            cdc_name: finalCdcName,
+            rcdg_name: finalRcdgName,
+            parentCommand: finalRcdgName,
+            parent_command: finalRcdgName,
             hero_emblems: loadedHeroEmblems,
             heroEmblems: loadedHeroEmblems,
             rcdg_seal_url: sbSettings.rcdg_seal_url || sbSettings.rcdgSealUrl || DEFAULT_SETTINGS.rcdg_seal_url,
@@ -413,19 +443,97 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     loadSettings();
   }, []);
 
+  // Live query for cadets and platoon capacities scoped to currentTermId
+  useEffect(() => {
+    let cancelled = false;
+    const fetchTermData = async () => {
+      if (!currentTermId) return;
+      try {
+        const client = getSupabaseClient();
+        if (client) {
+          const { data, error } = await client
+            .from('cadets')
+            .select('id, name, rank, battalion, company, platoon, battalion_id, company_id, platoon_id, academic_term_id')
+            .eq('academic_term_id', currentTermId);
+          if (!error && Array.isArray(data) && !cancelled) {
+            setLiveTermCadets(data);
+          }
+        }
+        const capacities = await fetchSystemWidePlatoonCapacities(currentTermId);
+        if (!cancelled && capacities) {
+          setLivePlatoonHeadcounts(capacities);
+          setSystemPlatoonCapacities(capacities);
+        }
+      } catch (err) {
+        console.warn('Error fetching term-scoped cadets in AdminSettings:', err);
+      }
+    };
+    fetchTermData();
+    return () => { cancelled = true; };
+  }, [currentTermId]);
+
+  // Dynamically load Command Profile for currentTermId
+  useEffect(() => {
+    if (!currentTermId) return;
+    const termProfiles = settings.term_command_profiles || settings.termCommandProfiles || {};
+    let profile = termProfiles[currentTermId] || null;
+
+    if (!profile) {
+      try {
+        const local = JSON.parse(localStorage.getItem('csu_rotc_term_command_profiles') || '{}');
+        if (local[currentTermId]) profile = local[currentTermId];
+      } catch (_) {}
+    }
+
+    if (!profile && selectedTerm) {
+      if (selectedTerm.commandant || selectedTerm.commanding_officer || selectedTerm.unit_name || selectedTerm.school_name) {
+        profile = {
+          commandant: selectedTerm.commandant || selectedTerm.commanding_officer,
+          commandingOfficer: selectedTerm.commandant || selectedTerm.commanding_officer,
+          commanding_officer: selectedTerm.commandant || selectedTerm.commanding_officer,
+          commandingOfficerTitle: selectedTerm.commanding_officer_title || selectedTerm.commandingOfficerTitle,
+          unit_name: selectedTerm.unit_name,
+          school_name: selectedTerm.school_name,
+          cdc_name: selectedTerm.cdc_name,
+          rcdg_name: selectedTerm.rcdg_name
+        };
+      }
+    }
+
+    if (profile) {
+      setSettings(prev => ({
+        ...prev,
+        commandant: profile.commandant || profile.commanding_officer || prev.commandant,
+        commandingOfficer: profile.commandant || profile.commanding_officer || prev.commandingOfficer,
+        commanding_officer: profile.commandant || profile.commanding_officer || prev.commanding_officer,
+        commandingOfficerTitle: profile.commanding_officer_title || profile.commandingOfficerTitle || prev.commandingOfficerTitle,
+        commanding_officer_title: profile.commanding_officer_title || profile.commandingOfficerTitle || prev.commanding_officer_title,
+        unit_name: profile.unit_name || prev.unit_name,
+        unitName: profile.unit_name || prev.unitName,
+        school_name: profile.school_name || prev.school_name,
+        hostInstitution: profile.school_name || prev.hostInstitution,
+        cdc_name: profile.cdc_name || prev.cdc_name,
+        rcdg_name: profile.rcdg_name || prev.rcdg_name,
+        parentCommand: profile.rcdg_name || prev.parentCommand
+      }));
+    }
+  }, [currentTermId, selectedTerm]);
+
   // Keyboard shortcut Ctrl+S / Cmd+S to Save All Settings
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
+        if (isArchived) return;
         handleSaveSettings();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [settings, orientation]);
+  }, [settings, orientation, isArchived]);
 
   const handleChange = (field, value) => {
+    if (isArchived) return;
     setSettings(prev => {
       const next = { ...prev, [field]: value };
       // 👈 Automatically sync ID Signatory name & title whenever Commandant is modified
@@ -464,6 +572,10 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   // Save Settings Handler (Centralized for all 4 tabs with payload sanitization & network timeout guard)
   const handleSaveSettings = async (e, customSettings = null) => {
     if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (isArchived) {
+      alert('🔒 Settings are locked for archived academic terms. Please switch to the Current term to make changes.');
+      return;
+    }
     setIsSaving(true);
 
     // Timeout helper to guarantee async operations never hang indefinitely
@@ -504,8 +616,35 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     const cleanHeroEmblems = JSON.parse(JSON.stringify(sanitizedHeroEmblems));
     const centerEmblem = cleanHeroEmblems.find(e => e.is_center) || cleanHeroEmblems[Math.floor(cleanHeroEmblems.length / 2)] || cleanHeroEmblems[0];
 
+    // Maintain per-term command profiles dictionary
+    const currentProfilesMap = {
+      ...(rawToSave.term_command_profiles || {}),
+      ...(rawToSave.termCommandProfiles || {})
+    };
+    if (currentTermId) {
+      currentProfilesMap[currentTermId] = {
+        commandant: activeCommandant,
+        commanding_officer: activeCommandant,
+        commandingOfficer: activeCommandant,
+        commanding_officer_title: activeOfficerTitle,
+        commandingOfficerTitle: activeOfficerTitle,
+        unit_name: activeUnitName,
+        unitName: activeUnitName,
+        school_name: activeSchoolName,
+        hostInstitution: activeSchoolName,
+        cdc_name: activeCdcName,
+        rcdg_name: activeRcdgName,
+        parentCommand: activeRcdgName
+      };
+      try {
+        localStorage.setItem('csu_rotc_term_command_profiles', JSON.stringify(currentProfilesMap));
+      } catch (_) {}
+    }
+
     const toSave = {
       ...rawToSave,
+      term_command_profiles: currentProfilesMap,
+      termCommandProfiles: currentProfilesMap,
       hero_emblems: cleanHeroEmblems,
       heroEmblems: cleanHeroEmblems,
       printOrientation: orientation,
@@ -580,6 +719,35 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       try {
         cloudResult = await withTimeout(saveSettingsToSupabase(toSave), 8000, { timedOut: true });
         await withTimeout(syncSessionCutoffTime(newCutoff), 4000, null);
+
+        // Also persist command profile directly onto academic_terms row if currentTermId exists
+        if (currentTermId) {
+          try {
+            const client = getSupabaseClient();
+            if (client) {
+              await client
+                .from('academic_terms')
+                .update({
+                  commandant: activeCommandant,
+                  commanding_officer: activeCommandant,
+                  commanding_officer_title: activeOfficerTitle,
+                  unit_name: activeUnitName,
+                  school_name: activeSchoolName,
+                  cdc_name: activeCdcName,
+                  rcdg_name: activeRcdgName,
+                  command_profile: {
+                    commandant: activeCommandant,
+                    commanding_officer_title: activeOfficerTitle,
+                    unit_name: activeUnitName,
+                    school_name: activeSchoolName,
+                    cdc_name: activeCdcName,
+                    rcdg_name: activeRcdgName
+                  }
+                })
+                .eq('id', currentTermId);
+            }
+          } catch (_) {}
+        }
       } catch (errCloud) {
         console.warn('Supabase save settings network warning:', errCloud?.message || errCloud);
       }
@@ -767,6 +935,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleUpdateEmblemLabel = (emblemId, newLabel) => {
+    if (isArchived) return;
     setSettings(prev => {
       const list = prev.hero_emblems || DEFAULT_SETTINGS.hero_emblems;
       const updated = list.map(item => item.id === emblemId ? { ...item, label: newLabel } : item);
@@ -775,6 +944,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleToggleEmblemActive = (emblemId) => {
+    if (isArchived) return;
     setSettings(prev => {
       const list = prev.hero_emblems || DEFAULT_SETTINGS.hero_emblems;
       const updated = list.map(item => item.id === emblemId ? { ...item, active: item.active === false ? true : false } : item);
@@ -783,6 +953,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleSetCenterEmblem = (emblemId) => {
+    if (isArchived) return;
     setSettings(prev => {
       const list = prev.hero_emblems || DEFAULT_SETTINGS.hero_emblems;
       const updated = list.map(item => ({
@@ -794,6 +965,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleReorderEmblems = (fromIndex, toIndex) => {
+    if (isArchived) return;
     if (fromIndex === toIndex || fromIndex === null || toIndex === null) return;
     setSettings(prev => {
       const list = [...(prev.hero_emblems || DEFAULT_SETTINGS.hero_emblems)];
@@ -804,6 +976,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleMoveEmblem = (index, direction) => {
+    if (isArchived) return;
     setSettings(prev => {
       const list = [...(prev.hero_emblems || DEFAULT_SETTINGS.hero_emblems)];
       const targetIndex = index + direction;
@@ -816,6 +989,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleDeleteEmblem = (emblemId) => {
+    if (isArchived) return;
     const list = settings.hero_emblems || DEFAULT_SETTINGS.hero_emblems;
     if (list.length <= 1) {
       alert('You must keep at least 1 hero banner emblem.');
@@ -837,6 +1011,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleAddEmblemSlot = () => {
+    if (isArchived) return;
     const list = settings.hero_emblems || DEFAULT_SETTINGS.hero_emblems;
     const newSlotNumber = list.length + 1;
     const newEmblem = {
@@ -855,6 +1030,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   };
 
   const handleResetEmblemsToDefault = () => {
+    if (isArchived) return;
     if (confirm('Reset hero emblems to the official 5 default military & university seals?')) {
       setSettings(prev => ({
         ...prev,
@@ -916,39 +1092,45 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Download System Backup
+  // Download System Backup (scoped to selected academic term)
   const handleDownloadBackup = async () => {
     try {
-      const res = await fetch('/api/backup');
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `csu_rotc_backup_${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-        setSaveSuccessToast('System backup downloaded successfully.');
-      } else {
-        const backupData = {
-          exportTimestamp: new Date().toISOString(),
-          settings: settings,
-          cadets: cadets,
-          attendanceLogs: attendanceLogs
-        };
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `csu_rotc_local_backup_${new Date().toISOString().slice(0, 10)}.json`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        setSaveSuccessToast('Local backup downloaded successfully.');
-      }
+      // Scoped records strictly matching currentTermId
+      const scopedCadets = currentTermId
+        ? (cadets || []).filter(c => !c.academic_term_id || c.academic_term_id === currentTermId)
+        : (cadets || []);
+      const scopedAttendance = currentTermId
+        ? (attendanceLogs || []).filter(l => !l.academic_term_id || l.academic_term_id === currentTermId)
+        : (attendanceLogs || []);
+
+      const termNameSlug = selectedTerm
+        ? `${selectedTerm.academicYear}_${selectedTerm.semester}`.replace(/[^a-zA-Z0-9_-]/g, '_')
+        : 'active_term';
+
+      const backupData = {
+        exportTimestamp: new Date().toISOString(),
+        academicTermId: currentTermId,
+        academicTermName: selectedTerm ? `${selectedTerm.academicYear} • ${selectedTerm.semester}` : 'Active Term',
+        isArchived: isArchived,
+        settings: settings,
+        cadets: scopedCadets,
+        attendanceLogs: scopedAttendance
+      };
+
+      const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `csu_rotc_${termNameSlug}_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setSaveSuccessToast(
+        isArchived
+          ? 'Archived term historical snapshot downloaded successfully.'
+          : 'Term backup JSON downloaded successfully.'
+      );
     } catch (err) {
       alert('Could not download backup: ' + err.message);
     } finally {
@@ -956,8 +1138,14 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Restore System Backup
+  // Restore System Backup (strictly disabled for archived terms)
   const handleRestoreBackup = (e) => {
+    if (isArchived) {
+      alert('⚠️ Restore from backup is strictly disabled when viewing an archived academic term (Read-Only Term).');
+      if (e?.target) e.target.value = '';
+      return;
+    }
+
     const file = e.target.files[0];
     if (!file) return;
 
@@ -1007,18 +1195,33 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
   const [isClearingCadets, setIsClearingCadets] = useState(false);
   const [isClearingAttendance, setIsClearingAttendance] = useState(false);
 
-  // Clear All Cadets from Supabase & Local Cache
+  // Clear Cadets for Selected Term from Supabase & Local Cache
   const handleClearCadetsFromApp = async () => {
-    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL cadets from Supabase and clear the local cadet cache? This action cannot be undone.')) {
+    if (isArchived) {
+      alert('⚠️ Purging cadet records is strictly disabled for archived academic terms.');
+      return;
+    }
+    const termLabel = selectedTerm ? `${selectedTerm.academicYear} • ${selectedTerm.semester}` : 'the selected term';
+    if (!window.confirm(`⚠️ WARNING: Are you sure you want to delete all cadets matching "${termLabel}" (${currentTermId || 'active'}) from Supabase and clear the local cadet cache for this term? This action cannot be undone.`)) {
       return;
     }
     setIsClearingCadets(true);
     try {
-      await clearCadetsFromSupabase();
-      localStorage.removeItem('csu_rotc_cadets_roster');
+      await clearCadetsFromSupabase(currentTermId);
+      try {
+        const localRaw = localStorage.getItem('csu_rotc_cadets_roster');
+        if (localRaw) {
+          const allCadets = JSON.parse(localRaw);
+          const remaining = Array.isArray(allCadets)
+            ? (currentTermId ? allCadets.filter(c => c.academic_term_id && c.academic_term_id !== currentTermId) : [])
+            : [];
+          localStorage.setItem('csu_rotc_cadets_roster', JSON.stringify(remaining));
+        }
+      } catch (_) {}
+      setLiveTermCadets([]);
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('local-attendance-update'));
-      setSaveSuccessToast('All cadet records successfully cleared from Supabase & local cache.');
+      setSaveSuccessToast(`Cadets for ${termLabel} successfully cleared from Supabase & local cache.`);
       if (onRefresh) onRefresh();
     } catch (err) {
       alert('Error clearing cadets: ' + err.message);
@@ -1028,19 +1231,33 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     }
   };
 
-  // Clear All Attendance Logs from Supabase & Local Cache
+  // Clear Attendance Logs for Selected Term from Supabase & Local Cache
   const handleClearAttendanceFromApp = async () => {
-    if (!window.confirm('⚠️ WARNING: Are you sure you want to delete ALL attendance logs from Supabase and clear local attendance history? This action cannot be undone.')) {
+    if (isArchived) {
+      alert('⚠️ Purging attendance records is strictly disabled for archived academic terms.');
+      return;
+    }
+    const termLabel = selectedTerm ? `${selectedTerm.academicYear} • ${selectedTerm.semester}` : 'the selected term';
+    if (!window.confirm(`⚠️ WARNING: Are you sure you want to delete all attendance logs matching "${termLabel}" (${currentTermId || 'active'}) from Supabase and clear local attendance history for this term? This action cannot be undone.`)) {
       return;
     }
     setIsClearingAttendance(true);
     try {
-      await clearAttendanceFromSupabase();
-      localStorage.removeItem('csu_rotc_master_attendance');
+      await clearAttendanceFromSupabase(currentTermId);
+      try {
+        const localRaw = localStorage.getItem('csu_rotc_master_attendance');
+        if (localRaw) {
+          const allLogs = JSON.parse(localRaw);
+          const remaining = Array.isArray(allLogs)
+            ? (currentTermId ? allLogs.filter(l => l.academic_term_id && l.academic_term_id !== currentTermId) : [])
+            : [];
+          localStorage.setItem('csu_rotc_master_attendance', JSON.stringify(remaining));
+        }
+      } catch (_) {}
       localStorage.removeItem('csu_rotc_recent_approved_signatures');
       window.dispatchEvent(new Event('storage'));
       window.dispatchEvent(new Event('local-attendance-update'));
-      setSaveSuccessToast('All attendance records successfully cleared from Supabase & local cache.');
+      setSaveSuccessToast(`Attendance logs for ${termLabel} successfully cleared from Supabase & local cache.`);
       if (onRefresh) onRefresh();
     } catch (err) {
       alert('Error clearing attendance: ' + err.message);
@@ -1082,6 +1299,60 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
     return acc + ((bn.companies || []).filter(c => !c.is_archived).reduce((pAcc, co) => pAcc + ((co.platoons || []).filter(p => !p.is_archived).length), 0));
   }, 0);
   const totalBasicQuota = activeBattalionsList.reduce((acc, bn) => acc + (Number(bn.targetQuota) || 0), 0);
+
+  // Dynamic cadet calculations scoped strictly to currentTermId
+  const effectiveTermCadets = useMemo(() => {
+    if (liveTermCadets !== null) return liveTermCadets;
+    if (currentTermId && Array.isArray(cadets)) {
+      const filtered = cadets.filter(c => c.academic_term_id === currentTermId);
+      return filtered.length > 0 ? filtered : cadets;
+    }
+    return Array.isArray(cadets) ? cadets : [];
+  }, [liveTermCadets, currentTermId, cadets]);
+
+  const termEnrolledCount = effectiveTermCadets.length;
+
+  const getBattalionCadetCount = (bn) => {
+    if (!bn) return 0;
+    const bnName = String(bn.name || '').trim().toLowerCase();
+    const bnId = String(bn.id || '').trim().toLowerCase();
+    return effectiveTermCadets.filter(c =>
+      String(c.battalion || '').trim().toLowerCase() === bnName ||
+      String(c.battalion_id || '').trim().toLowerCase() === bnId
+    ).length;
+  };
+
+  const getCompanyCadetCount = (bn, co) => {
+    if (!co) return 0;
+    const coName = String(co.name || '').trim().toLowerCase();
+    const coId = String(co.id || '').trim().toLowerCase();
+    const bnName = bn ? String(bn.name || '').trim().toLowerCase() : '';
+    return effectiveTermCadets.filter(c => {
+      const matchCo = String(c.company || '').trim().toLowerCase() === coName ||
+                      String(c.company_id || '').trim().toLowerCase() === coId;
+      if (!matchCo) return false;
+      if (!bnName) return true;
+      return String(c.battalion || '').trim().toLowerCase() === bnName;
+    }).length;
+  };
+
+  const getPlatoonCadetCount = (pl, co = null, bn = null) => {
+    if (!pl) return 0;
+    const plName = String(pl.name || '').trim().toLowerCase();
+    const plId = String(pl.id || '').trim().toLowerCase();
+    if (livePlatoonHeadcounts) {
+      if (bn && co) {
+        const fullKey = `${String(bn.name || '').trim().toLowerCase()}__${String(co.name || '').trim().toLowerCase()}__${plName}`;
+        if (livePlatoonHeadcounts[fullKey] !== undefined) return livePlatoonHeadcounts[fullKey];
+      }
+      if (livePlatoonHeadcounts[plId] !== undefined) return livePlatoonHeadcounts[plId];
+      if (livePlatoonHeadcounts[plName] !== undefined) return livePlatoonHeadcounts[plName];
+    }
+    return effectiveTermCadets.filter(c =>
+      String(c.platoon || '').trim().toLowerCase() === plName ||
+      String(c.platoon_id || '').trim().toLowerCase() === plId
+    ).length;
+  };
 
   // Active platoons system-wide across all battalions and companies (excluding the echelon being deleted)
   const allActivePlatoonsSystemWide = useMemo(() => {
@@ -1789,24 +2060,58 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           <button
             className="btn btn-gold"
             onClick={handleSaveSettings}
-            disabled={isSaving}
+            disabled={isSaving || isArchived}
+            title={isArchived ? "🔒 Settings are locked for archived terms" : "Save All Settings (Ctrl+S)"}
             style={{
               padding: '0.85rem 1.75rem',
               fontSize: '0.95rem',
               fontWeight: 800,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.35)',
+              boxShadow: isArchived ? 'none' : '0 8px 24px rgba(0,0,0,0.35)',
               display: 'flex',
               alignItems: 'center',
               gap: '0.65rem',
               borderRadius: '10px',
-              cursor: isSaving ? 'not-allowed' : 'pointer'
+              cursor: (isSaving || isArchived) ? 'not-allowed' : 'pointer',
+              background: isArchived ? '#64748b' : undefined,
+              borderColor: isArchived ? '#475569' : undefined,
+              color: isArchived ? '#e2e8f0' : undefined,
+              opacity: isArchived ? 0.75 : 1
             }}
           >
-            {isSaving ? <RefreshCw size={18} className="animate-spin" /> : <Save size={18} />}
-            <span>{isSaving ? 'SAVING...' : 'SAVE ALL'}</span>
+            {isSaving ? (
+              <RefreshCw size={18} className="animate-spin" />
+            ) : isArchived ? (
+              <Lock size={18} />
+            ) : (
+              <Save size={18} />
+            )}
+            <span>{isSaving ? 'SAVING...' : isArchived ? 'LOCKED (ARCHIVED)' : 'SAVE ALL'}</span>
           </button>
         </div>
       </div>
+
+      {/* Archived Term Read-Only Notice Banner */}
+      {isArchived && (
+        <div style={{
+          background: '#fef2f2',
+          border: '1.5px solid #f87171',
+          color: '#991b1b',
+          padding: '0.85rem 1.25rem',
+          borderRadius: '12px',
+          marginBottom: '1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          fontWeight: 700,
+          fontSize: '0.9rem',
+          boxShadow: '0 2px 8px rgba(239, 68, 68, 0.1)'
+        }}>
+          <Lock size={22} color="#dc2626" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1 }}>
+            <span style={{ fontWeight: 800 }}>Archived Term (Read-Only Mode):</span> When viewing historical terms ({selectedTerm?.term_name || 'Archived'}), all settings, command profiles, logos, and unit hierarchies are locked to protect historical data integrity.
+          </div>
+        </div>
+      )}
 
       {/* Floating Save Toast Banner */}
       {saveSuccessToast && (
@@ -1948,8 +2253,17 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="time"
                   className="form-control"
                   value={settings.morningCutoffTime}
+                  disabled={isArchived}
                   onChange={(e) => handleChange('morningCutoffTime', e.target.value)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-light)',
+                    fontSize: '0.95rem',
+                    backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                    cursor: isArchived ? 'not-allowed' : 'auto'
+                  }}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
                   Default morning muster deadline (e.g., 07:30 AM). Scans on or before this are marked Present; scans after this are marked Late.
@@ -1991,8 +2305,17 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   max="30"
                   className="form-control"
                   value={settings.excuseGracePeriodDays ?? 3}
+                  disabled={isArchived}
                   onChange={(e) => handleChange('excuseGracePeriodDays', parseInt(e.target.value, 10) || 0)}
-                  style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-light)',
+                    fontSize: '0.95rem',
+                    backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                    cursor: isArchived ? 'not-allowed' : 'auto'
+                  }}
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block', lineHeight: 1.4 }}>
                   Number of days after the formation date that a cadet may still file an online excuse. After this window, any <strong>EXCUSE_PENDING</strong> records automatically convert to <strong>ABSENT</strong>.
@@ -2021,7 +2344,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                 <button
                   type="button"
                   onClick={handleFixOrphanedCadets}
-                  disabled={isReassigningOrphans}
+                  disabled={isArchived || isReassigningOrphans}
                   className="btn btn-secondary"
                   style={{
                     display: 'inline-flex',
@@ -2030,11 +2353,13 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     fontSize: '0.78rem',
                     fontWeight: 700,
                     padding: '0.45rem 0.85rem',
-                    color: '#92400e',
-                    backgroundColor: '#fef3c7',
-                    borderColor: '#fde68a'
+                    color: isArchived ? '#94a3b8' : '#92400e',
+                    backgroundColor: isArchived ? '#f1f5f9' : '#fef3c7',
+                    borderColor: isArchived ? '#cbd5e1' : '#fde68a',
+                    cursor: isArchived ? 'not-allowed' : 'pointer',
+                    opacity: isArchived ? 0.6 : 1
                   }}
-                  title="Reassign cadets from removed companies (e.g. 2nd Bn Alpha -> Charlie Company)"
+                  title={isArchived ? "🔒 Locked for archived terms" : "Reassign cadets from removed companies (e.g. 2nd Bn Alpha -> Charlie Company)"}
                 >
                   <Users size={14} /> {isReassigningOrphans ? 'Reassigning...' : 'Fix Orphaned Cadets (2nd Bn Alpha → Charlie)'}
                 </button>
@@ -2063,8 +2388,17 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={handleRestoreDefaultStructure}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem' }}
-                  title="Reset to standard CSU ROTC hierarchy (4 Battalions, 8 Companies, 16 Platoons)"
+                  disabled={isArchived}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    fontSize: '0.8rem',
+                    cursor: isArchived ? 'not-allowed' : 'pointer',
+                    opacity: isArchived ? 0.6 : 1,
+                    backgroundColor: isArchived ? '#f1f5f9' : '#ffffff'
+                  }}
+                  title={isArchived ? "🔒 Locked for archived terms" : "Reset to standard CSU ROTC hierarchy (4 Battalions, 8 Companies, 16 Platoons)"}
                 >
                   <RefreshCw size={14} /> Reset Hierarchy to CSU Defaults
                 </button>
@@ -2083,7 +2417,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #bfdbfe' }}>
                 <div style={{ fontSize: '0.72rem', color: '#1e40af', fontWeight: 700, textTransform: 'uppercase' }}>Battalions</div>
                 <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#1e3a8a' }}>{totalBattalionsCount}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{totalBasicQuota.toLocaleString()} Basic Quota</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {termEnrolledCount} Enrolled • {totalBasicQuota.toLocaleString()} Quota
+                </div>
               </div>
 
               <div style={{ padding: '0.75rem', background: '#ffffff', borderRadius: '8px', border: '1px solid #a7f3d0' }}>
@@ -2101,7 +2437,9 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               <div style={{ padding: '0.75rem', background: 'rgba(6, 78, 46, 0.08)', borderRadius: '8px', border: '1.5px solid var(--rotc-green-dark)' }}>
                 <div style={{ fontSize: '0.72rem', color: 'var(--rotc-green-dark)', fontWeight: 800, textTransform: 'uppercase' }}>Total Unit Target</div>
                 <div style={{ fontSize: '1.3rem', fontWeight: 800, color: 'var(--rotc-green-dark)' }}>{totalBasicQuota.toLocaleString()}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Basic Cadets Quota</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {termEnrolledCount} Enrolled ({totalBasicQuota > 0 ? Math.round((termEnrolledCount / totalBasicQuota) * 100) : 0}% of Target)
+                </div>
               </div>
             </div>
           </div>
@@ -2122,33 +2460,36 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenAddEchelon('battalion')}
-                  style={{
-                    background: '#2563eb',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '0.75rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    boxShadow: '0 2px 6px rgba(37, 99, 235, 0.3)'
-                  }}
-                >
-                  <Plus size={13} /> Add Bn
-                </button>
+                {!isArchived && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddEchelon('battalion')}
+                    style={{
+                      background: '#2563eb',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 2px 6px rgba(37, 99, 235, 0.3)'
+                    }}
+                  >
+                    <Plus size={13} /> Add Bn
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
                 {currentStructure.filter(bn => showArchivedUnits || !bn.is_archived).map(bn => {
                   const isSelected = selectedBnId === bn.id;
                   const coyCount = (bn.companies || []).filter(c => !c.is_archived).length;
-                  const isArchived = Boolean(bn.is_archived);
+                  const isUnitArchived = Boolean(bn.is_archived);
+                  const enrolledCount = getBattalionCadetCount(bn);
 
                   return (
                     <div
@@ -2165,65 +2506,67 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       style={{
                         padding: '0.85rem 1rem',
                         borderRadius: '10px',
-                        background: isArchived ? '#f1f5f9' : isSelected ? '#ffffff' : '#f8fafc',
-                        border: isArchived ? '1.5px dashed #94a3b8' : isSelected ? '2px solid #2563eb' : '1px solid #bfdbfe',
-                        boxShadow: isSelected && !isArchived ? '0 4px 12px rgba(37, 99, 235, 0.2)' : 'none',
-                        opacity: isArchived ? 0.78 : 1,
+                        background: isUnitArchived ? '#f1f5f9' : isSelected ? '#ffffff' : '#f8fafc',
+                        border: isUnitArchived ? '1.5px dashed #94a3b8' : isSelected ? '2px solid #2563eb' : '1px solid #bfdbfe',
+                        boxShadow: isSelected && !isUnitArchived ? '0 4px 12px rgba(37, 99, 235, 0.2)' : 'none',
+                        opacity: isUnitArchived ? 0.78 : 1,
                         cursor: 'pointer',
                         transition: 'all 0.15s ease'
                       }}
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                         <div>
-                          <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isArchived ? '#64748b' : isSelected ? '#1e3a8a' : '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isUnitArchived ? '#64748b' : isSelected ? '#1e3a8a' : '#1e40af', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             <span>{bn.name}</span>
                             <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#dbeafe', color: '#1e40af', padding: '1px 6px', borderRadius: '4px' }}>
                               {bn.shortCode || 'BN'}
                             </span>
-                            {isArchived && (
+                            {isUnitArchived && (
                               <span style={{ fontSize: '0.65rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fde68a' }}>
                                 ARCHIVED
                               </span>
                             )}
                           </div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                            {coyCount} Active Companies • Quota: <strong>{bn.targetQuota}</strong>
+                            {coyCount} Active Companies • Quota: <strong>{bn.targetQuota}</strong> • Enrolled: <strong style={{ color: '#1e40af' }}>{enrolledCount}</strong>
                           </div>
                         </div>
 
                         {/* Controls */}
-                        <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
-                          {!isArchived ? (
-                            <>
+                        {!isArchived && (
+                          <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
+                            {!isUnitArchived ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditEchelon('battalion', bn)}
+                                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
+                                  title={`Edit ${bn.name}`}
+                                >
+                                  <Edit2 size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenDeleteEchelon('battalion', bn)}
+                                  disabled={checkingDeleteUnitId === bn.id}
+                                  style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === bn.id ? 'wait' : 'pointer' }}
+                                  title={`Archive / Safe Delete ${bn.name}`}
+                                >
+                                  {checkingDeleteUnitId === bn.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                </button>
+                              </>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() => handleOpenEditEchelon('battalion', bn)}
-                                style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
-                                title={`Edit ${bn.name}`}
+                                onClick={() => handleRestoreArchivedEchelon('battalion', bn)}
+                                style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                title={`Restore ${bn.name} to active roster`}
                               >
-                                <Edit2 size={13} />
+                                <RotateCcw size={12} /> Restore
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenDeleteEchelon('battalion', bn)}
-                                disabled={checkingDeleteUnitId === bn.id}
-                                style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === bn.id ? 'wait' : 'pointer' }}
-                                title={`Archive / Safe Delete ${bn.name}`}
-                              >
-                                {checkingDeleteUnitId === bn.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleRestoreArchivedEchelon('battalion', bn)}
-                              style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                              title={`Restore ${bn.name} to active roster`}
-                            >
-                              <RotateCcw size={12} /> Restore
-                            </button>
-                          )}
-                        </div>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#2563eb' : '#94a3b8', fontWeight: 700, marginTop: '6px' }}>
@@ -2249,27 +2592,29 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenAddEchelon('company', selectedBnId)}
-                  disabled={!activeBattalion}
-                  style={{
-                    background: '#059669',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '0.75rem',
-                    fontWeight: 800,
-                    cursor: activeBattalion ? 'pointer' : 'not-allowed',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    boxShadow: '0 2px 6px rgba(5, 150, 105, 0.3)'
-                  }}
-                >
-                  <Plus size={13} /> Add Coy
-                </button>
+                {!isArchived && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddEchelon('company', selectedBnId)}
+                    disabled={!activeBattalion}
+                    style={{
+                      background: '#059669',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: activeBattalion ? 'pointer' : 'not-allowed',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 2px 6px rgba(5, 150, 105, 0.3)'
+                    }}
+                  >
+                    <Plus size={13} /> Add Coy
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
@@ -2281,7 +2626,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   (activeBattalion.companies || []).filter(co => showArchivedUnits || !co.is_archived).map(co => {
                     const isSelected = selectedCoId === co.id;
                     const pltnCount = (co.platoons || []).filter(p => !p.is_archived).length;
-                    const isArchived = Boolean(co.is_archived);
+                    const isUnitArchived = Boolean(co.is_archived);
+                    const enrolledCount = getCompanyCadetCount(activeBattalion, co);
 
                     return (
                       <div
@@ -2290,65 +2636,67 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          background: isArchived ? '#f1f5f9' : isSelected ? '#ffffff' : '#f8fafc',
-                          border: isArchived ? '1.5px dashed #94a3b8' : isSelected ? '2px solid #059669' : '1px solid #a7f3d0',
-                          boxShadow: isSelected && !isArchived ? '0 4px 12px rgba(5, 150, 105, 0.2)' : 'none',
-                          opacity: isArchived ? 0.78 : 1,
+                          background: isUnitArchived ? '#f1f5f9' : isSelected ? '#ffffff' : '#f8fafc',
+                          border: isUnitArchived ? '1.5px dashed #94a3b8' : isSelected ? '2px solid #059669' : '1px solid #a7f3d0',
+                          boxShadow: isSelected && !isUnitArchived ? '0 4px 12px rgba(5, 150, 105, 0.2)' : 'none',
+                          opacity: isUnitArchived ? 0.78 : 1,
                           cursor: 'pointer',
                           transition: 'all 0.15s ease'
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                           <div>
-                            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isArchived ? '#64748b' : isSelected ? '#064e2e' : '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ fontWeight: 800, fontSize: '0.95rem', color: isUnitArchived ? '#64748b' : isSelected ? '#064e2e' : '#065f46', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>{co.name}</span>
                               <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#d1fae5', color: '#065f46', padding: '1px 6px', borderRadius: '4px' }}>
                                 {co.shortCode || 'CO'}
                               </span>
-                              {isArchived && (
+                              {isUnitArchived && (
                                 <span style={{ fontSize: '0.65rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fde68a' }}>
                                   ARCHIVED
                                 </span>
                               )}
                             </div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                              {pltnCount} Active Platoons • Quota: <strong>{co.targetQuota}</strong>
+                              {pltnCount} Active Platoons • Quota: <strong>{co.targetQuota}</strong> • Enrolled: <strong style={{ color: '#065f46' }}>{enrolledCount}</strong>
                             </div>
                           </div>
 
                           {/* Controls */}
-                          <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
-                            {!isArchived ? (
-                              <>
+                          {!isArchived && (
+                            <div style={{ display: 'flex', gap: '4px' }} onClick={(e) => e.stopPropagation()}>
+                              {!isUnitArchived ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditEchelon('company', co, selectedBnId)}
+                                    style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
+                                    title={`Edit ${co.name}`}
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDeleteEchelon('company', co, selectedBnId)}
+                                    disabled={checkingDeleteUnitId === co.id}
+                                    style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === co.id ? 'wait' : 'pointer' }}
+                                    title={`Archive / Safe Delete ${co.name}`}
+                                  >
+                                    {checkingDeleteUnitId === co.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                  </button>
+                                </>
+                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenEditEchelon('company', co, selectedBnId)}
-                                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
-                                  title={`Edit ${co.name}`}
+                                  onClick={() => handleRestoreArchivedEchelon('company', co, selectedBnId)}
+                                  style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title={`Restore ${co.name} to active roster`}
                                 >
-                                  <Edit2 size={13} />
+                                  <RotateCcw size={12} /> Restore
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenDeleteEchelon('company', co, selectedBnId)}
-                                  disabled={checkingDeleteUnitId === co.id}
-                                  style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === co.id ? 'wait' : 'pointer' }}
-                                  title={`Archive / Safe Delete ${co.name}`}
-                                >
-                                  {checkingDeleteUnitId === co.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreArchivedEchelon('company', co, selectedBnId)}
-                                style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                                title={`Restore ${co.name} to active roster`}
-                              >
-                                <RotateCcw size={12} /> Restore
-                              </button>
-                            )}
-                          </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.7rem', color: isSelected ? '#059669' : '#94a3b8', fontWeight: 700, marginTop: '6px' }}>
@@ -2375,27 +2723,29 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleOpenAddEchelon('platoon', selectedCoId)}
-                  disabled={!activeCompany}
-                  style={{
-                    background: '#d97706',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '4px 10px',
-                    fontSize: '0.75rem',
-                    fontWeight: 800,
-                    cursor: activeCompany ? 'pointer' : 'not-allowed',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    boxShadow: '0 2px 6px rgba(217, 119, 6, 0.3)'
-                  }}
-                >
-                  <Plus size={13} /> Add Pltn
-                </button>
+                {!isArchived && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAddEchelon('platoon', selectedCoId)}
+                    disabled={!activeCompany}
+                    style={{
+                      background: '#d97706',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '4px 10px',
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      cursor: activeCompany ? 'pointer' : 'not-allowed',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: '0 2px 6px rgba(217, 119, 6, 0.3)'
+                    }}
+                  >
+                    <Plus size={13} /> Add Pltn
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginTop: '0.75rem' }}>
@@ -2405,71 +2755,74 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   </div>
                 ) : (
                   (activeCompany.platoons || []).filter(pl => showArchivedUnits || !pl.is_archived).map(pl => {
-                    const isArchived = Boolean(pl.is_archived);
+                    const isUnitArchived = Boolean(pl.is_archived);
+                    const enrolledCount = getPlatoonCadetCount(pl, activeCompany, activeBattalion);
                     return (
                       <div
                         key={pl.id}
                         style={{
                           padding: '0.85rem 1rem',
                           borderRadius: '10px',
-                          background: isArchived ? '#f1f5f9' : '#ffffff',
-                          border: isArchived ? '1.5px dashed #94a3b8' : '1px solid #fde68a',
+                          background: isUnitArchived ? '#f1f5f9' : '#ffffff',
+                          border: isUnitArchived ? '1.5px dashed #94a3b8' : '1px solid #fde68a',
                           boxShadow: 'none',
-                          opacity: isArchived ? 0.78 : 1,
+                          opacity: isUnitArchived ? 0.78 : 1,
                           transition: 'all 0.15s ease'
                         }}
                       >
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div>
-                            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: isArchived ? '#64748b' : '#78350f', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <div style={{ fontWeight: 800, fontSize: '0.92rem', color: isUnitArchived ? '#64748b' : '#78350f', display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span>{pl.name}</span>
                               <span style={{ fontSize: '0.68rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px' }}>
                                 {pl.shortCode || 'PLTN'}
                               </span>
-                              {isArchived && (
+                              {isUnitArchived && (
                                 <span style={{ fontSize: '0.65rem', fontWeight: 800, background: '#fef3c7', color: '#92400e', padding: '1px 6px', borderRadius: '4px', border: '1px solid #fde68a' }}>
                                   ARCHIVED
                                 </span>
                               )}
                             </div>
                             <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px' }}>
-                              Capacity Quota: <strong>{pl.targetQuota} Cadets</strong>
+                              Capacity Quota: <strong>{pl.targetQuota} Cadets</strong> • Enrolled: <strong style={{ color: '#92400e' }}>{enrolledCount}</strong>
                             </div>
                           </div>
 
                           {/* Controls */}
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            {!isArchived ? (
-                              <>
+                          {!isArchived && (
+                            <div style={{ display: 'flex', gap: '4px' }}>
+                              {!isUnitArchived ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditEchelon('platoon', pl, selectedCoId)}
+                                    style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
+                                    title={`Edit ${pl.name}`}
+                                  >
+                                    <Edit2 size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenDeleteEchelon('platoon', pl, selectedCoId)}
+                                    disabled={checkingDeleteUnitId === pl.id}
+                                    style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === pl.id ? 'wait' : 'pointer' }}
+                                    title={`Archive / Safe Delete ${pl.name}`}
+                                  >
+                                    {checkingDeleteUnitId === pl.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                                  </button>
+                                </>
+                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handleOpenEditEchelon('platoon', pl, selectedCoId)}
-                                  style={{ background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '6px', padding: '4px 6px', color: '#334155', cursor: 'pointer' }}
-                                  title={`Edit ${pl.name}`}
+                                  onClick={() => handleRestoreArchivedEchelon('platoon', pl, selectedCoId)}
+                                  style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                                  title={`Restore ${pl.name} to active roster`}
                                 >
-                                  <Edit2 size={13} />
+                                  <RotateCcw size={12} /> Restore
                                 </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenDeleteEchelon('platoon', pl, selectedCoId)}
-                                  disabled={checkingDeleteUnitId === pl.id}
-                                  style={{ background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '4px 6px', color: '#dc2626', cursor: checkingDeleteUnitId === pl.id ? 'wait' : 'pointer' }}
-                                  title={`Archive / Safe Delete ${pl.name}`}
-                                >
-                                  {checkingDeleteUnitId === pl.id ? <RefreshCw size={13} className="animate-spin" /> : <Trash2 size={13} />}
-                                </button>
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => handleRestoreArchivedEchelon('platoon', pl, selectedCoId)}
-                                style={{ background: '#d1fae5', border: '1px solid #a7f3d0', borderRadius: '6px', padding: '4px 8px', color: '#065f46', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-                                title={`Restore ${pl.name} to active roster`}
-                              >
-                                <RotateCcw size={12} /> Restore
-                              </button>
-                            )}
-                          </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
@@ -2509,9 +2862,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     type="text"
                     className="form-control"
                     value={settings.commandant || settings.commandingOfficer || ''}
+                    disabled={isArchived}
                     onChange={(e) => handleChange('commandant', e.target.value)}
                     placeholder="e.g. LTC CHRISTIAN B ABAMO INF (GSC) PA"
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      fontSize: '0.95rem',
+                      backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                      cursor: isArchived ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
 
@@ -2524,9 +2886,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     type="text"
                     className="form-control"
                     value={settings.unit_name || settings.unitName || ''}
+                    disabled={isArchived}
                     onChange={(e) => handleChange('unit_name', e.target.value)}
                     placeholder="e.g. 1501st CDC ROTC Unit"
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      fontSize: '0.95rem',
+                      backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                      cursor: isArchived ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
 
@@ -2539,9 +2910,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     type="text"
                     className="form-control"
                     value={settings.school_name || settings.hostInstitution || ''}
+                    disabled={isArchived}
                     onChange={(e) => handleChange('school_name', e.target.value)}
                     placeholder="e.g. Caraga State University (CSU Main Campus, Ampayon, Butuan City)"
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      fontSize: '0.95rem',
+                      backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                      cursor: isArchived ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
 
@@ -2554,9 +2934,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     type="text"
                     className="form-control"
                     value={settings.cdc_name || ''}
+                    disabled={isArchived}
                     onChange={(e) => handleChange('cdc_name', e.target.value)}
                     placeholder="e.g. 1501st Community Defense Center"
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      fontSize: '0.95rem',
+                      backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                      cursor: isArchived ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
 
@@ -2569,9 +2958,18 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     type="text"
                     className="form-control"
                     value={settings.rcdg_name || settings.parentCommand || ''}
+                    disabled={isArchived}
                     onChange={(e) => handleChange('rcdg_name', e.target.value)}
                     placeholder="e.g. 15th Regional Community Defense Group (15RCDG)"
-                    style={{ width: '100%', padding: '0.7rem', borderRadius: '8px', border: '1px solid var(--border-light)', fontSize: '0.95rem' }}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-light)',
+                      fontSize: '0.95rem',
+                      backgroundColor: isArchived ? '#f1f5f9' : '#ffffff',
+                      cursor: isArchived ? 'not-allowed' : 'auto'
+                    }}
                   />
                 </div>
               </div>
@@ -2610,7 +3008,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       <button
                         type="button"
                         onClick={() => handleOrientationChange('portrait')}
-                        className={`flex-1 py-3 px-4 rounded-l-xl rounded-r-none transition-all flex items-center justify-center gap-2 cursor-pointer ${orientation === 'portrait'
+                        disabled={isArchived}
+                        className={`flex-1 py-3 px-4 rounded-l-xl rounded-r-none transition-all flex items-center justify-center gap-2 ${orientation === 'portrait'
                           ? 'border-2 border-[#004d25] bg-emerald-100 text-[#004d25] font-black z-10 shadow-xs'
                           : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 font-bold border-r-0'
                           }`}
@@ -2626,7 +3025,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                           backgroundColor: orientation === 'portrait' ? '#d1fae5' : '#ffffff',
                           color: orientation === 'portrait' ? '#004d25' : '#475569',
                           fontWeight: 900,
-                          cursor: 'pointer',
+                          cursor: isArchived ? 'not-allowed' : 'pointer',
+                          opacity: isArchived ? 0.65 : 1,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -2644,7 +3044,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       <button
                         type="button"
                         onClick={() => handleOrientationChange('landscape')}
-                        className={`flex-1 py-3 px-4 rounded-r-xl rounded-l-none transition-all flex items-center justify-center gap-2 cursor-pointer ${orientation === 'landscape'
+                        disabled={isArchived}
+                        className={`flex-1 py-3 px-4 rounded-r-xl rounded-l-none transition-all flex items-center justify-center gap-2 ${orientation === 'landscape'
                           ? 'border-2 border-[#004d25] bg-emerald-100 text-[#004d25] font-black z-10 shadow-xs'
                           : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 font-bold border-l-0'
                           }`}
@@ -2660,7 +3061,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                           backgroundColor: orientation === 'landscape' ? '#d1fae5' : '#ffffff',
                           color: orientation === 'landscape' ? '#004d25' : '#475569',
                           fontWeight: 900,
-                          cursor: 'pointer',
+                          cursor: isArchived ? 'not-allowed' : 'pointer',
+                          opacity: isArchived ? 0.65 : 1,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -2702,6 +3104,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               ref={dynamicEmblemFileInputRef}
               accept="image/*"
               style={{ display: 'none' }}
+              disabled={isArchived}
               onChange={handleDynamicEmblemFileChange}
             />
 
@@ -2715,8 +3118,15 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="button"
                   className="btn btn-secondary btn-sm"
                   onClick={handleResetEmblemsToDefault}
-                  style={{ fontSize: '0.72rem', padding: '4px 8px', color: '#64748b' }}
-                  title="Reset to 5 official default seals"
+                  disabled={isArchived}
+                  style={{
+                    fontSize: '0.72rem',
+                    padding: '4px 8px',
+                    color: isArchived ? '#94a3b8' : '#64748b',
+                    cursor: isArchived ? 'not-allowed' : 'pointer',
+                    opacity: isArchived ? 0.6 : 1
+                  }}
+                  title={isArchived ? "🔒 Locked for archived terms" : "Reset to 5 official default seals"}
                 >
                   <RefreshCw size={11} style={{ marginRight: '4px' }} />
                   Reset Defaults
@@ -2725,16 +3135,21 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="button"
                   className="btn btn-primary btn-sm"
                   onClick={handleAddEmblemSlot}
+                  disabled={isArchived}
                   style={{
                     fontSize: '0.75rem',
                     fontWeight: 700,
                     padding: '4px 10px',
-                    background: '#064e2e',
-                    borderColor: '#064e2e',
+                    background: isArchived ? '#94a3b8' : '#064e2e',
+                    borderColor: isArchived ? '#cbd5e1' : '#064e2e',
+                    color: '#ffffff',
+                    cursor: isArchived ? 'not-allowed' : 'pointer',
+                    opacity: isArchived ? 0.6 : 1,
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: '5px'
                   }}
+                  title={isArchived ? "🔒 Locked for archived terms" : "Add Emblem Slot"}
                 >
                   <Plus size={14} />
                   <span>Add Emblem Slot</span>
@@ -2764,12 +3179,14 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                 return (
                   <div
                     key={emblem.id || `emblem-${index}`}
-                    draggable
+                    draggable={!isArchived}
                     onDragStart={(e) => {
+                      if (isArchived) return;
                       setDraggedEmblemIndex(index);
                       e.dataTransfer.effectAllowed = 'move';
                     }}
                     onDragOver={(e) => {
+                      if (isArchived) return;
                       e.preventDefault();
                       e.dataTransfer.dropEffect = 'move';
                       if (dragOverEmblemIndex !== index) setDragOverEmblemIndex(index);
@@ -2778,6 +3195,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       if (dragOverEmblemIndex === index) setDragOverEmblemIndex(null);
                     }}
                     onDrop={(e) => {
+                      if (isArchived) return;
                       e.preventDefault();
                       if (draggedEmblemIndex !== null && draggedEmblemIndex !== index) {
                         handleReorderEmblems(draggedEmblemIndex, index);
@@ -2801,71 +3219,79 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       alignItems: 'center',
                       minHeight: '145px',
                       opacity: isDragging ? 0.35 : 1,
-                      cursor: 'grab',
+                      cursor: isArchived ? 'default' : 'grab',
                       transition: 'all 0.2s ease',
                       position: 'relative'
                     }}
                   >
                     {/* Top Action Row: Drag Handle (Left) & Action Icons Edit / Delete (Right) */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '0.4rem' }}>
-                      <div
-                        title="Drag card to reorder position"
-                        style={{ display: 'flex', alignItems: 'center', color: '#94a3b8', cursor: 'grab', padding: '2px' }}
-                      >
-                        <GripVertical size={16} />
-                      </div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginBottom: '0.4rem', minHeight: '22px' }}>
+                      {!isArchived ? (
+                        <>
+                          <div
+                            title="Drag card to reorder position"
+                            style={{ display: 'flex', alignItems: 'center', color: '#94a3b8', cursor: 'grab', padding: '2px' }}
+                          >
+                            <GripVertical size={16} />
+                          </div>
 
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        {/* Edit Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingEmblem({ ...emblem });
-                          }}
-                          title={`Edit ${emblem.label || 'Emblem'}`}
-                          style={{
-                            border: '1px solid #cbd5e1',
-                            background: '#ffffff',
-                            color: '#475569',
-                            borderRadius: '6px',
-                            padding: '3px 6px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#059669'; e.currentTarget.style.color = '#059669'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#475569'; }}
-                        >
-                          <Pencil size={12} />
-                        </button>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            {/* Edit Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingEmblem({ ...emblem });
+                              }}
+                              title={`Edit ${emblem.label || 'Emblem'}`}
+                              style={{
+                                border: '1px solid #cbd5e1',
+                                background: '#ffffff',
+                                color: '#475569',
+                                borderRadius: '6px',
+                                padding: '3px 6px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#059669'; e.currentTarget.style.color = '#059669'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#cbd5e1'; e.currentTarget.style.color = '#475569'; }}
+                            >
+                              <Pencil size={12} />
+                            </button>
 
-                        {/* Delete Button */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteEmblem(emblem.id);
-                          }}
-                          title="Delete Emblem Slot"
-                          style={{
-                            border: '1px solid #fecaca',
-                            background: '#ffffff',
-                            color: '#dc2626',
-                            borderRadius: '6px',
-                            padding: '3px 6px',
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            transition: 'all 0.15s ease'
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
+                            {/* Delete Button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteEmblem(emblem.id);
+                              }}
+                              title="Delete Emblem Slot"
+                              style={{
+                                border: '1px solid #fecaca',
+                                background: '#ffffff',
+                                color: '#dc2626',
+                                borderRadius: '6px',
+                                padding: '3px 6px',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                transition: 'all 0.15s ease'
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: '0.65rem', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.5px' }}>
+                          POSITION #{index + 1}
+                        </div>
+                      )}
                     </div>
 
                     {/* Card Surface: Image-Only with Hover Tooltip */}
@@ -2939,7 +3365,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           </div>
 
           {/* Edit Emblem Modal */}
-          {editingEmblem && (
+          {editingEmblem && !isArchived && (
             <div
               style={{
                 position: 'fixed',
@@ -3157,6 +3583,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       type="text"
                       className="form-control"
                       value={settings.exportDirectory}
+                      disabled={isArchived}
                       onChange={(e) => handleChange('exportDirectory', e.target.value)}
                       style={{
                         width: '100%',
@@ -3164,14 +3591,21 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                         borderRadius: '10px',
                         border: '1.5px solid #cbd5e1',
                         fontSize: '0.95rem',
-                        background: '#ffffff',
+                        background: isArchived ? '#f1f5f9' : '#ffffff',
+                        cursor: isArchived ? 'not-allowed' : 'text',
                         boxShadow: '0 1px 2px rgba(0,0,0,0.04)'
                       }}
                       placeholder="e.g., C:/Users/.../Desktop/ROTC ATTENDANCE/EXPORTS"
                     />
-                    <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '6px', display: 'block' }}>
-                      Designated local storage path where periodic master and platoon <code>.xlsx</code> attendance reports are saved.
-                    </span>
+                    {isArchived ? (
+                      <span style={{ fontSize: '0.76rem', color: '#b45309', marginTop: '6px', display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 700 }}>
+                        <Lock size={12} /> Directory settings locked during historical review to prevent path tampering.
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: '6px', display: 'block' }}>
+                        Designated local storage path where periodic master and platoon <code>.xlsx</code> attendance reports are saved.
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3182,6 +3616,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   type="button"
                   className="btn btn-secondary"
                   onClick={handleDownloadBackup}
+                  title="Download JSON backup snapshot for this academic term"
                   style={{
                     padding: '0.85rem 1rem',
                     display: 'flex',
@@ -3195,7 +3630,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   }}
                 >
                   <Download size={17} />
-                  <span>Download Backup JSON</span>
+                  <span>Download Backup JSON {isArchived ? '(Archived)' : ''}</span>
                 </button>
 
                 <input
@@ -3203,12 +3638,15 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                   ref={backupFileInputRef}
                   accept=".json"
                   style={{ display: 'none' }}
+                  disabled={isArchived}
                   onChange={handleRestoreBackup}
                 />
                 <button
                   type="button"
                   className="btn btn-secondary"
-                  onClick={() => backupFileInputRef.current?.click()}
+                  disabled={isArchived}
+                  onClick={() => !isArchived && backupFileInputRef.current?.click()}
+                  title={isArchived ? "🔒 Restoring from backup is strictly disabled for archived terms" : "Restore system data from backup JSON"}
                   style={{
                     padding: '0.85rem 1rem',
                     display: 'flex',
@@ -3218,11 +3656,14 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     fontSize: '0.88rem',
                     fontWeight: 700,
                     borderRadius: '10px',
-                    width: '100%'
+                    width: '100%',
+                    opacity: isArchived ? 0.5 : 1,
+                    cursor: isArchived ? 'not-allowed' : 'pointer',
+                    background: isArchived ? '#f1f5f9' : undefined
                   }}
                 >
-                  <Upload size={17} />
-                  <span>Restore from Backup</span>
+                  {isArchived ? <Lock size={16} /> : <Upload size={17} />}
+                  <span>{isArchived ? '🔒 Restore Disabled (Archived Term)' : 'Restore from Backup'}</span>
                 </button>
               </div>
             </div>
@@ -3281,8 +3722,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                     boxShadow: '0 2px 8px rgba(229, 169, 0, 0.25)'
                   }}
                 >
-                  <Settings size={18} />
-                  <span>Open Letterhead & Signatories Editor</span>
+                  {isArchived ? <Lock size={18} /> : <Settings size={18} />}
+                  <span>{isArchived ? 'View Letterhead & Signatories (Read-Only Preview)' : 'Open Letterhead & Signatories Editor'}</span>
                 </button>
               </div>
             </div>
@@ -3292,8 +3733,8 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
           <div
             className="card"
             style={{
-              border: '1.5px solid #fca5a5',
-              background: '#fffafb',
+              border: isArchived ? '1.5px solid #cbd5e1' : '1.5px solid #fca5a5',
+              background: isArchived ? '#f8fafc' : '#fffafb',
               borderRadius: '16px',
               padding: '2rem',
               margin: 0,
@@ -3301,37 +3742,52 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
               width: '100%'
             }}
           >
-            <div className="card-header" style={{ marginBottom: '1.25rem', paddingBottom: '0.85rem', borderColor: '#fecaca' }}>
-              <div className="card-title" style={{ color: '#991b1b', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
-                <Trash2 size={22} color="#dc2626" />
+            <div className="card-header" style={{ marginBottom: '1.25rem', paddingBottom: '0.85rem', borderColor: isArchived ? '#e2e8f0' : '#fecaca' }}>
+              <div className="card-title" style={{ color: isArchived ? '#475569' : '#991b1b', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}>
+                <Trash2 size={22} color={isArchived ? '#64748b' : '#dc2626'} />
                 <span>Database & Cloud Roster Maintenance</span>
               </div>
-              <span className="badge badge-absent" style={{ fontSize: '0.72rem', letterSpacing: '0.04em' }}>ADMIN PURGE</span>
+              {isArchived ? (
+                <span className="badge" style={{ background: '#fef3c7', color: '#92400e', border: '1px solid #f59e0b', fontSize: '0.72rem', letterSpacing: '0.04em' }}>
+                  🔒 PURGING LOCKED (ARCHIVED)
+                </span>
+              ) : (
+                <span className="badge badge-absent" style={{ fontSize: '0.72rem', letterSpacing: '0.04em' }}>ADMIN PURGE</span>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-              <p style={{ fontSize: '0.85rem', color: '#7f1d1d', margin: 0, lineHeight: 1.55 }}>
-                Manage or wipe database records stored in Supabase and local browser cache. Use caution when wiping master cadets or attendance logs.
+              <p style={{ fontSize: '0.85rem', color: isArchived ? '#92400e' : '#7f1d1d', margin: 0, lineHeight: 1.55 }}>
+                {isArchived ? (
+                  <span>
+                    🔒 <strong>Archived Academic Term:</strong> Database purges are strictly disabled while inspecting historical terms to preserve data integrity and historical attendance records.
+                  </span>
+                ) : (
+                  <span>
+                    Manage or wipe database records stored in Supabase and local browser cache strictly matching <strong>academic_term_id = {currentTermId ? `${currentTermId} (${selectedTerm ? `${selectedTerm.academicYear} • ${selectedTerm.semester}` : 'Active Term'})` : 'selectedTermId'}</strong>.
+                  </span>
+                )}
               </p>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
                 {/* Clear Cadets */}
-                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: isArchived ? '1px solid #cbd5e1' : '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#991b1b', marginBottom: '4px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: isArchived ? '#475569' : '#991b1b', marginBottom: '4px' }}>
                       Clear Cadets Directory
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                      Deletes all registered cadets from Supabase <code>cadets</code> table and clears local cadet roster cache.
+                      Deletes registered cadets strictly matching <code>academic_term_id = {currentTermId || 'selectedTermId'}</code> from Supabase <code>cadets</code> table and clears local cache.
                     </div>
                   </div>
                   <button
                     type="button"
                     className="btn"
                     onClick={handleClearCadetsFromApp}
-                    disabled={isClearingCadets}
+                    disabled={isArchived || isClearingCadets}
+                    title={isArchived ? "🔒 Purging cadets is strictly disabled for archived terms" : "Delete cadets for selected term"}
                     style={{
-                      background: '#ef4444',
+                      background: isArchived ? '#94a3b8' : '#ef4444',
                       color: '#ffffff',
                       fontWeight: 800,
                       borderRadius: '8px',
@@ -3343,31 +3799,33 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       gap: '8px',
                       border: 'none',
                       width: '100%',
-                      cursor: isClearingCadets ? 'not-allowed' : 'pointer'
+                      opacity: isArchived ? 0.6 : 1,
+                      cursor: (isArchived || isClearingCadets) ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    <Trash2 size={16} />
-                    <span>{isClearingCadets ? 'Clearing Cadets...' : 'Clear All Cadets in Supabase & Local'}</span>
+                    {isArchived ? <Lock size={16} /> : <Trash2 size={16} />}
+                    <span>{isArchived ? '🔒 Purge Disabled (Archived Term)' : isClearingCadets ? 'Clearing Cadets...' : 'Clear All Cadets in Supabase & Local'}</span>
                   </button>
                 </div>
 
                 {/* Clear Attendance */}
-                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
+                <div style={{ background: '#ffffff', padding: '1.25rem', borderRadius: '12px', border: isArchived ? '1px solid #cbd5e1' : '1px solid #fecaca', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: '1rem', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}>
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: '#991b1b', marginBottom: '4px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '0.94rem', color: isArchived ? '#475569' : '#991b1b', marginBottom: '4px' }}>
                       Clear Attendance Logs
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                      Deletes all scan history from Supabase <code>attendance_logs</code> table and clears local attendance records.
+                      Deletes scan history strictly matching <code>academic_term_id = {currentTermId || 'selectedTermId'}</code> from Supabase <code>attendance_logs</code> table and clears local records.
                     </div>
                   </div>
                   <button
                     type="button"
                     className="btn"
                     onClick={handleClearAttendanceFromApp}
-                    disabled={isClearingAttendance}
+                    disabled={isArchived || isClearingAttendance}
+                    title={isArchived ? "🔒 Purging attendance is strictly disabled for archived terms" : "Delete attendance for selected term"}
                     style={{
-                      background: '#b91c1c',
+                      background: isArchived ? '#94a3b8' : '#b91c1c',
                       color: '#ffffff',
                       fontWeight: 800,
                       borderRadius: '8px',
@@ -3379,11 +3837,12 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
                       gap: '8px',
                       border: 'none',
                       width: '100%',
-                      cursor: isClearingAttendance ? 'not-allowed' : 'pointer'
+                      opacity: isArchived ? 0.6 : 1,
+                      cursor: (isArchived || isClearingAttendance) ? 'not-allowed' : 'pointer'
                     }}
                   >
-                    <Trash2 size={16} />
-                    <span>{isClearingAttendance ? 'Clearing Logs...' : 'Clear All Attendance in Supabase & Local'}</span>
+                    {isArchived ? <Lock size={16} /> : <Trash2 size={16} />}
+                    <span>{isArchived ? '🔒 Purge Disabled (Archived Term)' : isClearingAttendance ? 'Clearing Logs...' : 'Clear All Attendance in Supabase & Local'}</span>
                   </button>
                 </div>
               </div>
@@ -4075,6 +4534,7 @@ export default function AdminSettings({ cadets = [], attendanceLogs = [], onRefr
       {/* Official Excel Report Letterhead & Signatories Modal */}
       <LetterheadSettingsModal
         isOpen={isLetterheadModalOpen}
+        readOnly={isArchived}
         onClose={() => setIsLetterheadModalOpen(false)}
         onSaved={() => {
           setSaveSuccessToast("Excel letterhead configuration updated successfully.");

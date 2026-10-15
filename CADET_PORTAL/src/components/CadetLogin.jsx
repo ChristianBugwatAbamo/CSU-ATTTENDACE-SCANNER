@@ -554,7 +554,7 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
               color: '#64748b'
             }}
           >
-            Caraga State University Main ROTC Unit
+            Caraga State University
           </div>
         </div>
       </div>

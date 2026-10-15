@@ -46,7 +46,8 @@ export default function CadetRosterHierarchy() {
       const plClean = plMatch ? plMatch[1] : (selectedPlatoon || '').trim();
 
       if (client) {
-        let query = client.from('cadets').select('*');
+        // Query read-optimized 3NF database view
+        let query = client.from('vw_cadet_master_roster').select('*');
 
         // Always scope strictly to the selected academic term
         if (currentTermId) {
@@ -60,7 +61,21 @@ export default function CadetRosterHierarchy() {
           if (plClean) query = query.ilike('platoon', `%${plClean}%`);
         }
 
-        const { data, error } = await query.order('name', { ascending: true });
+        let { data, error } = await query.order('name', { ascending: true });
+
+        // Resilient fallback to cadets table if view has not yet been applied
+        if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
+          let fbQuery = client.from('cadets').select('*');
+          if (currentTermId) fbQuery = fbQuery.eq('academic_term_id', currentTermId);
+          if (viewMode === 'drilldown') {
+            if (bnClean) fbQuery = fbQuery.ilike('battalion', `%${bnClean}%`);
+            if (coClean) fbQuery = fbQuery.ilike('company', `%${coClean}%`);
+            if (plClean) fbQuery = fbQuery.ilike('platoon', `%${plClean}%`);
+          }
+          const fbRes = await fbQuery.order('name', { ascending: true });
+          data = fbRes.data;
+          error = fbRes.error;
+        }
 
         if (!error && Array.isArray(data)) {
           fetchedCadets = data;
@@ -70,6 +85,7 @@ export default function CadetRosterHierarchy() {
           }
         }
       }
+
 
       // Fallback to local storage roster strictly if offline / network error
       if (!fetchedSuccessfully) {

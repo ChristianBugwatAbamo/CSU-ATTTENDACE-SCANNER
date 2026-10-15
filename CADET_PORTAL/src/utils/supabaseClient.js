@@ -514,9 +514,9 @@ export async function fetchCadetByCadetId(rawCadetId, rawLastName = '') {
         }
       }
 
-      // Query by id matching cleanId or dashedId
+      // Query by id matching cleanId or dashedId using read-optimized 3NF view
       const candidates = Array.from(new Set([cleanId, dashedId])).filter(Boolean);
-      let query = supabase.from('cadets').select('*');
+      let query = supabase.from('vw_cadet_master_roster').select('*');
 
       if (candidates.length === 1) {
         query = query.eq('id', candidates[0]);
@@ -524,7 +524,21 @@ export async function fetchCadetByCadetId(rawCadetId, rawLastName = '') {
         query = query.or(candidates.map(c => `id.eq.${c}`).join(','));
       }
 
-      const { data, error } = await query.limit(1).maybeSingle();
+      let { data, error } = await query.limit(1).maybeSingle();
+
+      // Resilient fallback to cadets table if view has not yet been applied
+      if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
+        let fbQuery = supabase.from('cadets').select('*');
+        if (candidates.length === 1) {
+          fbQuery = fbQuery.eq('id', candidates[0]);
+        } else {
+          fbQuery = fbQuery.or(candidates.map(c => `id.eq.${c}`).join(','));
+        }
+        const fbRes = await fbQuery.limit(1).maybeSingle();
+        data = fbRes.data;
+        error = fbRes.error;
+      }
+
 
       if (!error && data) {
         // Enforce strict exact equality verification on ID
@@ -638,11 +652,34 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
         ? `cadet_id.eq.${cleanId},cadet_id.eq.${dashedId}`
         : `cadet_id.eq.${cleanId}`;
 
+      // 1. Primary: Sub-second read-optimized view vw_cadet_portal_summary
       let { data, error } = await supabase
-        .from('attendance_logs')
+        .from('vw_cadet_portal_summary')
         .select('*')
         .or(orCond)
         .order('date', { ascending: false });
+
+      // Fallback: vw_attendance_logs_detailed or base attendance_logs
+      if (error || !data) {
+        const detailedRes = await supabase
+          .from('vw_attendance_logs_detailed')
+          .select('*')
+          .or(orCond)
+          .order('date', { ascending: false });
+
+        if (!detailedRes.error && Array.isArray(detailedRes.data)) {
+          data = detailedRes.data;
+          error = null;
+        } else {
+          const rawRes = await supabase
+            .from('attendance_logs')
+            .select('*')
+            .or(orCond)
+            .order('date', { ascending: false });
+          data = rawRes.data;
+          error = rawRes.error;
+        }
+      }
 
       if (!error && Array.isArray(data) && data.length > 0) {
         logs = data.map(l => ({
@@ -816,7 +853,7 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
     // 1. Strict validation: Verify that an official formation session exists in attendance_sessions
     const { data: sessionData, error: sessionErr } = await client
       .from('attendance_sessions')
-      .select('id, session_name, session_date')
+      .select('id, session_name, session_date, academic_term_id')
       .eq('session_date', dateKey)
       .limit(1)
       .maybeSingle();
@@ -832,7 +869,7 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
             session_type: 'TRAINING_DAY',
             status: 'OPEN'
           })
-          .select('id, session_name, session_date')
+          .select('id, session_name, session_date, academic_term_id')
           .maybeSingle();
         if (newSession?.id) {
           session = newSession;
@@ -848,10 +885,10 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       };
     }
 
-    // Check if record already exists for this cadet and date
+    // Check if record already exists for this cadet and date (avoid referencing dropped columns)
     const { data: existing } = await client
       .from('attendance_logs')
-      .select('id, status, session_id, name, rank, battalion, company, platoon')
+      .select('id, status, session_id, academic_term_id')
       .eq('cadet_id', cid)
       .eq('date', dateKey)
       .maybeSingle();
@@ -940,29 +977,28 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
       };
     } else {
       // INSERT new minimal row for unrecorded formation or unscanned date
-      // Fetch cadet profile from master roster to satisfy NOT NULL constraints (e.g. name)
+      // Fetch cadet profile to resolve academic_term_id without referencing dropped columns
       const { data: cadetProfile } = await client
         .from('cadets')
-        .select('name, rank, battalion, company, platoon')
+        .select('id, academic_term_id')
         .eq('id', cid)
         .maybeSingle();
 
       // Check if an official session exists for this date to avoid foreign key rejections
       const { data: sessionData } = await client
         .from('attendance_sessions')
-        .select('id')
+        .select('id, academic_term_id')
         .eq('session_date', dateKey)
         .limit(1)
         .maybeSingle();
 
+      const resolvedTermId = session?.academic_term_id || sessionData?.academic_term_id || cadetProfile?.academic_term_id || null;
+
+      // 3NF payload: dropped columns (battalion, company, platoon, name, rank) removed
+      // Backend resolves unit details purely via cadet_id and academic_term_id
       const insertPayload = {
         session_id: session?.id || sessionData?.id || null,
         cadet_id: cid,
-        name: cadetProfile?.name || ('Cadet ' + cid),
-        rank: cadetProfile?.rank || 'Cadet',
-        battalion: cadetProfile?.battalion || '1st Battalion',
-        company: cadetProfile?.company || 'Alpha Company',
-        platoon: cadetProfile?.platoon || '1st Platoon',
         date: dateKey,
         status: 'EXCUSE_PENDING',
         final_daily_status: 'EXCUSE_PENDING',
@@ -971,6 +1007,10 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
         excuse_submitted_at: now,
         updated_at: now
       };
+
+      if (resolvedTermId) {
+        insertPayload.academic_term_id = resolvedTermId;
+      }
 
       let { data, error } = await client
         .from('attendance_logs')
@@ -996,17 +1036,22 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
 
       // Also sync to excuse_requests table if present in Supabase
       try {
+        const excusePayload = {
+          cadet_id: cid,
+          drill_date: dateKey,
+          date: dateKey,
+          reason: reason || '',
+          proof_url: proofDataUrl || null,
+          status: 'PENDING',
+          submitted_at: now,
+          updated_at: now
+        };
+        if (resolvedTermId) {
+          excusePayload.academic_term_id = resolvedTermId;
+        }
         await client
           .from('excuse_requests')
-          .upsert({
-            cadet_id: cid,
-            drill_date: dateKey,
-            date: dateKey,
-            reason: reason || '',
-            status: 'PENDING',
-            submitted_at: now,
-            updated_at: now
-          }, { onConflict: 'cadet_id,drill_date' });
+          .upsert(excusePayload, { onConflict: 'cadet_id,drill_date' });
       } catch (_) { }
 
       return { data, created: true, message: 'Excuse request submitted successfully! Awaiting Duty Officer verification.' };

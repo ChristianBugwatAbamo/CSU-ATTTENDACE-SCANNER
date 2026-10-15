@@ -374,28 +374,15 @@ export async function fetchAttendanceFromSupabase() {
     );
 
     let rawData = [];
-    // Query attendance_logs joined with live cadets data so reassignments reflect immediately across history
+    // Query read-optimized 3NF view joining attendance_logs with live cadets and platoons
     const { data: joinedData, error: joinErr } = await client
-      .from('attendance_logs')
-      .select(`
-        *,
-        cadets (
-          id,
-          name,
-          rank,
-          battalion,
-          company,
-          platoon,
-          battalion_id,
-          company_id,
-          platoon_id
-        )
-      `)
+      .from('vw_attendance_logs_detailed')
+      .select('*')
       .order('date', { ascending: false })
       .limit(10000);
 
     if (joinErr) {
-      console.warn('[Supabase] Joined query fallback notice:', joinErr.message);
+      console.warn('[Supabase] vw_attendance_logs_detailed notice, falling back to direct table query:', joinErr.message);
       const { data: fallbackData, error: fbError } = await client
         .from('attendance_logs')
         .select('*')
@@ -406,6 +393,7 @@ export async function fetchAttendanceFromSupabase() {
     } else {
       rawData = joinedData || [];
     }
+
 
     // Strict Session Verification Filter: Only keep logs that belong to an active session
     // (matches active session_id OR matches an active session_date)
@@ -593,29 +581,16 @@ export async function fetchAttendanceByDate(dateKey) {
       return [];
     }
 
-    // 2. Verified active session exists -> query attendance_logs joined with live cadets table
+    // 2. Verified active session exists -> query read-optimized 3NF view
     let logs = [];
     const { data: joinedLogs, error: joinErr } = await client
-      .from('attendance_logs')
-      .select(`
-        *,
-        cadets (
-          id,
-          name,
-          rank,
-          battalion,
-          company,
-          platoon,
-          battalion_id,
-          company_id,
-          platoon_id
-        )
-      `)
+      .from('vw_attendance_logs_detailed')
+      .select('*')
       .eq('date', cleanDate)
       .order('time_in', { ascending: true });
 
     if (joinErr) {
-      console.warn('[Supabase] fetchAttendanceByDate joined query notice:', joinErr.message);
+      console.warn('[Supabase] fetchAttendanceByDate view notice, falling back to direct table query:', joinErr.message);
       const { data: fallbackLogs, error: logsErr } = await client
         .from('attendance_logs')
         .select('*')
@@ -626,6 +601,7 @@ export async function fetchAttendanceByDate(dateKey) {
     } else {
       logs = joinedLogs || [];
     }
+
 
     // 3. Query excuse_requests for this date and merge
     try {
@@ -1108,15 +1084,9 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           updatePayload
         });
       } else {
-        // No existing time-in: Insert new record with NO TIME-IN
+        // No existing time-in: Insert new record with NO TIME-IN (3NF normalized transaction)
         const insertRow = {
           cadet_id: cid,
-          name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : cadetMeta.name,
-          rank: rawScan.rank || cadetMeta.rank,
-          battalion: rawScan.battalion || cadetMeta.battalion,
-          company: rawScan.company || cadetMeta.company,
-          platoon: rawScan.platoon || cadetMeta.platoon,
-          designation: rawScan.designation || cadetMeta.designation || 'N/A',
           date: scanDate,
           time_in: null,
           time_out: scanTimestamp,
@@ -1168,14 +1138,9 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
           updatePayload
         });
       } else {
+        // 3NF normalized transaction insert
         const insertRow = {
           cadet_id: cid,
-          name: rawScan.name && rawScan.name !== 'UNREGISTERED CADET' ? rawScan.name : (existing?.name || cadetMeta.name),
-          rank: rawScan.rank || existing?.rank || cadetMeta.rank,
-          battalion: rawScan.battalion || existing?.battalion || cadetMeta.battalion,
-          company: rawScan.company || existing?.company || cadetMeta.company,
-          platoon: rawScan.platoon || existing?.platoon || cadetMeta.platoon,
-          designation: rawScan.designation || existing?.designation || cadetMeta.designation || 'N/A',
           date: scanDate,
           time_in: scanTimestamp,
           time_out: existing?.time_out || null,
@@ -1194,6 +1159,7 @@ export async function ingestBatchToSupabase(batchScans = [], sessionDateInput = 
       }
     }
   }
+
 
   // Execute all direct updates in parallel with 1:1 cadet-to-promise alignment
   if (updateEntries.length > 0) {
@@ -1566,14 +1532,21 @@ export async function syncSessionCutoffTime(newCutoffTime) {
 }
 
 /**
- * Deletes all cadet records from Supabase
+ * Deletes cadet records from Supabase, strictly scoped to academicTermId when provided.
+ * @param {string|null} academicTermId
  */
-export async function clearCadetsFromSupabase() {
+export async function clearCadetsFromSupabase(academicTermId = null) {
   const client = getSupabaseClient();
   if (!client) return false;
 
   try {
-    const { error } = await client.from('cadets').delete().neq('id', '');
+    let query = client.from('cadets').delete();
+    if (academicTermId) {
+      query = query.eq('academic_term_id', academicTermId);
+    } else {
+      query = query.neq('id', '');
+    }
+    const { error } = await query;
     if (error) throw error;
     return true;
   } catch (err) {
@@ -1583,15 +1556,36 @@ export async function clearCadetsFromSupabase() {
 }
 
 /**
- * Deletes all attendance records from Supabase
+ * Deletes attendance records from Supabase, strictly scoped to academicTermId when provided.
+ * @param {string|null} academicTermId
  */
-export async function clearAttendanceFromSupabase() {
+export async function clearAttendanceFromSupabase(academicTermId = null) {
   const client = getSupabaseClient();
   if (!client) return false;
 
   try {
-    const { error } = await client.from('attendance_logs').delete().neq('cadet_id', '');
-    if (error) throw error;
+    let logQuery = client.from('attendance_logs').delete();
+    if (academicTermId) {
+      logQuery = logQuery.eq('academic_term_id', academicTermId);
+    } else {
+      logQuery = logQuery.neq('cadet_id', '');
+    }
+    const { error: logErr } = await logQuery;
+    if (logErr) throw logErr;
+
+    // Also clear attendance_sessions matching the term if present
+    try {
+      let sessionQuery = client.from('attendance_sessions').delete();
+      if (academicTermId) {
+        sessionQuery = sessionQuery.eq('academic_term_id', academicTermId);
+      } else {
+        sessionQuery = sessionQuery.neq('id', '');
+      }
+      await sessionQuery;
+    } catch (sErr) {
+      console.warn('Optional clear attendance_sessions warning:', sErr);
+    }
+
     return true;
   } catch (err) {
     console.error('Supabase clear attendance error:', err);
@@ -1732,6 +1726,12 @@ export async function fetchSettingsFromSupabase() {
       } catch (_) {}
     }
 
+    if (combined && combined.term_command_profiles && typeof combined.term_command_profiles === 'string') {
+      try {
+        combined.term_command_profiles = JSON.parse(combined.term_command_profiles);
+      } catch (_) {}
+    }
+
     return Object.keys(combined).length > 0 ? combined : null;
   } catch (err) {
     console.error('Supabase fetch settings error:', err);
@@ -1791,6 +1791,7 @@ export async function saveSettingsToSupabase(settings) {
       commanding_officer_title: officerTitle,
       parent_command: activeRcdgName,
       host_institution: activeSchoolName,
+      term_command_profiles: settings.term_command_profiles || settings.termCommandProfiles || null,
 
       // Hero Emblems JSONB array (dynamic management with payload sanitization)
       hero_emblems: (() => {
@@ -1990,7 +1991,7 @@ export async function saveSettingsToSupabase(settings) {
  * @param {string} [params.companyName]
  * @returns {Promise<{cadetCount: number, logCount: number, hasDependencies: boolean, sampleCadets: Array}>}
  */
-export async function checkUnitDependencies({ level, id, name, battalionName, companyName }) {
+export async function checkUnitDependencies({ level, id, name, battalionName, companyName, academicTermId = null }) {
   const client = getSupabaseClient();
   let cadetCount = 0;
   let logCount = 0;
@@ -2002,6 +2003,10 @@ export async function checkUnitDependencies({ level, id, name, battalionName, co
   // Helper matcher for local rosters
   const matchesUnit = (item) => {
     if (!item) return false;
+    if (academicTermId) {
+      const tid = item.academic_term_id || item.academicTermId;
+      if (tid && String(tid) !== String(academicTermId)) return false;
+    }
     if (level === 'battalion') {
       const bName = String(item.battalion || item.battalion_id || '').toLowerCase();
       return bName.includes(cleanName.toLowerCase()) || bName === cleanId.toLowerCase();
@@ -2050,6 +2055,9 @@ export async function checkUnitDependencies({ level, id, name, battalionName, co
     try {
       // Query Cadets
       let cadetQuery = client.from('cadets').select('id, name, rank', { count: 'exact' });
+      if (academicTermId) {
+        cadetQuery = cadetQuery.eq('academic_term_id', academicTermId);
+      }
       if (level === 'battalion') {
         cadetQuery = cadetQuery.or(`battalion.ilike.%${cleanName}%,id.ilike.%${cleanId}%`);
       } else if (level === 'company') {
@@ -2076,6 +2084,9 @@ export async function checkUnitDependencies({ level, id, name, battalionName, co
 
       // Query Attendance Logs
       let logQuery = client.from('attendance_logs').select('id', { count: 'exact', head: true });
+      if (academicTermId) {
+        logQuery = logQuery.eq('academic_term_id', academicTermId);
+      }
       if (level === 'battalion') {
         logQuery = logQuery.ilike('battalion', `%${cleanName}%`);
       } else if (level === 'company') {
@@ -2116,7 +2127,7 @@ export async function checkUnitDependencies({ level, id, name, battalionName, co
  * Fetches current cadet headcount per platoon across all active units.
  * Keys are normalized `${battalionName}__${companyName}__${platoonName}` and `platoon_id`.
  */
-export async function fetchSystemWidePlatoonCapacities() {
+export async function fetchSystemWidePlatoonCapacities(academicTermId = null) {
   const counts = {};
 
   // 1. Local storage cache
@@ -2124,6 +2135,10 @@ export async function fetchSystemWidePlatoonCapacities() {
     const local = JSON.parse(localStorage.getItem('csu_rotc_cadets_roster') || '[]');
     if (Array.isArray(local)) {
       local.forEach(c => {
+        if (academicTermId) {
+          const tid = c.academic_term_id || c.academicTermId;
+          if (tid && String(tid) !== String(academicTermId)) return;
+        }
         const b = String(c.battalion || '').trim().toLowerCase();
         const co = String(c.company || '').trim().toLowerCase();
         const pl = String(c.platoon || '').trim().toLowerCase();
@@ -2139,9 +2154,13 @@ export async function fetchSystemWidePlatoonCapacities() {
   const client = getSupabaseClient();
   if (client) {
     try {
-      const { data, error } = await client
+      let query = client
         .from('cadets')
-        .select('battalion, company, platoon, battalion_id, company_id, platoon_id');
+        .select('battalion, company, platoon, battalion_id, company_id, platoon_id, academic_term_id');
+      if (academicTermId) {
+        query = query.eq('academic_term_id', academicTermId);
+      }
+      const { data, error } = await query;
       if (!error && Array.isArray(data)) {
         const liveCounts = {};
         data.forEach(c => {
@@ -2168,7 +2187,7 @@ export async function fetchSystemWidePlatoonCapacities() {
  * Supports Battalion, Company, and Platoon level reassignments across Supabase and local cache.
  * Automatically cascades battalion_id, company_id, and platoon_id foreign keys simultaneously.
  */
-export async function reassignUnitDependencies({ level, source, target }) {
+export async function reassignUnitDependencies({ level, source, target, academicTermId = null }) {
   const client = getSupabaseClient();
   let supabaseUpdatedCount = 0;
 
@@ -2216,6 +2235,9 @@ export async function reassignUnitDependencies({ level, source, target }) {
       // Safe updater with foreign key schema tolerance
       const executeSafeUpdate = async (table, filterBuilder, selectCount = false) => {
         let q = filterBuilder(client.from(table).update(updatePayload));
+        if (academicTermId && table === 'cadets') {
+          q = q.eq('academic_term_id', academicTermId);
+        }
         if (selectCount) q = q.select('id');
         let res = await q;
         if (res.error && (res.error.message?.includes('column') || res.error.message?.includes('does not exist'))) {
@@ -2224,6 +2246,9 @@ export async function reassignUnitDependencies({ level, source, target }) {
           delete fallback.company_id;
           delete fallback.platoon_id;
           let retryQ = filterBuilder(client.from(table).update(fallback));
+          if (academicTermId && table === 'cadets') {
+            retryQ = retryQ.eq('academic_term_id', academicTermId);
+          }
           if (selectCount) retryQ = retryQ.select('id');
           res = await retryQ;
         }
@@ -2399,11 +2424,12 @@ export async function reassignUnitDependencies({ level, source, target }) {
  * Reassign cadets and their attendance logs when a company is deleted or modified.
  * Backward compatible wrapper over reassignUnitDependencies.
  */
-export async function reassignCadetsCompany(battalionName, oldCompanyName, targetCompanyName) {
+export async function reassignCadetsCompany(battalionName, oldCompanyName, targetCompanyName, academicTermId = null) {
   return reassignUnitDependencies({
     level: 'company',
     source: { name: oldCompanyName, battalionName },
-    target: { name: targetCompanyName, battalionName }
+    target: { name: targetCompanyName, battalionName },
+    academicTermId
   });
 }
 
@@ -2817,7 +2843,7 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
 
     const { data: existing } = await client
       .from('attendance_logs')
-      .select('id, status, session_id, name, rank, battalion, company, platoon')
+      .select('id, status, session_id, academic_term_id')
       .eq('cadet_id', cid)
       .eq('date', dateKey)
       .maybeSingle();
@@ -2906,18 +2932,17 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
     } else {
       const { data: cadetProfile } = await client
         .from('cadets')
-        .select('name, rank, battalion, company, platoon')
+        .select('id, academic_term_id')
         .eq('id', cid)
         .maybeSingle();
 
+      const resolvedTermId = sessionData?.academic_term_id || cadetProfile?.academic_term_id || null;
+
+      // 3NF payload: dropped columns (battalion, company, platoon, name, rank) removed
+      // Backend resolves unit details purely via cadet_id and academic_term_id
       const insertPayload = {
         session_id: sessionData.id,
         cadet_id: cid,
-        name: cadetProfile?.name || ('Cadet ' + cid),
-        rank: cadetProfile?.rank || 'Cadet',
-        battalion: cadetProfile?.battalion || '1st Battalion',
-        company: cadetProfile?.company || 'Alpha Company',
-        platoon: cadetProfile?.platoon || '1st Platoon',
         date: dateKey,
         status: 'EXCUSE_PENDING',
         final_daily_status: 'EXCUSE_PENDING',
@@ -2926,6 +2951,10 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
         excuse_submitted_at: now,
         updated_at: now
       };
+
+      if (resolvedTermId) {
+        insertPayload.academic_term_id = resolvedTermId;
+      }
 
       let { data, error } = await client
         .from('attendance_logs')
@@ -2951,17 +2980,22 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
 
       // Also sync to excuse_requests table if present in Supabase
       try {
+        const excusePayload = {
+          cadet_id: cid,
+          drill_date: dateKey,
+          date: dateKey,
+          reason: reason || '',
+          proof_url: proofDataUrl || null,
+          status: 'PENDING',
+          submitted_at: now,
+          updated_at: now
+        };
+        if (resolvedTermId) {
+          excusePayload.academic_term_id = resolvedTermId;
+        }
         await client
           .from('excuse_requests')
-          .upsert({
-            cadet_id: cid,
-            drill_date: dateKey,
-            date: dateKey,
-            reason: reason || '',
-            status: 'PENDING',
-            submitted_at: now,
-            updated_at: now
-          }, { onConflict: 'cadet_id,drill_date' });
+          .upsert(excusePayload, { onConflict: 'cadet_id,drill_date' });
       } catch (_) {}
 
       return { data, created: true, message: 'Excuse request submitted successfully! Awaiting Duty Officer verification.' };

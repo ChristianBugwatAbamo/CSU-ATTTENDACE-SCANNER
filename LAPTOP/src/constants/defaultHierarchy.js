@@ -154,4 +154,100 @@ export const STANDARD_PLATOONS = [
   '2nd Platoon'
 ];
 
+/**
+ * Resolves a platoon standard code from battalion, company, and platoon strings.
+ */
+export function resolvePlatoonCode(battalion, company, platoon) {
+  const b = String(battalion || '').toLowerCase();
+  const c = String(company || '').toLowerCase();
+  const p = String(platoon || '').toLowerCase();
+  const is2nd = p.includes('2');
+
+  if (c.includes('seventh') || c.includes('sda')) {
+    return is2nd ? 'HQ-SDA-2PLTN' : 'HQ-SDA-1PLTN';
+  }
+  if (c.includes('officer') || c.includes('cadet officer')) {
+    return is2nd ? 'HQ-CO-2PLTN' : 'HQ-CO-1PLTN';
+  }
+  if (c.includes('alpha')) {
+    return is2nd ? '1BN-ALPHA-2PLTN' : '1BN-ALPHA-1PLTN';
+  }
+  if (c.includes('bravo')) {
+    return is2nd ? '1BN-BRAVO-2PLTN' : '1BN-BRAVO-1PLTN';
+  }
+  if (c.includes('charlie')) {
+    return is2nd ? '2BN-CHARLIE-2PLTN' : '2BN-CHARLIE-1PLTN';
+  }
+  if (c.includes('delta')) {
+    return is2nd ? '2BN-DELTA-2PLTN' : '2BN-DELTA-1PLTN';
+  }
+  if (c.includes('echo')) {
+    return is2nd ? '3BN-ECHO-2PLTN' : '3BN-ECHO-1PLTN';
+  }
+  if (c.includes('foxtrot')) {
+    return is2nd ? '3BN-FOXTROT-2PLTN' : '3BN-FOXTROT-1PLTN';
+  }
+
+  // Battalion-based fallback
+  if (b.includes('hq') || b.includes('headquarters')) {
+    return is2nd ? 'HQ-SDA-2PLTN' : 'HQ-SDA-1PLTN';
+  }
+  if (b.includes('2')) {
+    return is2nd ? '2BN-CHARLIE-2PLTN' : '2BN-CHARLIE-1PLTN';
+  }
+  if (b.includes('3')) {
+    return is2nd ? '3BN-ECHO-2PLTN' : '3BN-ECHO-1PLTN';
+  }
+
+  return is2nd ? '1BN-ALPHA-2PLTN' : '1BN-ALPHA-1PLTN';
+}
+
+/**
+ * Resolves standard course code from string.
+ */
+export function resolveCourseCode(course) {
+  return String(course || '').trim().toUpperCase() || 'BSIT';
+}
+
+/**
+ * Helper to check if a string is a valid UUID
+ */
+export function isValidUuid(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(str || ''));
+}
+
+// In-memory cache for database UUIDs
+let cachedPlatoonsMap = null;
+let cachedCoursesMap = null;
+
+export async function getPlatoonUuid(client, battalion, company, platoon) {
+  const code = resolvePlatoonCode(battalion, company, platoon);
+  if (!cachedPlatoonsMap && client) {
+    try {
+      const { data } = await client.from('platoons').select('id, code');
+      if (Array.isArray(data)) {
+        cachedPlatoonsMap = new Map();
+        data.forEach(p => cachedPlatoonsMap.set(p.code, p.id));
+      }
+    } catch (_) {}
+  }
+  return cachedPlatoonsMap?.get(code) || null;
+}
+
+export async function getCourseUuid(client, course) {
+  const code = resolveCourseCode(course);
+  if (!cachedCoursesMap && client) {
+    try {
+      const { data } = await client.from('academic_courses').select('id, code');
+      if (Array.isArray(data)) {
+        cachedCoursesMap = new Map();
+        data.forEach(c => cachedCoursesMap.set(c.code, c.id));
+      }
+    } catch (_) {}
+  }
+  return cachedCoursesMap?.get(code) || null;
+}
+
+
 export default DEFAULT_UNIT_STRUCTURE;
+

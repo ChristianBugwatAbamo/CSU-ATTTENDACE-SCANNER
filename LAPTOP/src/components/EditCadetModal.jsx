@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase, getSupabaseClient, validatePlatoonCapacity } from '../utils/supabaseClient';
+import { getPlatoonUuid, getCourseUuid, isValidUuid } from '../constants/defaultHierarchy';
+
+
 import {
   User,
   Building,
@@ -367,32 +370,53 @@ export const EditCadetModal = ({ cadet, isOpen, onClose, onRefresh }) => {
       }
     }
 
-    // Only include columns that actually exist in the cadets Supabase table (all uppercase)
+    const client = supabase || getSupabaseClient();
+    const resolvedPlatoonId = await getPlatoonUuid(client, targetBattalion, targetCompany, targetPlatoon);
+    const resolvedCourseId = await getCourseUuid(client, formData.degree || formData.program || cadet.course);
+
     const payload = {
       name: formData.name.trim().toUpperCase() || String(cadet.name || '').toUpperCase(),
       gender: formData.gender.toUpperCase(),
-      department: formData.department.toUpperCase(),
       program: formData.degree.trim().toUpperCase(),
-      course: formData.degree.trim().toUpperCase(),
+      ...(isValidUuid(resolvedPlatoonId) ? { platoon_id: resolvedPlatoonId } : {}),
+      ...(isValidUuid(resolvedCourseId) ? { course_id: resolvedCourseId } : {}),
       contact_number: formData.contactNumber.trim().toUpperCase(),
       province: formData.province.trim().toUpperCase() || null,
       city: formatCityName(formData.city) || null,
       barangay: formData.barangay.trim().toUpperCase() || null,
-      religion: (formData.religion || '').toUpperCase() || null,
+      religion: (formData.religion || '').toUpperCase() || null
+    };
+
+
+    const legacyPayload = {
+      ...payload,
+      department: formData.department.toUpperCase(),
+      course: formData.degree.trim().toUpperCase(),
       battalion: targetBattalion,
       company: targetCompany,
       platoon: targetPlatoon
     };
 
-    const updatedCadet = { ...cadet, ...payload, id: targetId, cadetId: targetId };
+    const updatedCadet = { ...cadet, ...legacyPayload, id: targetId, cadetId: targetId };
 
     try {
       if (supabase && typeof supabase.from === 'function') {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('cadets')
           .update(payload)
           .eq('id', targetId)
           .select();
+
+        // If error due to missing 3NF columns on legacy schema, retry with legacy payload
+        if (error && (error.code === 'PGRST204' || error.message?.includes('platoon_id') || error.message?.includes('course_id'))) {
+          const legacyRes = await supabase
+            .from('cadets')
+            .update(legacyPayload)
+            .eq('id', targetId)
+            .select();
+          data = legacyRes.data;
+          error = legacyRes.error;
+        }
 
         if (error) {
           console.error('Supabase Update Error:', error);
@@ -403,6 +427,7 @@ export const EditCadetModal = ({ cadet, isOpen, onClose, onRefresh }) => {
 
         console.log('Supabase update result:', data);
       }
+
 
       // Update local storage cache
       try {

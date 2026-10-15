@@ -203,8 +203,8 @@ export default function AttendanceHistory({
     async function fetchTermCadetRoster() {
       setIsRosterLoading(true);
       try {
-        const { data, error } = await client
-          .from('cadets')
+        let { data, error } = await client
+          .from('vw_cadet_master_roster')
           .select(`
             id,
             name,
@@ -212,15 +212,34 @@ export default function AttendanceHistory({
             battalion,
             company,
             platoon,
-            battalion_id,
-            company_id,
             platoon_id,
+            course_id,
             type,
             rotc_subject,
             academic_term_id
           `)
           .eq('academic_term_id', currentTermId)
           .order('name', { ascending: true });
+
+        // Resilient fallback to cadets table if view has not yet been applied
+        if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
+          const fb = await client
+            .from('cadets')
+            .select(`
+              id,
+              name,
+              rank,
+              type,
+              rotc_subject,
+              academic_term_id,
+              platoon_id
+            `)
+            .eq('academic_term_id', currentTermId)
+            .order('name', { ascending: true });
+          data = fb.data;
+          error = fb.error;
+        }
+
 
         if (!error && Array.isArray(data) && !isCancelled) {
           setTermRosterCadets(data);
@@ -424,29 +443,37 @@ export default function AttendanceHistory({
       setIsJoinedQueryLoading(true);
       try {
         let query = client
-          .from('attendance_logs')
-          .select(`
-            *,
-            cadets!inner (
-              id,
-              name,
-              rank,
-              battalion,
-              company,
-              platoon,
-              battalion_id,
-              company_id,
-              platoon_id,
-              academic_term_id
-            )
-          `)
+          .from('vw_attendance_logs_detailed')
+          .select('*')
           .eq('date', selectedDate);
 
         if (currentTermId) {
-          query = query.eq('cadets.academic_term_id', currentTermId);
+          query = query.eq('academic_term_id', currentTermId);
         }
 
-        const { data: joinedData, error: joinErr } = await query.order('time_in', { ascending: true });
+        let { data: joinedData, error: joinErr } = await query.order('time_in', { ascending: true });
+
+        // If view not ready, retry with joined table query
+        if (joinErr && (joinErr.code === '42P01' || joinErr.code === 'PGRST205')) {
+          let legacyQuery = client
+            .from('attendance_logs')
+            .select(`
+              *,
+              cadets!inner (
+                id,
+                name,
+                rank,
+                platoon_id,
+                academic_term_id
+              )
+            `)
+            .eq('date', selectedDate);
+          if (currentTermId) legacyQuery = legacyQuery.eq('cadets.academic_term_id', currentTermId);
+          const legacyRes = await legacyQuery.order('time_in', { ascending: true });
+          joinedData = legacyRes.data;
+          joinErr = legacyRes.error;
+        }
+
 
         if (joinErr) {
           console.warn('[AttendanceHistory] Live joined query notice, falling back to fetchAttendanceByDate:', joinErr.message);

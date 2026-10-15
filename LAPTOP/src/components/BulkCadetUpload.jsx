@@ -23,6 +23,9 @@ import {
   MAX_PLATOON_CAPACITY,
   normalizePlatoonParts
 } from '../utils/supabaseClient';
+import { getPlatoonUuid, getCourseUuid, isValidUuid } from '../constants/defaultHierarchy';
+
+
 import { normalizeCompany } from './BasicCadetRegistration';
 import { downloadDynamicCadetTemplate, parseCadetNameComponents } from '../utils/excelExport';
 import { parseCadetExcel, parseCadetRows, isTitleOrLetterheadRow } from '../utils/parseCadetExcel';
@@ -325,7 +328,11 @@ function ValidationNotesCell({ notes = [] }) {
 
 export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle, activeTerm, isArchived = false }) {
   const { unitStructure } = useUnitStructure();
-  const isLocked = isArchived || String(activeTerm?.status || '').toUpperCase() === 'ARCHIVED';
+  const isLocked = Boolean(
+    isArchived ||
+    String(activeTerm?.status || '').toUpperCase() === 'ARCHIVED' ||
+    (activeTerm?.academic_year && !activeTerm?.academic_year.includes('2026-2027'))
+  );
   const [fileData, setFileData] = useState(null);
   const [fileName, setFileName] = useState('');
   const [fileSize, setFileSize] = useState('');
@@ -757,30 +764,35 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
     const termId = activeTerm?.id || null;
     const defaultRotc = (activeTerm?.semester && activeTerm.semester.includes('2')) ? 'MS2' : 'MS1';
 
-    const cadetsToUpsert = recordsToSave.map((r) => {
+    const cadetsToUpsert = await Promise.all(recordsToSave.map(async (r) => {
       const c = r.cadet;
       const deptUpper = String(c.department || 'CCIS').toUpperCase().trim();
       const progUpper = String(c.program || c.course || '').toUpperCase().trim();
       const rotc = c.rotc_subject || defaultRotc;
+      const targetBn = c.battalion || '1st Battalion';
+      const targetCo = c.company || 'Alpha Company';
+      const targetPl = c.platoon || '1st Platoon';
+
+      const pUuid = await getPlatoonUuid(client, targetBn, targetCo, targetPl);
+      const cUuid = await getCourseUuid(client, progUpper);
+
       return {
         id: String(c.id || '').toUpperCase().trim(),
         name: String(c.name || '').toUpperCase().trim(),
         rank: c.rank || 'Cadet',
-        battalion: c.battalion || '1st Battalion',
-        company: c.company || 'Alpha Company',
-        platoon: c.platoon || '1st Platoon',
         type: rotc || c.type || 'Basic Cadet',
         rotc_subject: rotc,
         academic_term_id: c.academic_term_id || termId,
+        ...(isValidUuid(pUuid) ? { platoon_id: pUuid } : {}),
+        ...(isValidUuid(cUuid) ? { course_id: cUuid } : {}),
         designation: c.designation || 'N/A',
         gender: c.gender || 'Male',
-        department: deptUpper,
         program: progUpper,
-        course: progUpper,
         contact_number: String(c.contact_number || '').trim(),
         is_active: true
       };
-    });
+    }));
+
     const BATCH_SIZE = 50;
     let insertedCount = 0;
     let failedCount = 0;
@@ -791,9 +803,9 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
         const chunk = cadetsToUpsert.slice(i, i + BATCH_SIZE);
         let { error } = await client.from('cadets').upsert(chunk, { onConflict: 'id' });
 
-        // If columns rotc_subject or academic_term_id not yet created in DB, fallback without them
-        if (error && (error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id') || error.code === 'PGRST204')) {
-          const fallbackChunk = chunk.map(({ rotc_subject, academic_term_id, ...rest }) => rest);
+        // If error due to missing 3NF columns or missing term, retry with fallback
+        if (error && (error.code === 'PGRST204' || error.message?.includes('platoon_id') || error.message?.includes('course_id') || error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id'))) {
+          const fallbackChunk = chunk.map(({ platoon_id, course_id, rotc_subject, academic_term_id, ...rest }) => rest);
           const fallbackRes = await client.from('cadets').upsert(fallbackChunk, { onConflict: 'id' });
           error = fallbackRes.error;
         }
@@ -803,6 +815,7 @@ export default function BulkCadetUpload({ cadets = [], onRefresh, onBackToSingle
           failedCount += chunk.length;
           errorsList.push(error.message);
         } else {
+
           insertedCount += chunk.length;
         }
 

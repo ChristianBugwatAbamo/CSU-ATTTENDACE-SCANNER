@@ -15,6 +15,8 @@ import {
 import { useUnitStructure } from '../context/UnitContext';
 import { getActiveAcademicTerm } from '../utils/academicTermsApi';
 import { useAcademicTerm } from '../context/AcademicTermContext';
+import { getPlatoonUuid, getCourseUuid, isValidUuid } from '../constants/defaultHierarchy';
+
 
 // Re-export shared helpers (used by QRCodeGenerator too)
 export { MAX_PLATOON_CAPACITY, normalizePlatoonParts, validatePlatoonCapacity };
@@ -193,12 +195,16 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
   const [company, setCompany] = useState(() => load('company', 'Alpha Company'));
   const [platoon, setPlatoon] = useState(() => load('platoon', '1st Platoon'));
 
-  const { selectedTerm, activeTerm: contextActiveTerm } = useAcademicTerm();
+  const { selectedTerm, activeTerm: contextActiveTerm, isArchived: contextIsArchived } = useAcademicTerm();
   const [activeTerm, setActiveTerm] = useState(null);
   const [isLoadingTerm, setIsLoadingTerm] = useState(true);
 
   const effectiveTerm = selectedTerm || contextActiveTerm || activeTerm;
-  const isArchived = String(effectiveTerm?.status || '').toUpperCase() === 'ARCHIVED';
+  const isArchived = Boolean(
+    contextIsArchived ||
+    String(effectiveTerm?.status || '').toUpperCase() === 'ARCHIVED' ||
+    (effectiveTerm?.academic_year && !effectiveTerm?.academic_year.includes('2026-2027'))
+  );
 
   const [formErrors, setFormErrors] = useState({});
   const [isSaving, setIsSaving] = useState(false);
@@ -418,22 +424,34 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
       } catch (_) { }
     }
 
+    const client = getSupabaseClient();
+    const resolvedPlatoonId = await getPlatoonUuid(client, battalion, normalizeCompany(company), platoon);
+    const resolvedCourseId = await getCourseUuid(client, academicProgram);
+
     const payload = {
       id: cadetId.trim(),
       name: fullName,
       rank: 'Cadet',
-      battalion: battalion || '1st Battalion',
-      company: normalizeCompany(company),
-      platoon: platoon || '1st Platoon',
       type: rotcSubject || 'MS1',
       rotc_subject: rotcSubject || 'MS1',
       academic_term_id: resolvedTerm?.id || null,
+      ...(isValidUuid(resolvedPlatoonId) ? { platoon_id: resolvedPlatoonId } : {}),
+      ...(isValidUuid(resolvedCourseId) ? { course_id: resolvedCourseId } : {}),
       designation: 'N/A',
       gender: gender || 'Male',
-      department: department || 'CCIS',
       program: academicProgram.trim().toUpperCase() || null,
-      course: academicProgram.trim().toUpperCase() || null,
       is_active: true
+    };
+
+
+    // Include legacy columns if still present in database schema for backwards compatibility
+    const legacyPayload = {
+      ...payload,
+      battalion: battalion || '1st Battalion',
+      company: normalizeCompany(company),
+      platoon: platoon || '1st Platoon',
+      course: academicProgram.trim().toUpperCase() || null,
+      department: department || 'CCIS'
     };
 
     try {
@@ -442,7 +460,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
       if (!client) throw new Error('Supabase not configured. Check Settings > Cloud Database.');
 
       // Final server-side capacity validation
-      const validation = await validatePlatoonCapacity(payload, client);
+      const validation = await validatePlatoonCapacity(legacyPayload, client);
       if (!validation.valid) {
         setAlertModal({
           type: 'error', title: 'Capacity Violation (Server-Side)',
@@ -452,10 +470,18 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
         return;
       }
 
+      // Try normalized 3NF upsert first (or legacy if columns present)
       let { error } = await client.from('cadets').upsert(payload, { onConflict: 'id' });
-      // If columns rotc_subject or academic_term_id not yet created in Supabase SQL editor, retry with fallback payload
-      if (error && (error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id') || error.code === 'PGRST204')) {
-        console.warn('Columns rotc_subject or academic_term_id not found in cadets table. Retrying with fallback payload...');
+      
+      // If error due to missing 3NF columns on legacy db, fallback with legacy payload
+      if (error && (error.code === 'PGRST204' || error.message?.includes('platoon_id') || error.message?.includes('course_id'))) {
+        console.warn('Retrying upsert with legacy text payload...');
+        const legacyRes = await client.from('cadets').upsert(legacyPayload, { onConflict: 'id' });
+        error = legacyRes.error;
+      }
+
+      // Fallback for missing rotc_subject or academic_term_id if necessary
+      if (error && (error.message?.includes('rotc_subject') || error.message?.includes('academic_term_id'))) {
         const fallback = { ...payload };
         delete fallback.rotc_subject;
         delete fallback.academic_term_id;
@@ -464,6 +490,7 @@ export default function BasicCadetRegistration({ cadets = [], onRefresh }) {
       }
 
       if (error) throw error;
+
 
       showToast('success', `✅ ${payload.name} (${payload.id}) registered successfully!`);
       clearForm();

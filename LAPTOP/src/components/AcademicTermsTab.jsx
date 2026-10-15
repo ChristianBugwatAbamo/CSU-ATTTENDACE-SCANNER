@@ -14,7 +14,11 @@ import {
   RefreshCw,
   Power,
   Trash2,
-  Calendar
+  Calendar,
+  Lock,
+  Archive,
+  Table as TableIcon,
+  LayoutGrid
 } from 'lucide-react';
 import ConfirmModal from './ConfirmModal';
 import {
@@ -22,6 +26,7 @@ import {
   fetchAcademicTerms,
   createAcademicTerm,
   setActiveAcademicTerm,
+  archiveAcademicTerm,
   deleteAcademicTerm,
   evaluateTermStatusByDates,
   describeTermError,
@@ -117,10 +122,17 @@ export function StatusBadge({ status, useLongLabel = false }) {
  *  - Displays exact status values stored in the database
  */
 export default function AcademicTermsTab() {
-  const { setActiveTermId: setGlobalActiveTermId, refreshTerms: refreshGlobalTerms } = useAcademicTerm();
+  const {
+    selectedTermId: headerSelectedTermId,
+    selectedTerm: headerSelectedTerm,
+    setActiveTermId: setGlobalActiveTermId,
+    refreshTerms: refreshGlobalTerms
+  } = useAcademicTerm();
+
   const [terms, setTerms] = useState([]);
   const [selectedTermId, setSelectedTermId] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('current');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [viewMode, setViewMode] = useState('table'); // 'table' | 'cards'
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -128,6 +140,9 @@ export default function AcademicTermsTab() {
   const [actionError, setActionError] = useState(null);
   const [pendingActivateTerm, setPendingActivateTerm] = useState(null);
   const [isActivating, setIsActivating] = useState(false);
+  const [pendingArchiveTerm, setPendingArchiveTerm] = useState(null);
+  const [archiveNextTermId, setArchiveNextTermId] = useState('');
+  const [isArchiving, setIsArchiving] = useState(false);
   const [pendingDeleteTerm, setPendingDeleteTerm] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const isMountedRef = useRef(true);
@@ -145,20 +160,18 @@ export default function AcademicTermsTab() {
     setLoadError(null);
     try {
       // Query academic_terms with live relational count from cadets table via academic_term_id
-      // Also handles one-time legacy cadet auto-link
+      // Also handles one-time legacy cadet auto-link and distinct formation session counts
       const rows = await fetchAcademicTerms();
       if (!isMountedRef.current) return;
       setTerms(rows);
 
-      // Keep current selection if valid, else pick active or first record
+      // Keep current selection if valid, else pick header selection or active or first record
       const prevId = selectedIdRef.current;
       if (!prevId || !rows.some(t => t.id === prevId)) {
-        const initial = rows.find(t => String(t.status || '').toLowerCase() === 'current') || rows[0];
-        setSelectedTermId(initial?.id ?? null);
-        if (initial) {
-          const norm = String(initial.status || '').toLowerCase();
-          setStatusFilter(norm === 'current' || norm === 'upcoming' || norm === 'archived' ? norm : 'current');
-        }
+        const preferredId = headerSelectedTermId && rows.some(t => t.id === headerSelectedTermId)
+          ? headerSelectedTermId
+          : (rows.find(t => String(t.status || '').toLowerCase() === 'current')?.id || rows[0]?.id || null);
+        setSelectedTermId(preferredId);
       }
     } catch (err) {
       console.error('Failed to load academic terms from Supabase:', err);
@@ -171,21 +184,29 @@ export default function AcademicTermsTab() {
     } finally {
       if (isMountedRef.current) setIsLoading(false);
     }
-  }, []);
+  }, [headerSelectedTermId]);
 
   useEffect(() => { loadTerms(); }, [loadTerms]);
 
+  // Keep local inspection in sync when header term changes
+  useEffect(() => {
+    if (headerSelectedTermId && terms.some(t => t.id === headerSelectedTermId)) {
+      setSelectedTermId(headerSelectedTermId);
+    }
+  }, [headerSelectedTermId, terms]);
+
   const selectedTerm = useMemo(
-    () => terms.find(t => t.id === selectedTermId) || terms[0] || null,
-    [terms, selectedTermId]
+    () => terms.find(t => t.id === selectedTermId) || terms.find(t => t.id === headerSelectedTermId) || terms[0] || null,
+    [terms, selectedTermId, headerSelectedTermId]
   );
 
-  const visibleTerms = useMemo(
-    () => terms.filter(t => String(t.status || '').trim().toLowerCase() === String(statusFilter || '').trim().toLowerCase()),
-    [terms, statusFilter]
-  );
+  const visibleTerms = useMemo(() => {
+    if (statusFilter === 'all') return terms;
+    return terms.filter(t => String(t.status || '').trim().toLowerCase() === String(statusFilter || '').trim().toLowerCase());
+  }, [terms, statusFilter]);
 
   const counts = useMemo(() => ({
+    all: terms.length,
     current: terms.filter(t => String(t.status || '').trim().toLowerCase() === 'current').length,
     upcoming: terms.filter(t => String(t.status || '').trim().toLowerCase() === 'upcoming').length,
     archived: terms.filter(t => String(t.status || '').trim().toLowerCase() === 'archived').length
@@ -201,8 +222,6 @@ export default function AcademicTermsTab() {
     await loadTerms();
     refreshGlobalTerms?.();
     setSelectedTermId(created.id);
-    const norm = String(created.status || '').toLowerCase();
-    setStatusFilter(norm === 'current' || norm === 'upcoming' || norm === 'archived' ? norm : 'upcoming');
     setIsModalOpen(false);
     showToast(`✓ ${created.academicYear} • ${created.semester} (${created.status}) saved to Supabase.`);
   };
@@ -249,7 +268,6 @@ export default function AcademicTermsTab() {
       if (!isMountedRef.current) return;
       setTerms(rows);
       setSelectedTermId(term.id);
-      setStatusFilter('current');
       setGlobalActiveTermId?.(term.id);
       refreshGlobalTerms?.();
       showToast(`✓ ${term.academicYear} • ${term.semester} is now the active system term.`);
@@ -258,6 +276,31 @@ export default function AcademicTermsTab() {
       if (isMountedRef.current) setActionError(describeTermError(err));
     } finally {
       if (isMountedRef.current) setIsActivating(false);
+    }
+  };
+
+  const handleConfirmArchive = async () => {
+    const term = pendingArchiveTerm;
+    if (!term) return;
+    setIsArchiving(true);
+    setActionError(null);
+    try {
+      const rows = await archiveAcademicTerm(term.id, archiveNextTermId || null);
+      if (!isMountedRef.current) return;
+      setTerms(rows);
+      if (archiveNextTermId) {
+        setSelectedTermId(archiveNextTermId);
+        setGlobalActiveTermId?.(archiveNextTermId);
+      }
+      refreshGlobalTerms?.();
+      showToast(`✓ "${term.academicYear} • ${term.semester}" has been archived.`);
+      setPendingArchiveTerm(null);
+      setArchiveNextTermId('');
+    } catch (err) {
+      console.error('Failed to archive academic term:', err);
+      if (isMountedRef.current) setActionError(describeTermError(err));
+    } finally {
+      if (isMountedRef.current) setIsArchiving(false);
     }
   };
 
@@ -332,6 +375,23 @@ export default function AcademicTermsTab() {
                   >
                     {isActivating ? <RefreshCw size={14} className="animate-spin" /> : <Power size={14} />}
                     <span>Set as Active Term</span>
+                  </button>
+                )}
+
+                {String(selectedTerm.status || '').toLowerCase() === 'current' && (
+                  <button
+                    type="button"
+                    className="at-btn-activate"
+                    style={{ background: 'rgba(255, 255, 255, 0.16)', borderColor: 'rgba(255, 255, 255, 0.35)', color: '#ffffff' }}
+                    onClick={() => {
+                      setPendingArchiveTerm(selectedTerm);
+                      const nextUp = terms.find(t => String(t.status || '').toLowerCase() === 'upcoming');
+                      setArchiveNextTermId(nextUp?.id || '');
+                    }}
+                    title="Archive this active term"
+                  >
+                    <Archive size={14} />
+                    <span>Archive Term</span>
                   </button>
                 )}
 
@@ -436,136 +496,344 @@ export default function AcademicTermsTab() {
         </div>
       )}
 
-      {/* ===================== SEMESTER DIRECTORY ===================== */}
-      <section className="card" aria-label="Semester directory">
+      {/* ===================== SEMESTER DIRECTORY & TERM MANAGEMENT TABLE ===================== */}
+      <section className="card" aria-label="Term management and semester directory">
         <div className="at-dir-head" style={{ marginBottom: '1.25rem' }}>
           <div>
             <h3 className="at-dir-title">
               <Layers size={20} color="var(--rotc-green-dark)" />
-              Semester Directory
+              Term Management &amp; Semester Directory
             </h3>
-            <p className="at-dir-sub">Click any semester card to inspect its training progress and enrollment above.</p>
+            <p className="at-dir-sub">
+              Dynamic per-term cadet enrollment, training progress metrics, and system-wide term lifecycle controls.
+            </p>
           </div>
 
-          <div className="at-filter" role="tablist" aria-label="Filter terms by status">
-            {[
-              { id: 'current', label: 'Current' },
-              { id: 'upcoming', label: 'Upcoming' },
-              { id: 'archived', label: 'Archived' }
-            ].map(f => (
-              <button
-                key={f.id}
-                id={`at-filter-${f.id}`}
-                type="button"
-                role="tab"
-                aria-selected={statusFilter === f.id}
-                className={statusFilter === f.id ? 'is-active' : ''}
-                onClick={() => setStatusFilter(f.id)}
-              >
-                {f.label} ({counts[f.id]})
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="at-grid">
-          {visibleTerms.map(term => {
-            const isSelected = selectedTerm?.id === term.id;
-            const termPct = getProgressPct(term);
-            const isCurrent = String(term.status || '').toLowerCase() === 'current';
-            const isArchived = String(term.status || '').toLowerCase() === 'archived';
-
-            return (
-              <button
-                key={term.id}
-                id={`at-term-card-${term.id}`}
-                type="button"
-                className={`at-card${isSelected ? ' is-selected' : ''}${isArchived ? ' is-archived' : ''}`}
-                onClick={() => setSelectedTermId(term.id)}
-                aria-pressed={isSelected}
-              >
-                {isCurrent && (
-                  <span className="at-card-ribbon">
-                    <CheckCircle2 size={11} /> CURRENT
-                  </span>
-                )}
-
-                <div className="at-card-top">
-                  <div>
-                    <div className="at-card-ay">{term.academicYear}</div>
-                    <div className="at-card-sem">{term.semester}</div>
-                    <div className="at-card-course">{term.course}</div>
-                    {term.startDate && term.endDate && (
-                      <div className="at-card-dates">
-                        <Calendar size={11} />
-                        <span>{formatTermDates(term.startDate, term.endDate)}</span>
-                      </div>
-                    )}
-                  </div>
-                  <StatusBadge status={term.status} />
-                </div>
-
-                <div className="at-mini">
-                  <div className="at-mini-head">
-                    <span><strong>{term.completedDays}</strong> / {term.expectedDays} days</span>
-                    <span>{termPct}%</span>
-                  </div>
-                  <div className="at-mini-track">
-                    <div className={`at-mini-fill at-mini-fill--${String(term.status || '').toLowerCase()}`} style={{ width: `${termPct}%` }} />
-                  </div>
-                </div>
-
-                <div className="at-card-foot">
-                  <span className="at-cadets">
-                    <GraduationCap size={14} color="#059669" />
-                    {term.enrolledCadets.toLocaleString()} cadets
-                  </span>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {!isCurrent && (
-                      <button
-                        type="button"
-                        className="at-card-activate-btn"
-                        title="Set as active system term"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingActivateTerm(term);
-                        }}
-                      >
-                        <Power size={11} color="#059669" />
-                        <span>Set Active</span>
-                      </button>
-                    )}
-
-                    {isDeletableUpcoming(term) && (
-                      <button
-                        type="button"
-                        className="at-card-delete-btn"
-                        title="Delete upcoming term"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setPendingDeleteTerm(term);
-                        }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    )}
-
-                    <span className="at-inspect">
-                      {isSelected ? 'Inspecting' : 'Inspect'} <ChevronRight size={14} />
-                    </span>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-
-          {visibleTerms.length === 0 && (
-            <div className="at-empty">
-              {isLoading ? 'Loading from Supabase...' : `No ${statusFilter} terms found in Supabase.`}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            <div className="at-filter" role="tablist" aria-label="Filter terms by status">
+              {[
+                { id: 'all', label: 'All Terms' },
+                { id: 'current', label: 'Current' },
+                { id: 'upcoming', label: 'Upcoming' },
+                { id: 'archived', label: 'Archived' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  id={`at-filter-${f.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={statusFilter === f.id}
+                  className={statusFilter === f.id ? 'is-active' : ''}
+                  onClick={() => setStatusFilter(f.id)}
+                >
+                  {f.label} ({counts[f.id]})
+                </button>
+              ))}
             </div>
-          )}
+
+            <div className="at-view-toggle">
+              <button
+                type="button"
+                className={viewMode === 'table' ? 'is-active' : ''}
+                onClick={() => setViewMode('table')}
+                title="Table View"
+              >
+                <TableIcon size={14} /> <span>Table View</span>
+              </button>
+              <button
+                type="button"
+                className={viewMode === 'cards' ? 'is-active' : ''}
+                onClick={() => setViewMode('cards')}
+                title="Cards View"
+              >
+                <LayoutGrid size={14} /> <span>Cards View</span>
+              </button>
+            </div>
+          </div>
         </div>
+
+        {viewMode === 'table' ? (
+          <div className="at-table-container">
+            <table className="at-table">
+              <thead>
+                <tr>
+                  <th style={{ width: '22%' }}>Academic Term</th>
+                  <th style={{ width: '25%' }}>Status &amp; Header Inspection</th>
+                  <th style={{ width: '15%' }}>Term Dates</th>
+                  <th style={{ width: '18%' }}>Training Progress</th>
+                  <th style={{ width: '10%' }}>Cadets</th>
+                  <th style={{ width: '10%', textAlign: 'right' }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleTerms.map(term => {
+                  const isSelected = selectedTerm?.id === term.id;
+                  const isHeaderSelected = term.id === headerSelectedTermId;
+                  const isCurrent = String(term.status || '').toLowerCase() === 'current';
+                  const isArchived = String(term.status || '').toLowerCase() === 'archived';
+                  const isUpcoming = String(term.status || '').toLowerCase() === 'upcoming';
+                  const termPct = getProgressPct(term);
+
+                  return (
+                    <tr
+                      key={term.id}
+                      className={`at-table-row${isHeaderSelected ? ' is-header-selected' : ''}${isArchived ? ' is-archived' : ''}`}
+                      onClick={() => setSelectedTermId(term.id)}
+                      title={isHeaderSelected ? 'Currently selected in top header switcher' : 'Click to preview term in top banner'}
+                    >
+                      <td>
+                        <div style={{ fontWeight: 800, color: 'var(--text-dark)', fontSize: '0.92rem' }}>
+                          {term.academicYear} • {term.semester}
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {term.course}
+                        </div>
+                      </td>
+
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <StatusBadge status={term.status} />
+                          {isHeaderSelected && (
+                            isArchived ? (
+                              <span className="at-badge-inspecting-archived">
+                                <Lock size={11} /> CURRENTLY INSPECTING (ARCHIVED)
+                              </span>
+                            ) : isCurrent ? (
+                              <span className="at-badge-inspecting-active">
+                                <CheckCircle2 size={11} /> CURRENT ACTIVE
+                              </span>
+                            ) : (
+                              <span className="at-badge-inspecting-upcoming">
+                                <Calendar size={11} /> CURRENTLY INSPECTING (UPCOMING)
+                              </span>
+                            )
+                          )}
+                        </div>
+                      </td>
+
+                      <td>
+                        {term.startDate && term.endDate ? (
+                          <div style={{ fontSize: '0.78rem', color: '#334155', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Calendar size={12} color="#64748b" />
+                            <span>{formatTermDates(term.startDate, term.endDate)}</span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Dates unconfigured</span>
+                        )}
+                      </td>
+
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', fontWeight: 700 }}>
+                            <span><strong>{term.completedDays}</strong> / {term.expectedDays} days</span>
+                            <span style={{ color: 'var(--text-muted)' }}>{termPct}%</span>
+                          </div>
+                          <div className="at-mini-track" style={{ height: '6px' }}>
+                            <div className={`at-mini-fill at-mini-fill--${String(term.status || '').toLowerCase()}`} style={{ width: `${termPct}%` }} />
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontWeight: 800, fontSize: '0.88rem', color: '#065f46' }}>
+                          <GraduationCap size={15} color="#059669" />
+                          <span>{term.enrolledCadets.toLocaleString()}</span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px' }} onClick={e => e.stopPropagation()}>
+                          {!isCurrent && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.74rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              onClick={() => setPendingActivateTerm(term)}
+                              title="Promote this term to system active"
+                            >
+                              <Power size={11} color="#059669" />
+                              <span>Set Active</span>
+                            </button>
+                          )}
+
+                          {isCurrent && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-secondary"
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.74rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              onClick={() => {
+                                setPendingArchiveTerm(term);
+                                const nextCandidate = terms.find(t => String(t.status || '').toLowerCase() === 'upcoming');
+                                setArchiveNextTermId(nextCandidate?.id || '');
+                              }}
+                              title="Archive active term"
+                            >
+                              <Archive size={11} color="#b45309" />
+                              <span>Archive</span>
+                            </button>
+                          )}
+
+                          {isArchived && (
+                            <span style={{ fontSize: '0.72rem', color: '#94a3b8', display: 'inline-flex', alignItems: 'center', gap: '3px' }} title="Completed training days and dates are locked for archived terms">
+                              <Lock size={11} /> Locked
+                            </span>
+                          )}
+
+                          {isDeletableUpcoming(term) && (
+                            <button
+                              type="button"
+                              className="at-card-delete-btn"
+                              style={{ width: '26px', height: '26px' }}
+                              onClick={() => setPendingDeleteTerm(term)}
+                              title="Delete upcoming term"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-ghost"
+                            style={{ padding: '0.35rem 0.5rem', fontSize: '0.74rem' }}
+                            onClick={() => setSelectedTermId(term.id)}
+                            title="Inspect in top banner"
+                          >
+                            <ChevronRight size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+
+                {visibleTerms.length === 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>
+                      {isLoading ? 'Loading academic terms from Supabase...' : `No ${statusFilter === 'all' ? '' : statusFilter} terms found in Supabase.`}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="at-grid">
+            {visibleTerms.map(term => {
+              const isSelected = selectedTerm?.id === term.id;
+              const isHeaderSelected = term.id === headerSelectedTermId;
+              const termPct = getProgressPct(term);
+              const isCurrent = String(term.status || '').toLowerCase() === 'current';
+              const isArchived = String(term.status || '').toLowerCase() === 'archived';
+
+              return (
+                <button
+                  key={term.id}
+                  id={`at-term-card-${term.id}`}
+                  type="button"
+                  className={`at-card${isSelected ? ' is-selected' : ''}${isHeaderSelected ? ' is-header-selected' : ''}${isArchived ? ' is-archived' : ''}`}
+                  onClick={() => setSelectedTermId(term.id)}
+                  aria-pressed={isSelected}
+                >
+                  {isCurrent && (
+                    <span className="at-card-ribbon">
+                      <CheckCircle2 size={11} /> CURRENT
+                    </span>
+                  )}
+
+                  <div className="at-card-top">
+                    <div>
+                      <div className="at-card-ay">{term.academicYear}</div>
+                      <div className="at-card-sem">{term.semester}</div>
+                      <div className="at-card-course">{term.course}</div>
+                      {term.startDate && term.endDate && (
+                        <div className="at-card-dates">
+                          <Calendar size={11} />
+                          <span>{formatTermDates(term.startDate, term.endDate)}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                      <StatusBadge status={term.status} />
+                      {isHeaderSelected && (
+                        isArchived ? (
+                          <span className="at-badge-inspecting-archived" style={{ marginTop: '2px' }}>
+                            <Lock size={10} /> CURRENTLY INSPECTING (ARCHIVED)
+                          </span>
+                        ) : isCurrent ? (
+                          <span className="at-badge-inspecting-active" style={{ marginTop: '2px' }}>
+                            <CheckCircle2 size={10} /> CURRENT ACTIVE
+                          </span>
+                        ) : (
+                          <span className="at-badge-inspecting-upcoming" style={{ marginTop: '2px' }}>
+                            <Calendar size={10} /> CURRENTLY INSPECTING (UPCOMING)
+                          </span>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="at-mini">
+                    <div className="at-mini-head">
+                      <span><strong>{term.completedDays}</strong> / {term.expectedDays} days</span>
+                      <span>{termPct}%</span>
+                    </div>
+                    <div className="at-mini-track">
+                      <div className={`at-mini-fill at-mini-fill--${String(term.status || '').toLowerCase()}`} style={{ width: `${termPct}%` }} />
+                    </div>
+                  </div>
+
+                  <div className="at-card-foot">
+                    <span className="at-cadets">
+                      <GraduationCap size={14} color="#059669" />
+                      {term.enrolledCadets.toLocaleString()} cadets
+                    </span>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      {!isCurrent && (
+                        <button
+                          type="button"
+                          className="at-card-activate-btn"
+                          title="Set as active system term"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingActivateTerm(term);
+                          }}
+                        >
+                          <Power size={11} color="#059669" />
+                          <span>Set Active</span>
+                        </button>
+                      )}
+
+                      {isDeletableUpcoming(term) && (
+                        <button
+                          type="button"
+                          className="at-card-delete-btn"
+                          title="Delete upcoming term"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPendingDeleteTerm(term);
+                          }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+
+                      <span className="at-inspect">
+                        {isSelected ? 'Inspecting' : 'Inspect'} <ChevronRight size={14} />
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+
+            {visibleTerms.length === 0 && (
+              <div className="at-empty">
+                {isLoading ? 'Loading from Supabase...' : `No ${statusFilter === 'all' ? '' : statusFilter} terms found in Supabase.`}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       {isModalOpen && (
@@ -586,6 +854,19 @@ export default function AcademicTermsTab() {
           isDestructive={false}
           onConfirm={handleConfirmActivate}
           onCancel={() => setPendingActivateTerm(null)}
+        />
+      )}
+
+      {pendingArchiveTerm && (
+        <ConfirmModal
+          isOpen={Boolean(pendingArchiveTerm)}
+          title="Archive Active Academic Term"
+          message={`Are you sure you want to archive "${pendingArchiveTerm.academicYear} • ${pendingArchiveTerm.semester}"? Its historical attendance logs and roster records will be preserved in read-only mode.`}
+          confirmText={isArchiving ? 'Archiving...' : 'Yes, Archive Term'}
+          cancelText="Cancel"
+          isDestructive={false}
+          onConfirm={handleConfirmArchive}
+          onCancel={() => setPendingArchiveTerm(null)}
         />
       )}
 

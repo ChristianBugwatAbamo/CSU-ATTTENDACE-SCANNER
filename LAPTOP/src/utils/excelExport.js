@@ -1041,13 +1041,19 @@ export async function exportCadetRosterToExcel(cadetsInput = [], options = {}) {
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
-          .from('cadets')
+        let { data, error } = await client
+          .from('vw_cadet_master_roster')
           .select('*')
-          .order('last_name', { ascending: true });
+          .order('name', { ascending: true });
+        if (error && (error.code === '42P01' || error.code === 'PGRST205')) {
+          const fb = await client.from('cadets').select('*').order('name', { ascending: true });
+          data = fb.data;
+          error = fb.error;
+        }
         if (!error && Array.isArray(data)) {
           rawList = data;
         }
+
       } catch (err) {
         console.warn('Could not query existing cadets from Supabase for template:', err);
       }

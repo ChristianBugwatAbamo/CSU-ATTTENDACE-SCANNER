@@ -721,3 +721,25 @@ export async function getActiveAcademicTerm() {
     return null;
   }
 }
+
+/**
+ * Archives a term and optionally sets nextActiveTermId as the new active term.
+ */
+export async function archiveAcademicTerm(termId, nextActiveTermId = null) {
+  const client = requireClient();
+
+  // 1. Archive the target term
+  const { error: archErr } = await client
+    .from('academic_terms')
+    .update({ status: 'archived', is_active: false })
+    .eq('id', termId);
+  if (archErr) throw archErr;
+
+  // 2. If nextActiveTermId provided, activate it
+  if (nextActiveTermId) {
+    await setActiveAcademicTerm(nextActiveTermId);
+  }
+
+  return await fetchAcademicTerms();
+}
+

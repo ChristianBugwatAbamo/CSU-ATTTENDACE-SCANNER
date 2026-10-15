@@ -38,6 +38,7 @@ import {
   fetchMandatoryFormationDates,
   fetchAttendanceSessionsFromSupabase,
   fetchCadetByCadetId,
+  fetchAcademicTermById,
   submitExcuseRequest,
   subscribeToPortalRealtime
 } from '../utils/supabaseClient';
@@ -127,6 +128,15 @@ export default function CadetPortal({ cadet, onLogout }) {
   });
 
   const cadetTermId = cadet?.academic_term_id || cadetProfile?.academic_term_id;
+
+  const [cadetTerm, setCadetTerm] = useState(() => {
+    try {
+      const cached = localStorage.getItem(`csu_rotc_cadet_term_${cid}`);
+      return cached ? JSON.parse(cached) : null;
+    } catch (_) {
+      return null;
+    }
+  });
 
   const [formationDates, setFormationDates] = useState(() => {
     try {
@@ -262,6 +272,21 @@ export default function CadetPortal({ cadet, onLogout }) {
       }
 
       const effectiveTermId = liveCadet?.academic_term_id || cadetProfile?.academic_term_id || cadet?.academic_term_id;
+
+      // Authoritative academic term lookup to determine active vs archived term status
+      if (effectiveTermId) {
+        try {
+          const tInfo = await fetchAcademicTermById(effectiveTermId);
+          if (tInfo) {
+            setCadetTerm(tInfo);
+            try {
+              localStorage.setItem(`csu_rotc_cadet_term_${activeCid}`, JSON.stringify(tInfo));
+            } catch (_) { }
+          }
+        } catch (tErr) {
+          console.warn('Could not fetch academic term details:', tErr);
+        }
+      }
 
       const [historyLogs, sbSettings, mDates, sessionsRes] = await Promise.allSettled([
         fetchCadetAttendanceHistory(activeCid, true), // Always fetch fresh attendance & excuse status from cloud
@@ -1432,6 +1457,25 @@ export default function CadetPortal({ cadet, onLogout }) {
   const company = activeCadet.company || 'Alpha Company';
   const platoon = activeCadet.platoon || '1st Platoon';
 
+  // ── Term Guardrail Policy: Active (AY 2026-2027) vs Archived (AY 2025-2026 & older) ──
+  const activeAcademicYear = cadetTerm?.academic_year || activeCadet?.academic_year || activeCadet?.academicYear || '';
+  const activeSemester = cadetTerm?.semester || activeCadet?.semester || '';
+  const activeTermStatus = String(cadetTerm?.status || activeCadet?.term_status || activeCadet?.status || '').toUpperCase();
+
+  const isArchived = useMemo(() => {
+    // 1. Explicit archived status
+    if (activeTermStatus === 'ARCHIVED' || Boolean(cadetTerm?.is_archived || activeCadet?.is_archived)) {
+      return true;
+    }
+    // 2. Academic year rule: Both 1st & 2nd Sem of AY 2026-2027 are active; older years (AY 2025-2026 & older) are archived
+    if (activeAcademicYear && !activeAcademicYear.includes('2026-2027')) {
+      return true;
+    }
+    return false;
+  }, [activeTermStatus, cadetTerm, activeCadet, activeAcademicYear]);
+
+  const displayAcademicYear = activeAcademicYear || 'AY 2025-2026';
+
   // Profile fields: Department, Academic Program, Gender, Permanent Address, Contact Number, Religion
   const department = activeCadet.department || activeCadet.college || activeCadet.dept || 'N/A';
   const program = activeCadet.program || activeCadet.course || 'N/A';
@@ -1621,8 +1665,9 @@ export default function CadetPortal({ cadet, onLogout }) {
           isLoggingOut={isLoggingOut}
           handleLogoutClick={handleLogoutClick}
           onOpenFileExcuse={() => {
-            setShowExcuseModal(true);
+            if (!isArchived) setShowExcuseModal(true);
           }}
+          isArchived={isArchived}
         />
 
         {/* 2. Main Content Area */}
@@ -1639,6 +1684,84 @@ export default function CadetPortal({ cadet, onLogout }) {
             zIndex: 10
           }}
         >
+
+          {/* ============================================================ */}
+          {/* ARCHIVED ACADEMIC TERM HISTORICAL RECORD BANNER (READ-ONLY)   */}
+          {/* ============================================================ */}
+          {isArchived && (
+            <div
+              className="cadet-archived-term-banner"
+              style={{
+                background: isLight
+                  ? 'linear-gradient(135deg, #fef3c7 0%, #fffbeb 100%)'
+                  : 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.12) 100%)',
+                border: isLight ? '1.5px solid #f59e0b' : '1.5px solid rgba(245, 158, 11, 0.55)',
+                borderRadius: '14px',
+                padding: '1rem 1.25rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '1rem',
+                boxShadow: isLight
+                  ? '0 4px 14px rgba(245, 158, 11, 0.15)'
+                  : '0 6px 20px rgba(0, 0, 0, 0.4)',
+                width: '100%',
+                boxSizing: 'border-box'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: isLight ? '#fde68a' : 'rgba(245, 158, 11, 0.25)',
+                    border: `1.5px solid ${isLight ? '#d97706' : '#f59e0b'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.25rem',
+                    flexShrink: 0
+                  }}
+                >
+                  🔒
+                </div>
+                <div>
+                  <div
+                    style={{
+                      fontWeight: 800,
+                      fontSize: '0.98rem',
+                      color: isLight ? '#92400e' : '#fbbf24',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      flexWrap: 'wrap'
+                    }}
+                  >
+                    <span>🔒 Historical Record ({displayAcademicYear}) — Read-Only Mode</span>
+                    <span
+                      style={{
+                        fontSize: '0.68rem',
+                        fontWeight: 800,
+                        background: isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.3)',
+                        color: isLight ? '#78350f' : '#fef08a',
+                        border: `1px solid ${isLight ? '#d97706' : '#f59e0b'}`,
+                        padding: '2px 8px',
+                        borderRadius: '9999px',
+                        letterSpacing: '0.4px',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      Archived Academic Term
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: isLight ? '#78350f' : '#fef3c7', marginTop: '3px', lineHeight: 1.4 }}>
+                    This cadet profile belongs to a past academic year ({displayAcademicYear}{activeSemester ? ` • ${activeSemester}` : ''}). Live Digital QR Pass generation and excuse filings are disabled.
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ============================================================ */}
           {/* EMPATHETIC, CLEAR ATTENDANCE STATUS ALERT BANNER              */}
@@ -1944,32 +2067,39 @@ export default function CadetPortal({ cadet, onLogout }) {
                 </div>
               </div>
 
-              {/* Digital QR Pass Button */}
+              {/* Digital QR Pass Button (Disabled & Locked for Archived Terms) */}
               <button
                 type="button"
                 className="cadet-profile-id-btn"
-                onClick={() => setShowIdModal(true)}
+                onClick={() => {
+                  if (isArchived) return;
+                  setShowIdModal(true);
+                }}
+                disabled={isArchived}
                 style={{
-                  background: '#e5a900',
-                  color: '#0b0f19',
-                  border: 'none',
+                  background: isArchived ? (isLight ? '#e2e8f0' : '#1e293b') : '#e5a900',
+                  color: isArchived ? (isLight ? '#94a3b8' : '#64748b') : '#0b0f19',
+                  border: isArchived ? `1.5px solid ${isLight ? '#cbd5e1' : '#334155'}` : 'none',
                   padding: '0.7rem 1.25rem',
                   borderRadius: '10px',
                   fontSize: '0.86rem',
                   fontWeight: 800,
-                  cursor: 'pointer',
+                  cursor: isArchived ? 'not-allowed' : 'pointer',
+                  opacity: isArchived ? 0.6 : 1,
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '8px',
-                  boxShadow: '0 2px 8px rgba(229, 169, 0, 0.25)',
-                  transition: 'background-color 0.15s ease',
+                  boxShadow: isArchived ? 'none' : '0 2px 8px rgba(229, 169, 0, 0.25)',
+                  transition: 'all 0.15s ease',
                   flexShrink: 0,
                   whiteSpace: 'nowrap'
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#d97706'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#e5a900'; }}
+                onMouseEnter={(e) => { if (!isArchived) e.currentTarget.style.background = '#d97706'; }}
+                onMouseLeave={(e) => { if (!isArchived) e.currentTarget.style.background = '#e5a900'; }}
+                title={isArchived ? "Digital QR Pass is disabled for archived academic years (prevent scanning archived QR codes)" : "View Digital QR Pass"}
               >
-                <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>🔲</span> View Digital QR Pass
+                <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>{isArchived ? '🔒' : '🔲'}</span> View Digital QR Pass
+                {isArchived && <span style={{ fontSize: '0.72rem', opacity: 0.85, fontWeight: 700 }}>(Locked)</span>}
               </button>
             </div>
 
@@ -2677,7 +2807,6 @@ export default function CadetPortal({ cadet, onLogout }) {
                       <span>Syncing...</span>
                     </div>
                   )}
-
                   {/* Refresh Button */}
                   <button
                     type="button"
@@ -3220,6 +3349,7 @@ export default function CadetPortal({ cadet, onLogout }) {
             onSubmitSuccess={() => {
               handleRefresh();
             }}
+            isArchived={isArchived}
           />
 
           {/* ============================================================ */}

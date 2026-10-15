@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   Shield,
   Clock,
@@ -21,10 +21,116 @@ import {
   MapPin
 } from 'lucide-react';
 import MilitaryLoader from './MilitaryLoader';
+import { fetchSettingsFromSupabase, subscribeToPortalRealtime } from '../utils/supabaseClient';
+
+const DEFAULT_LOGOS = {
+  rcdg_seal_url: '/rcdg-logo.png',
+  cdc_seal_url: '/cdc-logo.png',
+  rotc_seal_url: '/rotc-seal-transparent.png',
+  nstp_logo_url: '/nstp-logo.png',
+  university_logo_url: '/csu-logo.png',
+  unit_name: 'CSU MAIN ROTC UNIT'
+};
+
+function extractLogosFromSettings(data) {
+  if (!data) return DEFAULT_LOGOS;
+
+  let heroList = [];
+  if (Array.isArray(data.hero_emblems) && data.hero_emblems.length > 0) {
+    heroList = data.hero_emblems;
+  } else if (typeof data.hero_emblems === 'string') {
+    try {
+      const parsed = JSON.parse(data.hero_emblems);
+      if (Array.isArray(parsed)) heroList = parsed;
+    } catch (_) { }
+  }
+
+  const centerHero = heroList.find((e) => e && (e.is_center === true || e.isCenter === true));
+
+  return {
+    rcdg_seal_url:
+      heroList[0]?.url || data.rcdg_seal_url || data.rcdgSealUrl || DEFAULT_LOGOS.rcdg_seal_url,
+    cdc_seal_url:
+      heroList[1]?.url || data.cdc_seal_url || data.cdcSealUrl || DEFAULT_LOGOS.cdc_seal_url,
+    rotc_seal_url:
+      centerHero?.url || heroList[2]?.url || data.rotc_seal_url || data.rotcSealUrl || DEFAULT_LOGOS.rotc_seal_url,
+    nstp_logo_url:
+      heroList[3]?.url || data.nstp_logo_url || data.nstpLogoUrl || DEFAULT_LOGOS.nstp_logo_url,
+    university_logo_url:
+      heroList[4]?.url || data.university_logo_url || data.universityLogoUrl || DEFAULT_LOGOS.university_logo_url,
+    unit_name: data.unit_name || data.unitName || DEFAULT_LOGOS.unit_name
+  };
+}
 
 export default function CadetLandingPage({ onOpenLogin }) {
   const currentYear = new Date().getFullYear();
   const [activeFaq, setActiveFaq] = useState(null);
+
+  // Dynamic branding state backed by Supabase system_settings with local fallback
+  const [branding, setBranding] = useState(() => {
+    try {
+      const saved = localStorage.getItem('csu_rotc_admin_settings');
+      if (saved) {
+        return extractLogosFromSettings(JSON.parse(saved));
+      }
+    } catch (_) { }
+    return DEFAULT_LOGOS;
+  });
+
+  // Graceful image fallback handler
+  const handleImgError = (fallbackSrc) => (e) => {
+    const current = e.currentTarget.getAttribute('src');
+    if (current !== fallbackSrc) {
+      e.currentTarget.src = fallbackSrc;
+    } else {
+      e.currentTarget.style.display = 'none';
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    // 1. Fetch latest system_settings from cloud Supabase
+    async function loadBranding() {
+      try {
+        const data = await fetchSettingsFromSupabase(true);
+        if (isMounted && data) {
+          setBranding(extractLogosFromSettings(data));
+        }
+      } catch (err) {
+        console.warn('Failed to load dynamic branding from Supabase:', err);
+      }
+    }
+
+    loadBranding();
+
+    // 2. Custom update event listener
+    const handleSettingsUpdate = (e) => {
+      if (!isMounted) return;
+      if (e?.detail) {
+        setBranding(extractLogosFromSettings(e.detail));
+      }
+    };
+    window.addEventListener('csu_settings_updated', handleSettingsUpdate);
+
+    // 3. Supabase Realtime live sync from Laptop HQ admin changes
+    const realtimeChannel = subscribeToPortalRealtime({
+      onSettingsChange: (payload) => {
+        if (!isMounted) return;
+        if (payload?.new) {
+          setBranding(extractLogosFromSettings(payload.new));
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('csu_settings_updated', handleSettingsUpdate);
+      if (realtimeChannel && typeof realtimeChannel.unsubscribe === 'function') {
+        realtimeChannel.unsubscribe();
+      }
+    };
+  }, []);
 
   // Navigation overlay state
   const [isNavigating, setIsNavigating] = useState(false);
@@ -261,12 +367,10 @@ export default function CadetLandingPage({ onOpenLogin }) {
             }}
           >
             <img
-              src="/rotc-seal-transparent.png"
+              src={branding.rotc_seal_url || '/rotc-seal-transparent.png'}
               alt="CSU ROTC Unit Seal"
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
+              onError={handleImgError('/rotc-seal-transparent.png')}
             />
           </div>
           <div style={{ minWidth: 0 }}>
@@ -282,7 +386,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                   lineHeight: 1.2
                 }}
               >
-                CSU MAIN ROTC UNIT
+                Reserve Officers Training Corps
               </span>
               <span
                 style={{
@@ -400,7 +504,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                 }}
               >
                 <img
-                  src="/rcdg-logo.png"
+                  src={branding.rcdg_seal_url || '/rcdg-logo.png'}
                   alt="15th Regional Community Defense Group"
                   style={{
                     width: '100%',
@@ -409,7 +513,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                     borderRadius: '50%',
                     filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
                   }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
+                  onError={handleImgError('/rcdg-logo.png')}
                 />
               </div>
 
@@ -433,7 +537,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                 }}
               >
                 <img
-                  src="/cdc-logo.png"
+                  src={branding.cdc_seal_url || '/cdc-logo.png'}
                   alt="1501st Community Defense Center"
                   style={{
                     width: '100%',
@@ -442,13 +546,13 @@ export default function CadetLandingPage({ onOpenLogin }) {
                     borderRadius: '50%',
                     filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
                   }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
+                  onError={handleImgError('/cdc-logo.png')}
                 />
               </div>
 
               {/* 3. Center: Featured Main ROTC Emblem (Significantly Enlarged) */}
               <div
-                title="Caraga State University ROTC Unit"
+                title={branding.unit_name ? branding.unit_name : 'Caraga State University ROTC Unit'}
                 className="cadet-seal-center"
                 style={{
                   width: 'clamp(170px, 23vw, 235px)',
@@ -468,7 +572,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                 }}
               >
                 <img
-                  src="/rotc-seal-transparent.png"
+                  src={branding.rotc_seal_url || '/rotc-seal-transparent.png'}
                   alt="CSU ROTC Official Seal"
                   style={{
                     width: '100%',
@@ -476,7 +580,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                     objectFit: 'contain',
                     filter: 'drop-shadow(0 0 24px rgba(229, 169, 0, 0.65)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.5))'
                   }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
+                  onError={handleImgError('/rotc-seal-transparent.png')}
                 />
               </div>
 
@@ -500,7 +604,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                 }}
               >
                 <img
-                  src="/nstp-logo.png"
+                  src={branding.nstp_logo_url || '/nstp-logo.png'}
                   alt="National Service Training Program"
                   style={{
                     width: '100%',
@@ -509,7 +613,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                     borderRadius: '50%',
                     filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
                   }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
+                  onError={handleImgError('/nstp-logo.png')}
                 />
               </div>
 
@@ -533,7 +637,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                 }}
               >
                 <img
-                  src="/csu-logo.png"
+                  src={branding.university_logo_url || '/csu-logo.png'}
                   alt="Caraga State University"
                   style={{
                     width: '100%',
@@ -542,7 +646,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
                     borderRadius: '50%',
                     filter: 'drop-shadow(0 3px 8px rgba(0,0,0,0.4))'
                   }}
-                  onError={(e) => { e.target.style.display = 'none'; }}
+                  onError={handleImgError('/csu-logo.png')}
                 />
               </div>
             </div>
@@ -682,7 +786,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
             <div>
               <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#064e2e' }}>Official Excuse Justifications</div>
               <div style={{ fontSize: '0.76rem', color: '#64748b', marginTop: '2px', lineHeight: 1.45 }}>
-                Submit medical certificates or university official duty excuse letters to your Platoon Leader or S1 within 5 school days.
+                Submit medical certificates or university official duty excuse letters to your Platoon Leader or S1 within school days.
               </div>
             </div>
           </div>
@@ -759,7 +863,7 @@ export default function CadetLandingPage({ onOpenLogin }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.84rem', color: '#334155' }}>
                   <CheckCircle2 size={16} color="#059669" style={{ marginTop: '2px', flexShrink: 0 }} />
-                  <span><strong>Valid Medical Excuses:</strong> State that valid medical excuses require attached proof (e.g., medical receipts) submitted within 5 days.</span>
+                  <span><strong>Valid Medical Excuses:</strong> State that valid medical excuses require attached proof (e.g., medical receipts) submitted within specific days.</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', fontSize: '0.84rem', color: '#334155' }}>
                   <CheckCircle2 size={16} color="#059669" style={{ marginTop: '2px', flexShrink: 0 }} />

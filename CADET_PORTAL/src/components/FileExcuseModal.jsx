@@ -42,7 +42,8 @@ function FileExcuseModal({
   approvedExcuseDatesMap = new Map(),
   pendingExcuseDatesMap = new Map(),
   officialFormationDatesSet = new Set(),
-  onSubmitSuccess
+  onSubmitSuccess,
+  isArchived = false
 }) {
   // 1. Live Grace Period directly from system_settings table in Supabase (defaults to 3)
   const [directGracePeriod, setDirectGracePeriod] = useState(() => {
@@ -536,6 +537,7 @@ function FileExcuseModal({
   // Handle Form Submission
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
+    if (isArchived) return;
     if (!cadetId) {
       setResult({ success: false, message: 'Cadet ID not verified. Please log in again.' });
       return;
@@ -1175,6 +1177,26 @@ function FileExcuseModal({
         ) : (
           /* 6. ACTIVE FILING FORM (Default state when cadet has an eligible date selected) */
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {isArchived && (
+              <div
+                style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '10px',
+                  background: isLight ? '#fef3c7' : 'rgba(245, 158, 11, 0.15)',
+                  border: '1.5px solid #f59e0b',
+                  color: isLight ? '#92400e' : '#fbbf24',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                <span>🔒</span>
+                <span>Archived Academic Term — Historical Record. Excuse filing is disabled in Read-Only Mode.</span>
+              </div>
+            )}
+
             {/* Reason for Absence Textarea */}
             <div>
               <label
@@ -1234,6 +1256,7 @@ function FileExcuseModal({
             <button
               type="submit"
               disabled={
+                isArchived ||
                 isSubmitting ||
                 !selectedDate ||
                 !reason.trim() ||
@@ -1250,6 +1273,7 @@ function FileExcuseModal({
                 fontSize: '0.88rem',
                 fontWeight: 800,
                 cursor: (
+                  isArchived ||
                   isSubmitting ||
                   !selectedDate ||
                   !reason.trim() ||
@@ -1257,6 +1281,7 @@ function FileExcuseModal({
                   getDaysDiff(selectedDate) > gracePeriodDays
                 ) ? 'not-allowed' : 'pointer',
                 background: (
+                  isArchived ||
                   isSubmitting ||
                   !selectedDate ||
                   !reason.trim() ||
@@ -1268,6 +1293,7 @@ function FileExcuseModal({
                 color: '#ffffff',
                 border: 'none',
                 boxShadow: (
+                  isArchived ||
                   isSubmitting ||
                   !selectedDate ||
                   !reason.trim() ||
@@ -1277,8 +1303,22 @@ function FileExcuseModal({
                 transition: 'all 0.2s ease'
               }}
             >
-              <Send size={15} />
-              {isSubmitting ? 'Submitting...' : 'Submit Excuse Request'}
+              {isSubmitting ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  <span>Submitting...</span>
+                </>
+              ) : isArchived ? (
+                <>
+                  <span>🔒</span>
+                  <span>Excuse Filing Locked (Archived Term)</span>
+                </>
+              ) : (
+                <>
+                  <Send size={15} />
+                  <span>Submit Excuse Request</span>
+                </>
+              )}
             </button>
 
             <p style={{ margin: 0, fontSize: '0.72rem', color: isLight ? '#94a3b8' : '#64748b', textAlign: 'center' }}>

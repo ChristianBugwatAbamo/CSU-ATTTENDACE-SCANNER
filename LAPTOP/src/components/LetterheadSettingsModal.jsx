@@ -22,7 +22,8 @@ import {
   Undo,
   Redo,
   Type,
-  ChevronDown
+  ChevronDown,
+  Lock
 } from 'lucide-react';
 import {
   DEFAULT_LETTERHEAD,
@@ -133,7 +134,7 @@ const QUICK_HIGHLIGHT_COLORS = [
   { label: 'Soft Orange', value: '#fed7aa' }
 ];
 
-export default function LetterheadSettingsModal({ isOpen = true, onClose, onSaved, onSaveSuccess, selectedDate = null }) {
+export default function LetterheadSettingsModal({ isOpen = true, onClose, onSaved, onSaveSuccess, selectedDate = null, readOnly = false }) {
   const [form, setForm] = useState(DEFAULT_LETTERHEAD);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -241,11 +242,13 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
   if (!isOpen) return null;
 
   const handleChange = (field, value) => {
+    if (readOnly) return;
     setForm(prev => ({ ...prev, [field]: value }));
   };
 
   // Keep form state in sync when editor content changes
   const handleCanvasInput = () => {
+    if (readOnly) return;
     if (editorRef.current) {
       const html = editorRef.current.innerHTML;
       const lines = extractLinesFromHtml(html);
@@ -263,6 +266,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
 
   // Convert uploaded image file to base64 Data URL
   const handleFileUpload = (e, field) => {
+    if (readOnly) return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -281,6 +285,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
 
   // Execute standard formatting command
   const applyExecCommand = (command, value = null) => {
+    if (readOnly) return;
     if (editorRef.current) {
       editorRef.current.focus();
     }
@@ -400,6 +405,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
 
   // Restore Official Military Template
   const handleResetToMilitaryTemplate = () => {
+    if (readOnly) return;
     const defaultHtml = generateDefaultLetterheadHtml(DEFAULT_LETTERHEAD);
     if (editorRef.current) {
       editorRef.current.innerHTML = defaultHtml;
@@ -412,6 +418,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
   };
 
   const handleSave = async () => {
+    if (readOnly) return;
     try {
       setSaving(true);
       const currentHtml = editorRef.current ? editorRef.current.innerHTML : form.contentHtml;
@@ -526,6 +533,28 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
           </button>
         </div>
 
+        {/* Read-Only Historical Notice */}
+        {readOnly && (
+          <div style={{
+            background: '#fef3c7',
+            border: '1.5px solid #f59e0b',
+            borderRadius: '10px',
+            padding: '0.75rem 1rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            color: '#92400e',
+            fontSize: '0.82rem',
+            fontWeight: 700
+          }}>
+            <Lock size={18} color="#b45309" style={{ flexShrink: 0 }} />
+            <span>
+              <strong>Read-Only Historical Mode:</strong> You are viewing an archived academic term. Letterhead editing, insignia updates, and document signatories are locked to preserve historical record integrity.
+            </span>
+          </div>
+        )}
+
         {/* Section 1: Left & Right Logo File Upload Inputs */}
         <div style={{ marginBottom: '1.25rem' }}>
           <div style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--rotc-green-dark)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '0.65rem', display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -554,18 +583,28 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                     ref={leftLogoInputRef}
                     accept="image/*"
                     style={{ display: 'none' }}
+                    disabled={readOnly}
                     onChange={(e) => handleFileUpload(e, 'leftLogoUrl')}
                   />
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => leftLogoInputRef.current?.click()}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                    disabled={readOnly}
+                    onClick={() => !readOnly && leftLogoInputRef.current?.click()}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '0.75rem',
+                      padding: '0.35rem 0.65rem',
+                      opacity: readOnly ? 0.5 : 1,
+                      cursor: readOnly ? 'not-allowed' : 'pointer'
+                    }}
                   >
                     <Upload size={13} /> Upload Image File
                   </button>
 
-                  {form.leftLogoUrl && (
+                  {form.leftLogoUrl && !readOnly && (
                     <button
                       type="button"
                       onClick={() => handleChange('leftLogoUrl', '')}
@@ -581,9 +620,10 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                 type="text"
                 className="form-control form-control-sm"
                 value={form.leftLogoUrl || ''}
+                disabled={readOnly}
                 onChange={(e) => handleChange('leftLogoUrl', e.target.value)}
                 placeholder="Or paste Image URL / path..."
-                style={{ fontSize: '0.75rem' }}
+                style={{ fontSize: '0.75rem', background: readOnly ? '#f1f5f9' : '#ffffff', cursor: readOnly ? 'not-allowed' : 'text' }}
               />
             </div>
 
@@ -608,18 +648,28 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                     ref={rightLogoInputRef}
                     accept="image/*"
                     style={{ display: 'none' }}
+                    disabled={readOnly}
                     onChange={(e) => handleFileUpload(e, 'rightLogoUrl')}
                   />
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm"
-                    onClick={() => rightLogoInputRef.current?.click()}
-                    style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '0.75rem', padding: '0.35rem 0.65rem' }}
+                    disabled={readOnly}
+                    onClick={() => !readOnly && rightLogoInputRef.current?.click()}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      fontSize: '0.75rem',
+                      padding: '0.35rem 0.65rem',
+                      opacity: readOnly ? 0.5 : 1,
+                      cursor: readOnly ? 'not-allowed' : 'pointer'
+                    }}
                   >
                     <Upload size={13} /> Upload Image File
                   </button>
 
-                  {form.rightLogoUrl && (
+                  {form.rightLogoUrl && !readOnly && (
                     <button
                       type="button"
                       onClick={() => handleChange('rightLogoUrl', '')}
@@ -635,9 +685,10 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                 type="text"
                 className="form-control form-control-sm"
                 value={form.rightLogoUrl || ''}
+                disabled={readOnly}
                 onChange={(e) => handleChange('rightLogoUrl', e.target.value)}
                 placeholder="Or paste Image URL / path..."
-                style={{ fontSize: '0.75rem' }}
+                style={{ fontSize: '0.75rem', background: readOnly ? '#f1f5f9' : '#ffffff', cursor: readOnly ? 'not-allowed' : 'text' }}
               />
             </div>
           </div>
@@ -1112,7 +1163,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
               {/* Direct WYSIWYG Editable Canvas */}
               <div
                 ref={editorRef}
-                contentEditable
+                contentEditable={!readOnly}
                 suppressContentEditableWarning
                 onInput={handleCanvasInput}
                 onBlur={handleCanvasInput}
@@ -1124,9 +1175,11 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                   outline: 'none',
                   border: '1px solid transparent',
                   transition: 'all 0.15s ease',
-                  cursor: 'text'
+                  cursor: readOnly ? 'default' : 'text',
+                  background: readOnly ? '#f8fafc' : '#ffffff'
                 }}
                 onFocus={(e) => {
+                  if (readOnly) return;
                   e.currentTarget.style.borderColor = '#10b981';
                   e.currentTarget.style.boxShadow = '0 0 0 2px rgba(16, 185, 129, 0.15)';
                 }}
@@ -1162,6 +1215,7 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                 <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600 }}>OFFICE SYMBOL:</span>
                 <input
                   type="text"
+                  disabled={readOnly}
                   value={form.officeSymbol || 'CSUROTCU1'}
                   onChange={(e) => handleChange('officeSymbol', e.target.value.toUpperCase())}
                   style={{
@@ -1171,7 +1225,9 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
                     borderRadius: '4px',
                     border: '1px solid #cbd5e1',
                     textTransform: 'uppercase',
-                    width: '120px'
+                    width: '120px',
+                    background: readOnly ? '#f1f5f9' : '#ffffff',
+                    cursor: readOnly ? 'not-allowed' : 'text'
                   }}
                 />
               </div>
@@ -1204,7 +1260,14 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
             type="button"
             className="btn btn-secondary btn-sm"
             onClick={handleResetToMilitaryTemplate}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+            disabled={readOnly}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              opacity: readOnly ? 0.5 : 1,
+              cursor: readOnly ? 'not-allowed' : 'pointer'
+            }}
           >
             <RotateCcw size={13} /> Reset to Default Letterhead
           </button>
@@ -1215,25 +1278,46 @@ export default function LetterheadSettingsModal({ isOpen = true, onClose, onSave
               className="btn btn-secondary btn-sm"
               onClick={onClose}
             >
-              Cancel
+              {readOnly ? 'Close Preview' : 'Cancel'}
             </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={handleSave}
-              disabled={saving}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                fontWeight: 800,
-                opacity: saving ? 0.7 : 1,
-                cursor: saving ? 'not-allowed' : 'pointer'
-              }}
-            >
-              <CheckCircle size={15} />
-              {saving ? 'Syncing to Supabase...' : savedSuccess ? 'Saved & Synced!' : 'Save & Set Letterhead'}
-            </button>
+            {readOnly ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 800,
+                  opacity: 0.65,
+                  cursor: 'not-allowed',
+                  background: '#e2e8f0',
+                  color: '#64748b'
+                }}
+              >
+                <Lock size={14} />
+                Signatures Locked (Archived)
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleSave}
+                disabled={saving}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontWeight: 800,
+                  opacity: saving ? 0.7 : 1,
+                  cursor: saving ? 'not-allowed' : 'pointer'
+                }}
+              >
+                <CheckCircle size={15} />
+                {saving ? 'Syncing to Supabase...' : savedSuccess ? 'Saved & Synced!' : 'Save & Set Letterhead'}
+              </button>
+            )}
           </div>
         </div>
       </div>

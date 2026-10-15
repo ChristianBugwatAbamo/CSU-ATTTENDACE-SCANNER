@@ -171,6 +171,21 @@ export function AcademicTermProvider({ children }) {
     return academicTerms.find((t) => t.id === selectedTermId) || activeTerm || null;
   }, [academicTerms, selectedTermId, activeTerm]);
 
+  // Term Guardrail Policy: Active (AY 2026-2027 1st & 2nd Sem) vs Archived (AY 2025-2026 & older)
+  const isArchived = useMemo(() => {
+    if (!selectedTerm) return false;
+    const st = String(selectedTerm.status || '').trim().toLowerCase();
+    const ay = String(selectedTerm.academic_year || selectedTerm.academicYear || '').trim();
+    if (st === 'archived' || selectedTerm.is_archived === true || selectedTerm.isArchived === true) {
+      return true;
+    }
+    // If academic year is explicitly older than AY 2026-2027
+    if (ay && !ay.includes('2026-2027')) {
+      return true;
+    }
+    return false;
+  }, [selectedTerm]);
+
   const value = useMemo(
     () => ({
       academicTerms,
@@ -178,6 +193,7 @@ export function AcademicTermProvider({ children }) {
       activeTermId: activeTerm?.id || selectedTermId || null,
       selectedTerm,
       activeTerm,
+      isArchived,
       setSelectedTermId,
       setActiveTermId,
       refreshTerms,
@@ -188,6 +204,7 @@ export function AcademicTermProvider({ children }) {
       selectedTermId,
       selectedTerm,
       activeTerm,
+      isArchived,
       setSelectedTermId,
       setActiveTermId,
       refreshTerms,
@@ -211,6 +228,7 @@ export function useAcademicTerm() {
       activeTermId: null,
       selectedTerm: null,
       activeTerm: null,
+      isArchived: false,
       setSelectedTermId: () => {},
       setActiveTermId: () => {},
       refreshTerms: async () => [],

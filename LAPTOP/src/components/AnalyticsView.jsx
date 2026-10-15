@@ -538,7 +538,7 @@ export default function AnalyticsView({
 
         if (client) {
           let cadetQuery = client
-            .from('cadets')
+            .from('vw_cadet_master_roster')
             .select('*')
             .order('created_at', { ascending: true });
 
@@ -546,7 +546,16 @@ export default function AnalyticsView({
             cadetQuery = cadetQuery.eq('academic_term_id', currentTermId);
           }
 
-          const { data: allCadets, error: cadetErr } = await cadetQuery;
+          let { data: allCadets, error: cadetErr } = await cadetQuery;
+
+          // Resilient fallback to cadets table if view has not yet been applied
+          if (cadetErr && (cadetErr.code === '42P01' || cadetErr.code === 'PGRST205')) {
+            let fbQuery = client.from('cadets').select('*').order('created_at', { ascending: true });
+            if (currentTermId) fbQuery = fbQuery.eq('academic_term_id', currentTermId);
+            const fbRes = await fbQuery;
+            allCadets = fbRes.data;
+            cadetErr = fbRes.error;
+          }
 
           if (!cadetErr && Array.isArray(allCadets)) {
             fetchedCadetsList = allCadets;
@@ -556,6 +565,7 @@ export default function AnalyticsView({
             totalCount = allCadets.length;
           }
         }
+
 
         const cadetRecords = fetchedCadetsList.length > 0 ? fetchedCadetsList : (liveCadets && liveCadets.length > 0 ? liveCadets : propsCadets);
 
