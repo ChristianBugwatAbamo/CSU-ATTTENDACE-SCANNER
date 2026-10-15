@@ -493,7 +493,36 @@ export async function fetchCadetByCadetId(rawCadetId, rawLastName = '') {
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
-      // If last name is provided, query verifying both parameters (student_id AND last_name)
+      // 1a. Primary: Secure Server-Side RPC Login (verifies credentials within PostgreSQL, prevents enumeration)
+      if (cleanLastName) {
+        try {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc('rpc_cadet_portal_login', {
+            p_cadet_id: cleanId,
+            p_last_name: cleanLastName
+          });
+
+          if (!rpcErr && rpcRes) {
+            if (rpcRes.success && rpcRes.cadet) {
+              const profile = buildProfile(rpcRes.cadet);
+              cacheProfile(profile);
+              return profile;
+            } else if (rpcRes.code === 'LAST_NAME_MISMATCH') {
+              const mismatchErr = new Error(rpcRes.message || 'Last Name mismatch');
+              mismatchErr.code = 'LAST_NAME_MISMATCH';
+              mismatchErr.cadetId = cleanId;
+              mismatchErr.enteredLastName = cleanLastName;
+              throw mismatchErr;
+            } else if (rpcRes.code === 'CADET_NOT_FOUND') {
+              return null;
+            }
+          }
+        } catch (rpcEx) {
+          if (rpcEx.code === 'LAST_NAME_MISMATCH') throw rpcEx;
+          // Fall back gracefully if RPC migration not yet applied in Supabase SQL editor
+        }
+      }
+
+      // 1b. Fallback: Direct table match if RPC not available
       if (cleanLastName) {
         try {
           const { data: directMatch, error: directErr } = await supabase
@@ -648,16 +677,49 @@ export async function fetchCadetAttendanceHistory(rawCadetId, forceRefresh = fal
   try {
     const supabase = getSupabaseClient();
     if (supabase) {
+      let data = null;
+      let error = null;
+
+      // 1a. Primary Secure RPC: Fetch attendance verified inside PostgreSQL
+      let cadetLastName = '';
+      try {
+        const session = JSON.parse(localStorage.getItem('csu_rotc_cadet_session') || '{}');
+        cadetLastName = session.cadet?.last_name || '';
+        if (!cadetLastName) {
+          const prof = JSON.parse(localStorage.getItem(`csu_rotc_cadet_profile_${cleanId}`) || '{}');
+          cadetLastName = prof.last_name || '';
+        }
+      } catch (_) {}
+
+      if (cadetLastName) {
+        try {
+          const { data: rpcLogs, error: rpcErr } = await supabase.rpc('rpc_get_cadet_attendance_logs', {
+            p_cadet_id: cleanId,
+            p_last_name: cadetLastName,
+            p_academic_term_id: academicTermId || null
+          });
+
+          if (!rpcErr && Array.isArray(rpcLogs) && rpcLogs.length > 0) {
+            data = rpcLogs;
+            error = null;
+          }
+        } catch (_) {}
+      }
+
       const orCond = dashedId !== cleanId
         ? `cadet_id.eq.${cleanId},cadet_id.eq.${dashedId}`
         : `cadet_id.eq.${cleanId}`;
 
-      // 1. Primary: Sub-second read-optimized view vw_cadet_portal_summary
-      let { data, error } = await supabase
-        .from('vw_cadet_portal_summary')
-        .select('*')
-        .or(orCond)
-        .order('date', { ascending: false });
+      // 1b. Fallback: Sub-second read-optimized view vw_cadet_portal_summary if RPC not available
+      if (!data) {
+        const viewRes = await supabase
+          .from('vw_cadet_portal_summary')
+          .select('*')
+          .or(orCond)
+          .order('date', { ascending: false });
+        data = viewRes.data;
+        error = viewRes.error;
+      }
 
       // Fallback: vw_attendance_logs_detailed or base attendance_logs
       if (error || !data) {
@@ -849,8 +911,41 @@ export async function submitExcuseRequest(cadetId, formationDate, reason, proofD
   const dateKey = _dateKey(formationDate);
   if (!cid || !dateKey) return { error: 'INVALID_DATE', message: 'Invalid formation date selected.' };
 
+  // 1a. Primary Secure RPC: Validate & submit excuse request inside PostgreSQL
   try {
-    // 1. Strict validation: Verify that an official formation session exists in attendance_sessions
+    let cadetLastName = '';
+    try {
+      const session = JSON.parse(localStorage.getItem('csu_rotc_cadet_session') || '{}');
+      cadetLastName = session.cadet?.last_name || '';
+      if (!cadetLastName) {
+        const prof = JSON.parse(localStorage.getItem(`csu_rotc_cadet_profile_${cid}`) || '{}');
+        cadetLastName = prof.last_name || '';
+      }
+    } catch (_) {}
+
+    if (cadetLastName) {
+      const { data: rpcRes, error: rpcErr } = await client.rpc('rpc_submit_excuse_request', {
+        p_cadet_id: cid,
+        p_last_name: cadetLastName,
+        p_drill_date: dateKey,
+        p_reason: reason || '',
+        p_proof_url: proofDataUrl || ''
+      });
+
+      if (!rpcErr && rpcRes) {
+        if (rpcRes.success) {
+          return { success: true, message: rpcRes.message || 'Excuse request submitted successfully.' };
+        } else {
+          return { error: rpcRes.error || 'SUBMIT_ERROR', message: rpcRes.message };
+        }
+      }
+    }
+  } catch (rpcEx) {
+    console.warn('rpc_submit_excuse_request fallback:', rpcEx);
+  }
+
+  try {
+    // 1b. Fallback: Direct table validation & update if RPC not yet deployed
     const { data: sessionData, error: sessionErr } = await client
       .from('attendance_sessions')
       .select('id, session_name, session_date, academic_term_id')
