@@ -125,20 +125,24 @@ const IDCardPreview = React.forwardRef(({ card }, ref) => {
         />
       </div>
 
-      {/* Line 1: LAST NAME ONLY (e.g. TRAZARES) */}
-      <div style={{
-        fontFamily: 'Oswald, sans-serif',
-        fontWeight: 800,
-        fontSize: '0.8rem',
-        color: '#0f172a',
-        textAlign: 'center',
-        lineHeight: 1.15,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        maxWidth: '100%',
-        wordBreak: 'break-word',
-        marginTop: '2px'
-      }}>
+      {/* Line 1: LAST NAME ONLY (e.g. TRAZARES) - Hidden on screen for privacy, visible on print & PDF */}
+      <div
+        className="qr-pass-lastname hidden print:block"
+        data-qr-lastname="true"
+        style={{
+          fontFamily: 'Oswald, sans-serif',
+          fontWeight: 800,
+          fontSize: '0.8rem',
+          color: '#0f172a',
+          textAlign: 'center',
+          lineHeight: 1.15,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          maxWidth: '100%',
+          wordBreak: 'break-word',
+          marginTop: '2px'
+        }}
+      >
         {lastNameOnly}
       </div>
 

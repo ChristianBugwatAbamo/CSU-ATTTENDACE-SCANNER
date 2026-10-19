@@ -1,11 +1,12 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Shield, ArrowLeft, User, AlertCircle, Loader2, ChevronRight, X } from 'lucide-react';
+import { Shield, ArrowLeft, User, AlertCircle, Loader2, ChevronRight, X, Eye, EyeOff } from 'lucide-react';
 import { fetchCadetByCadetId } from '../utils/supabaseClient';
 import MilitaryLoader from './MilitaryLoader';
 
 export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
   const [cadetIdInput, setCadetIdInput] = useState('');
   const [lastNameInput, setLastNameInput] = useState('');
+  const [showLastName, setShowLastName] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorInfo, setErrorInfo] = useState(null); // { title: string, message: string }
   const hasError = Boolean(errorInfo);
@@ -449,7 +450,7 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
                 </div>
                 <input
                   id="cadet-lastname-input"
-                  type="text"
+                  type={showLastName ? 'text' : 'password'}
                   value={lastNameInput}
                   onChange={handleLastNameChange}
                   placeholder="e.g. DELA CRUZ"
@@ -457,7 +458,7 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
                   disabled={loading}
                   style={{
                     width: '100%',
-                    padding: '0.8rem 1rem 0.8rem 2.75rem',
+                    padding: '0.8rem 2.85rem 0.8rem 2.75rem',
                     background: 'rgba(0, 0, 0, 0.35)',
                     border: hasError ? '1.5px solid rgba(239, 68, 68, 0.85)' : '1.5px solid rgba(245, 158, 11, 0.4)',
                     borderRadius: '10px',
@@ -490,6 +491,43 @@ export default function CadetLogin({ onCadetLoginSuccess, onBackToHome }) {
                     }
                   }}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowLastName((prev) => !prev)}
+                  aria-label={showLastName ? 'Hide Last Name' : 'Show Last Name'}
+                  title={showLastName ? 'Hide Last Name' : 'Show Last Name'}
+                  disabled={loading}
+                  style={{
+                    position: 'absolute',
+                    right: '0.75rem',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'transparent',
+                    border: 'none',
+                    padding: '6px',
+                    borderRadius: '6px',
+                    color: hasError ? '#fca5a5' : '#94a3b8',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'color 0.15s, background-color 0.15s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!loading) {
+                      e.currentTarget.style.color = '#facc15';
+                      e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.08)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!loading) {
+                      e.currentTarget.style.color = hasError ? '#fca5a5' : '#94a3b8';
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }
+                  }}
+                >
+                  {showLastName ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
               <div style={{ fontSize: '0.7rem', color: hasError ? '#fca5a5' : '#94a3b8', marginTop: '0.35rem', marginLeft: '2px' }}>
                 Enter your surname as officially registered in CSU ROTC roster

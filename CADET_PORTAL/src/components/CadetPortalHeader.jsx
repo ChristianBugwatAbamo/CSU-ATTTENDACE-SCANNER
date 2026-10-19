@@ -155,8 +155,9 @@ export default function CadetPortalHeader({
           }}
           className="md:block"
         >
-          <div style={{ fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap' }}>{fullName}</div>
-          <div style={{ fontSize: '0.72rem', color: '#f1f5f9', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{cadetId}</div>
+          <div style={{ fontWeight: 800, color: '#ffffff', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+            {cadetId ? (String(cadetId).trim().toUpperCase().startsWith('ID:') ? cadetId : `ID: ${cadetId}`) : 'ID: N/A'}
+          </div>
         </div>
 
         {/* Sign Out Button (Icon-Only Action) */}

@@ -2230,6 +2230,29 @@ body {
   }
 }
 
+/* ==========================================================================
+   QR Pass Cadet Last Name Visibility Rules (Privacy compliance)
+   - Hidden on-screen in the digital pass modal
+   - Automatically visible when printed or exported
+   ========================================================================== */
+.hidden {
+  display: none !important;
+}
+
+.qr-pass-lastname {
+  display: none !important;
+}
+
+@media print {
+  .print\:block {
+    display: block !important;
+  }
+  .qr-pass-lastname {
+    display: block !important;
+  }
+}
+
+
 
 
 

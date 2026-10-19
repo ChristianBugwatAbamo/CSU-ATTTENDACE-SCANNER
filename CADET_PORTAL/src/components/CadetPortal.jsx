@@ -1526,6 +1526,12 @@ export default function CadetPortal({ cadet, onLogout }) {
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
+        onclone: (clonedDoc) => {
+          const lastNameElem = clonedDoc.querySelector('.qr-pass-lastname, [data-qr-lastname]');
+          if (lastNameElem) {
+            lastNameElem.style.setProperty('display', 'block', 'important');
+          }
+        }
       });
 
       const imgData = canvas.toDataURL('image/png');
@@ -1612,6 +1618,10 @@ export default function CadetPortal({ cadet, onLogout }) {
                 page-break-inside: avoid !important;
                 break-inside: avoid !important;
                 box-sizing: border-box !important;
+              }
+              .qr-pass-lastname,
+              .print\\:block {
+                display: block !important;
               }
             </style>
           </head>
@@ -2015,7 +2025,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                   {cadet.photoUrl || cadet.photo_url ? (
                     <img
                       src={cadet.photoUrl || cadet.photo_url}
-                      alt={fullName}
+                      alt={cadetId ? (String(cadetId).trim().toUpperCase().startsWith('ID:') ? cadetId : `ID: ${cadetId}`) : 'Cadet'}
                       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   ) : (
@@ -2039,21 +2049,6 @@ export default function CadetPortal({ cadet, onLogout }) {
                     >
                       {rank}
                     </span>
-                    <span
-                      style={{
-                        fontFamily: 'monospace',
-                        fontSize: '0.78rem',
-                        background: t.insetBg,
-                        color: t.textMuted,
-                        padding: '2px 8px',
-                        borderRadius: '6px',
-                        border: `1px solid ${t.insetBorder}`,
-                        fontWeight: 700,
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      ID: {cadetId}
-                    </span>
                   </div>
 
                   <h1
@@ -2062,7 +2057,7 @@ export default function CadetPortal({ cadet, onLogout }) {
                       color: t.textMain
                     }}
                   >
-                    {fullName}
+                    {cadetId ? (String(cadetId).trim().toUpperCase().startsWith('ID:') ? cadetId : `ID: ${cadetId}`) : 'ID: N/A'}
                   </h1>
                 </div>
               </div>
@@ -3778,6 +3773,10 @@ export default function CadetPortal({ cadet, onLogout }) {
             box-sizing: border-box !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+          }
+          .qr-pass-lastname,
+          .print\\:block {
+            display: block !important;
           }
         }
       `}</style>
